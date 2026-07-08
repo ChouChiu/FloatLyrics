@@ -12,13 +12,20 @@ use crate::{
     cache::{Cache, CachedLyrics, ProviderResultInsert},
     config::AppConfig,
     lyrics::{
-        FetchedLyrics, SearchPlan, TimedLine, active_line_index, search_best_lyrics,
-        timed_lines_from_raw,
+        FetchedLyrics, SearchPlan, TimedLine, active_line_index, line_index_at_or_before,
+        search_best_lyrics, timed_lines_from_raw,
     },
     mpris::{PlaybackStatus, SpotifyPlayerState, SpotifyWatcherEvent, spawn_spotify_watcher},
     paths::AppPaths,
     track::TrackMetadata,
 };
+
+const CURRENT_LYRIC_FONT_PX: i32 = 24;
+const CURRENT_KARAOKE_HEIGHT: i32 = 42;
+const CURRENT_TRANSLATION_HEIGHT: i32 = 20;
+const LYRICS_VIEWPORT_HEIGHT: i32 = CURRENT_KARAOKE_HEIGHT + CURRENT_TRANSLATION_HEIGHT;
+const LYRICS_SCROLL_DURATION: Duration = Duration::from_millis(180);
+const LYRICS_SCROLL_OFFSET_PX: i32 = 14;
 
 pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -74,9 +81,58 @@ struct FloatingWidgets {
     song_info: gtk::Label,
     progress: gtk::ProgressBar,
     progress_label: gtk::Label,
-    previous_line: gtk::Label,
-    current_line: gtk::Label,
-    next_line: gtk::Label,
+    lyrics_viewport: gtk::Fixed,
+    lyrics_box: gtk::Box,
+    lyrics_scroll: Rc<RefCell<LyricsScrollState>>,
+    current: LyricSlotWidgets,
+}
+
+#[derive(Clone)]
+struct LyricSlotWidgets {
+    text: gtk::Label,
+    translation_area: gtk::DrawingArea,
+    translation_state: Rc<RefCell<TextLineRenderState>>,
+    translation_row: gtk::Box,
+    container: gtk::Box,
+    karaoke_area: Option<gtk::DrawingArea>,
+    karaoke_state: Option<Rc<RefCell<KaraokeRenderState>>>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct KaraokeRenderState {
+    text: String,
+    syllables: Vec<crate::lyrics::TimedSyllable>,
+    position_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+struct TextLineRenderState {
+    text: String,
+    style: TextLineStyle,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TextLineStyle {
+    font_px: i32,
+    color: (f64, f64, f64, f64),
+}
+
+#[derive(Debug, Clone, Default)]
+struct LyricsScrollState {
+    current_key: Option<String>,
+    started_at: Option<Instant>,
+}
+
+impl Default for TextLineRenderState {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            style: TextLineStyle {
+                font_px: 14,
+                color: (1.0, 1.0, 1.0, 1.0),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -224,37 +280,31 @@ fn build_floating_window(app: &adw::Application, config: &AppConfig) -> Floating
     let separator = gtk::Separator::new(gtk::Orientation::Horizontal);
     separator.add_css_class("floating-separator");
 
-    let previous_line = gtk::Label::builder()
-        .label("")
+    let current = lyric_slot(
+        ["floating-slot-current"],
+        ["floating-lyric-current"],
+        ["floating-translation-current"],
+        "Open Spotify to start tracking",
+        Some((panel_width, CURRENT_KARAOKE_HEIGHT)),
+        translation_style(true),
+        panel_width,
+    );
+
+    let lyrics_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    lyrics_box.set_halign(gtk::Align::Center);
+    lyrics_box.set_valign(gtk::Align::Center);
+    lyrics_box.set_size_request(panel_width, -1);
+    lyrics_box.append(&current.container);
+    let lyrics_viewport = gtk::Fixed::builder()
+        .width_request(panel_width)
+        .height_request(LYRICS_VIEWPORT_HEIGHT)
         .halign(gtk::Align::Center)
         .valign(gtk::Align::Center)
-        .ellipsize(gtk::pango::EllipsizeMode::End)
-        .max_width_chars(56)
-        .single_line_mode(true)
-        .css_classes(["floating-lyric-adjacent"])
         .build();
+    lyrics_viewport.put(&lyrics_box, 0.0, 0.0);
+    let lyrics_scroll = Rc::new(RefCell::new(LyricsScrollState::default()));
 
-    let current_line = gtk::Label::builder()
-        .label("Open Spotify to start tracking")
-        .halign(gtk::Align::Center)
-        .valign(gtk::Align::Center)
-        .ellipsize(gtk::pango::EllipsizeMode::End)
-        .max_width_chars(50)
-        .single_line_mode(true)
-        .css_classes(["floating-lyric-current"])
-        .build();
-
-    let next_line = gtk::Label::builder()
-        .label("")
-        .halign(gtk::Align::Center)
-        .valign(gtk::Align::Center)
-        .ellipsize(gtk::pango::EllipsizeMode::End)
-        .max_width_chars(56)
-        .single_line_mode(true)
-        .css_classes(["floating-lyric-adjacent"])
-        .build();
-
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 5);
     content.set_halign(gtk::Align::Center);
     content.set_valign(gtk::Align::Center);
     content.set_size_request(panel_width, -1);
@@ -262,10 +312,8 @@ fn build_floating_window(app: &adw::Application, config: &AppConfig) -> Floating
     content.append(&song_info);
     content.append(&progress_row);
     content.append(&separator);
-    content.append(&previous_line);
-    content.append(&current_line);
-    content.append(&next_line);
-    attach_floating_drag(&window, &content, panel_width, 150);
+    content.append(&lyrics_viewport);
+    attach_floating_drag(&window, &content, panel_width, 96);
 
     let provider = gtk::CssProvider::new();
     let panel_alpha = config.window.opacity.clamp(0.18, 0.72);
@@ -278,7 +326,7 @@ fn build_floating_window(app: &adw::Application, config: &AppConfig) -> Floating
         }
 
         .floating-panel {
-            padding: 10px 18px 8px 18px;
+            padding: 9px 18px 10px 18px;
             border-radius: 8px;
             background: rgba(10, 12, 16, __PANEL_ALPHA__);
         }
@@ -292,17 +340,36 @@ fn build_floating_window(app: &adw::Application, config: &AppConfig) -> Floating
 
         .floating-lyric-current {
             color: white;
-            font-size: 26px;
+            font-size: 24px;
             font-weight: 750;
             text-shadow: 0 2px 8px rgba(0,0,0,0.85);
-            min-height: 34px;
         }
 
         .floating-lyric-adjacent {
             color: rgba(255,255,255,0.66);
-            font-size: 17px;
+            font-size: 15px;
             text-shadow: 0 2px 8px rgba(0,0,0,0.85);
-            min-height: 23px;
+        }
+
+        .floating-translation-current {
+            color: rgba(255,255,255,0.78);
+            font-size: 14px;
+            font-weight: 500;
+            text-shadow: none;
+        }
+
+        .floating-translation-adjacent {
+            color: rgba(255,255,255,0.50);
+            font-size: 12px;
+            text-shadow: none;
+        }
+
+        .floating-slot-current {
+            margin: 2px 0;
+        }
+
+        .floating-slot-adjacent {
+            margin: 0;
         }
 
         .floating-progress {
@@ -351,10 +418,324 @@ fn build_floating_window(app: &adw::Application, config: &AppConfig) -> Floating
         song_info,
         progress,
         progress_label,
-        previous_line,
-        current_line,
-        next_line,
+        lyrics_viewport,
+        lyrics_box,
+        lyrics_scroll,
+        current,
     }
+}
+
+fn lyric_slot(
+    container_classes: [&str; 1],
+    text_classes: [&str; 1],
+    _translation_classes: [&str; 1],
+    initial_text: &str,
+    karaoke_size: Option<(i32, i32)>,
+    translation_style: TextLineStyle,
+    panel_width: i32,
+) -> LyricSlotWidgets {
+    let text = gtk::Label::builder()
+        .label(initial_text)
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
+        .ellipsize(gtk::pango::EllipsizeMode::End)
+        .max_width_chars(56)
+        .single_line_mode(true)
+        .css_classes(text_classes)
+        .build();
+
+    let (text_widget, karaoke_area, karaoke_state) = lyric_text_widget(&text, karaoke_size);
+    let (translation_area, translation_state) = text_line_area(
+        panel_width,
+        translation_line_height(translation_style),
+        translation_style,
+    );
+    let text_row = lyric_line_row(&text_widget, 0, 0);
+    let translation_widget: gtk::Widget = translation_area.clone().upcast();
+    let translation_row = lyric_line_row(&translation_widget, 0, 0);
+
+    let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    container.set_halign(gtk::Align::Center);
+    container.set_valign(gtk::Align::Center);
+    container.add_css_class(container_classes[0]);
+    container.append(&text_row);
+    container.append(&translation_row);
+
+    LyricSlotWidgets {
+        text,
+        translation_area,
+        translation_state,
+        translation_row,
+        container,
+        karaoke_area,
+        karaoke_state,
+    }
+}
+
+fn translation_style(is_current: bool) -> TextLineStyle {
+    if is_current {
+        TextLineStyle {
+            font_px: 14,
+            color: (1.0, 1.0, 1.0, 0.78),
+        }
+    } else {
+        TextLineStyle {
+            font_px: 12,
+            color: (1.0, 1.0, 1.0, 0.50),
+        }
+    }
+}
+
+fn translation_line_height(style: TextLineStyle) -> i32 {
+    if style.font_px >= 14 {
+        CURRENT_TRANSLATION_HEIGHT
+    } else {
+        18
+    }
+}
+
+fn lyric_line_row(widget: &gtk::Widget, margin_top: i32, margin_bottom: i32) -> gtk::Box {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    row.set_halign(gtk::Align::Center);
+    row.set_valign(gtk::Align::Center);
+    row.set_margin_top(margin_top);
+    row.set_margin_bottom(margin_bottom);
+    row.append(widget);
+    row
+}
+
+fn text_line_area(
+    width: i32,
+    height: i32,
+    style: TextLineStyle,
+) -> (gtk::DrawingArea, Rc<RefCell<TextLineRenderState>>) {
+    let state = Rc::new(RefCell::new(TextLineRenderState {
+        text: String::new(),
+        style,
+    }));
+    let area = gtk::DrawingArea::builder()
+        .width_request(width)
+        .height_request(height)
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
+        .visible(false)
+        .build();
+    {
+        let state = Rc::clone(&state);
+        area.set_draw_func(move |area, cr, width, height| {
+            draw_text_line(area, cr, width, height, &state.borrow());
+        });
+    }
+
+    (area, state)
+}
+
+fn lyric_text_widget(
+    text: &gtk::Label,
+    karaoke_size: Option<(i32, i32)>,
+) -> (
+    gtk::Widget,
+    Option<gtk::DrawingArea>,
+    Option<Rc<RefCell<KaraokeRenderState>>>,
+) {
+    let Some((width, height)) = karaoke_size else {
+        return (text.clone().upcast(), None, None);
+    };
+
+    let state = Rc::new(RefCell::new(KaraokeRenderState::default()));
+    let area = gtk::DrawingArea::builder()
+        .width_request(width)
+        .height_request(height)
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
+        .visible(false)
+        .build();
+    {
+        let state = Rc::clone(&state);
+        area.set_draw_func(move |area, cr, width, height| {
+            draw_karaoke_line(area, cr, width, height, &state.borrow());
+        });
+    }
+
+    let stack = gtk::Stack::new();
+    stack.set_halign(gtk::Align::Center);
+    stack.set_valign(gtk::Align::Center);
+    stack.add_child(text);
+    stack.add_child(&area);
+
+    (stack.upcast(), Some(area), Some(state))
+}
+
+fn draw_text_line(
+    area: &gtk::DrawingArea,
+    cr: &gtk::cairo::Context,
+    width: i32,
+    _height: i32,
+    state: &TextLineRenderState,
+) {
+    if state.text.trim().is_empty() {
+        return;
+    }
+
+    let layout = area.create_pango_layout(Some(&state.text));
+    let mut font = gtk::pango::FontDescription::from_string("Sans");
+    font.set_absolute_size(state.style.font_px as f64 * gtk::pango::SCALE as f64);
+    layout.set_font_description(Some(&font));
+    layout.set_single_paragraph_mode(true);
+    layout.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    layout.set_alignment(gtk::pango::Alignment::Center);
+    layout.set_width(width.saturating_mul(gtk::pango::SCALE));
+
+    draw_pango_layout(cr, &layout, 0.0, 0.0, state.style.color);
+}
+
+fn draw_karaoke_line(
+    area: &gtk::DrawingArea,
+    cr: &gtk::cairo::Context,
+    width: i32,
+    height: i32,
+    state: &KaraokeRenderState,
+) {
+    if state.text.trim().is_empty() {
+        return;
+    }
+
+    let layout = area.create_pango_layout(Some(&state.text));
+    let mut font = gtk::pango::FontDescription::from_string("Sans Bold");
+    font.set_absolute_size(CURRENT_LYRIC_FONT_PX as f64 * gtk::pango::SCALE as f64);
+    layout.set_font_description(Some(&font));
+    layout.set_single_paragraph_mode(true);
+
+    let (text_width, text_height) = layout.pixel_size();
+    let x = ((width - text_width).max(0) as f64) / 2.0;
+    let y = ((height - text_height).max(0) as f64) / 2.0;
+    let fill_width = karaoke_fill_width(&layout, state);
+
+    draw_pango_layout(cr, &layout, x, y, (0.62, 0.65, 0.70, 1.0));
+    if fill_width > 0.0 {
+        let _ = cr.save();
+        cr.rectangle(x, 0.0, fill_width, height as f64);
+        cr.clip();
+        draw_pango_layout(cr, &layout, x, y, (1.0, 1.0, 1.0, 1.0));
+        let _ = cr.restore();
+    }
+}
+
+fn draw_pango_layout(
+    cr: &gtk::cairo::Context,
+    layout: &gtk::pango::Layout,
+    x: f64,
+    y: f64,
+    color: (f64, f64, f64, f64),
+) {
+    cr.set_source_rgba(color.0, color.1, color.2, color.3);
+    cr.move_to(x, y);
+    pangocairo::functions::show_layout(cr, layout);
+}
+
+fn karaoke_fill_width(layout: &gtk::pango::Layout, state: &KaraokeRenderState) -> f64 {
+    for (index, syllable) in state.syllables.iter().enumerate() {
+        if state.position_ms < syllable.start_ms {
+            return index
+                .checked_sub(1)
+                .and_then(|previous| syllable_byte_range(&state.text, &state.syllables, previous))
+                .map_or(0.0, |range| layout_x_at_byte(layout, range.end));
+        }
+
+        if state.position_ms < syllable.end_ms {
+            let Some(range) = syllable_byte_range(&state.text, &state.syllables, index) else {
+                return fallback_syllable_fill_width(layout, &state.syllables, index);
+            };
+            let start_x = layout_x_at_byte(layout, range.start);
+            let end_x = layout_x_at_byte(layout, range.end);
+            let progress = active_syllable_fraction(syllable, state.position_ms);
+
+            return start_x + (end_x - start_x).max(0.0) * progress;
+        }
+    }
+
+    layout.pixel_size().0.max(0) as f64
+}
+
+fn syllable_byte_range(
+    full_text: &str,
+    syllables: &[crate::lyrics::TimedSyllable],
+    target_index: usize,
+) -> Option<std::ops::Range<i32>> {
+    let mut search_from = 0usize;
+
+    for (index, syllable) in syllables.iter().enumerate() {
+        let syllable_text = syllable.text.as_str();
+        if syllable_text.is_empty() {
+            if index == target_index {
+                let byte = byte_index_i32(search_from.min(full_text.len()));
+                return Some(byte..byte);
+            }
+            continue;
+        }
+
+        let start = full_text
+            .get(search_from..)
+            .and_then(|remaining| remaining.find(syllable_text))
+            .map(|offset| search_from.saturating_add(offset));
+
+        let Some(start) = start else {
+            return fallback_syllable_byte_range(full_text, syllables, target_index);
+        };
+        let end = start
+            .saturating_add(syllable_text.len())
+            .min(full_text.len());
+
+        if index == target_index {
+            return Some(byte_index_i32(start)..byte_index_i32(end));
+        }
+
+        search_from = end;
+    }
+
+    None
+}
+
+fn fallback_syllable_byte_range(
+    full_text: &str,
+    syllables: &[crate::lyrics::TimedSyllable],
+    target_index: usize,
+) -> Option<std::ops::Range<i32>> {
+    let mut byte_index = 0usize;
+
+    for (index, syllable) in syllables.iter().enumerate() {
+        let start = byte_index.min(full_text.len());
+        byte_index = byte_index.saturating_add(syllable.text.len());
+        let end = byte_index.min(full_text.len());
+
+        if index == target_index {
+            return Some(byte_index_i32(start)..byte_index_i32(end));
+        }
+    }
+
+    None
+}
+
+fn fallback_syllable_fill_width(
+    layout: &gtk::pango::Layout,
+    syllables: &[crate::lyrics::TimedSyllable],
+    target_index: usize,
+) -> f64 {
+    let byte_index = syllables
+        .iter()
+        .take(target_index + 1)
+        .map(|syllable| syllable.text.len())
+        .sum::<usize>();
+
+    layout_x_at_byte(layout, byte_index_i32(byte_index))
+}
+
+fn byte_index_i32(byte_index: usize) -> i32 {
+    byte_index.try_into().unwrap_or(i32::MAX)
+}
+
+fn layout_x_at_byte(layout: &gtk::pango::Layout, byte_index: i32) -> f64 {
+    layout.index_to_pos(byte_index).x() as f64 / gtk::pango::SCALE as f64
 }
 
 fn attach_floating_drag(
@@ -492,7 +873,8 @@ fn attach_spotify_events(
     let latest = Rc::new(RefCell::new(None::<UiPlaybackSnapshot>));
     let lyrics_state = Rc::new(RefCell::new(LyricsDisplayState::default()));
 
-    gtk::glib::timeout_add_local(Duration::from_millis(250), move || {
+    let tick_widget = floating.current.container.clone();
+    tick_widget.add_tick_callback(move |_, _| {
         let ctx = SpotifyUiContext {
             settings: &settings,
             floating: &floating,
@@ -503,6 +885,8 @@ fn attach_spotify_events(
             latest: &latest,
             lyrics_state: &lyrics_state,
         };
+
+        update_lyrics_scroll_animation(ctx.floating);
 
         for event in receiver.borrow().try_iter() {
             handle_spotify_event(&event, &ctx);
@@ -550,7 +934,7 @@ fn handle_spotify_event(event: &SpotifyWatcherEvent, ctx: &SpotifyUiContext<'_>)
                 .player_row
                 .set_subtitle("Waiting for Spotify MPRIS");
             ctx.floating.song_info.set_label("FloatLyrics");
-            set_lyrics_labels(ctx.floating, "", "Open Spotify to start tracking", "");
+            set_status_lyrics(ctx.floating, "Open Spotify to start tracking");
             reset_progress(ctx.floating);
         }
         SpotifyWatcherEvent::Error(message) => {
@@ -560,7 +944,7 @@ fn handle_spotify_event(event: &SpotifyWatcherEvent, ctx: &SpotifyUiContext<'_>)
                 .player_row
                 .set_subtitle(&format!("Listener error: {message}"));
             ctx.floating.song_info.set_label("FloatLyrics");
-            set_lyrics_labels(ctx.floating, "", "Spotify listener needs attention", "");
+            set_status_lyrics(ctx.floating, "Spotify listener needs attention");
             reset_progress(ctx.floating);
         }
     }
@@ -596,7 +980,7 @@ fn update_spotify_state(state: &SpotifyPlayerState, ctx: &SpotifyUiContext<'_>) 
             .player_row
             .set_subtitle(&format!("{status} via {}", state.bus_name));
         ctx.floating.song_info.set_label("FloatLyrics");
-        set_lyrics_labels(ctx.floating, "", "Waiting for Spotify metadata", "");
+        set_status_lyrics(ctx.floating, "Waiting for Spotify metadata");
         reset_progress(ctx.floating);
     }
 }
@@ -876,68 +1260,226 @@ fn update_lyrics_display(
     position_ms: Option<u64>,
 ) {
     if let Some(message) = &lyrics_state.status_message {
-        set_lyrics_labels(floating, "", message, "");
+        set_status_lyrics(floating, message);
         return;
     }
 
     if lyrics_state.lines.is_empty() {
-        set_lyrics_labels(floating, "", "Waiting for lyrics", "");
+        set_status_lyrics(floating, "Waiting for lyrics");
         return;
     }
 
     let Some(position_ms) = position_ms else {
-        set_lyrics_labels(floating, "", "Waiting for playback position", "");
+        set_status_lyrics(floating, "Waiting for playback position");
         return;
     };
 
     let Some(index) = active_line_index(&lyrics_state.lines, position_ms, config.lyrics.offset_ms)
     else {
-        let next = line_text(lyrics_state.lines.first(), config);
-        set_lyrics_labels(floating, "", "…", &next);
+        if let Some(index) =
+            line_index_at_or_before(&lyrics_state.lines, position_ms, config.lyrics.offset_ms)
+        {
+            set_surrounding_lyrics_labels(
+                floating,
+                &lyrics_state.lines,
+                index,
+                config,
+                position_ms,
+            );
+        } else {
+            set_lyrics_slots(floating, LyricSlotText::message("…"), "before-first-line");
+        }
         return;
     };
 
-    let previous = line_text(
-        index.checked_sub(1).and_then(|i| lyrics_state.lines.get(i)),
-        config,
-    );
-    let current = line_text(lyrics_state.lines.get(index), config);
-    let next = line_text(lyrics_state.lines.get(index + 1), config);
-
-    set_lyrics_labels(floating, &previous, &current, &next);
+    set_surrounding_lyrics_labels(floating, &lyrics_state.lines, index, config, position_ms);
 }
 
-fn line_text(line: Option<&TimedLine>, config: &AppConfig) -> String {
+fn set_surrounding_lyrics_labels(
+    floating: &FloatingWidgets,
+    lines: &[TimedLine],
+    index: usize,
+    config: &AppConfig,
+    position_ms: u64,
+) {
+    let current = current_line_text(lines.get(index), config, position_ms);
+    set_lyrics_slots(floating, current, &format!("line:{index}"));
+}
+
+#[derive(Debug, Clone, Default)]
+struct LyricSlotText {
+    text: String,
+    karaoke: Option<KaraokeRenderState>,
+    translation: String,
+}
+
+impl LyricSlotText {
+    fn empty() -> Self {
+        Self::default()
+    }
+
+    fn message(message: &str) -> Self {
+        Self {
+            text: message.to_string(),
+            karaoke: None,
+            translation: String::new(),
+        }
+    }
+}
+
+fn line_text(line: Option<&TimedLine>, config: &AppConfig) -> LyricSlotText {
     let Some(line) = line else {
-        return String::new();
+        return LyricSlotText::empty();
     };
 
-    let mut parts = Vec::new();
-    if !line.text.trim().is_empty() {
-        parts.push(line.text.trim());
-    }
+    let mut text = line.text.trim().to_string();
     if config.lyrics.show_translation {
         if let Some(translation) = line.translation.as_deref().map(str::trim) {
-            if !translation.is_empty() {
-                parts.push(translation);
+            if !translation.is_empty() && !is_placeholder_text(translation) {
+                return LyricSlotText {
+                    text,
+                    karaoke: None,
+                    translation: translation.to_string(),
+                };
             }
         }
     }
     if config.lyrics.show_romanization {
         if let Some(romanization) = line.romanization.as_deref().map(str::trim) {
             if !romanization.is_empty() {
-                parts.push(romanization);
+                text = format!("{text}  /  {romanization}");
             }
         }
     }
 
-    parts.join("  /  ")
+    LyricSlotText {
+        text,
+        karaoke: None,
+        translation: String::new(),
+    }
 }
 
-fn set_lyrics_labels(floating: &FloatingWidgets, previous: &str, current: &str, next: &str) {
-    floating.previous_line.set_label(previous);
-    floating.current_line.set_label(current);
-    floating.next_line.set_label(next);
+fn current_line_text(
+    line: Option<&TimedLine>,
+    config: &AppConfig,
+    position_ms: u64,
+) -> LyricSlotText {
+    let mut value = line_text(line, config);
+    let Some(line) = line else {
+        return value;
+    };
+    if !line.syllables.is_empty() {
+        let adjusted_position = adjusted_position_ms(position_ms, config.lyrics.offset_ms);
+        value.karaoke = Some(KaraokeRenderState {
+            text: line.text.clone(),
+            syllables: line.syllables.clone(),
+            position_ms: adjusted_position,
+        });
+    }
+    value
+}
+
+fn adjusted_position_ms(position_ms: u64, offset_ms: i64) -> u64 {
+    (position_ms as i128 + offset_ms as i128).max(0) as u64
+}
+
+fn active_syllable_fraction(syllable: &crate::lyrics::TimedSyllable, position_ms: u64) -> f64 {
+    let duration = syllable.end_ms.saturating_sub(syllable.start_ms);
+    if duration == 0 {
+        return 1.0;
+    }
+
+    let elapsed = position_ms.saturating_sub(syllable.start_ms).min(duration);
+    elapsed as f64 / duration as f64
+}
+
+fn is_placeholder_text(value: &str) -> bool {
+    let normalized = value
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>();
+
+    matches!(normalized.as_str(), "//" | "/" | "／" | "／／")
+}
+
+fn set_lyrics_slots(floating: &FloatingWidgets, current: LyricSlotText, animation_key: &str) {
+    start_lyrics_scroll_if_needed(floating, animation_key);
+    set_lyric_slot(&floating.current, &current);
+}
+
+fn set_status_lyrics(floating: &FloatingWidgets, message: &str) {
+    set_lyrics_slots(
+        floating,
+        LyricSlotText::message(message),
+        &format!("status:{message}"),
+    );
+}
+
+fn start_lyrics_scroll_if_needed(floating: &FloatingWidgets, key: &str) {
+    let mut state = floating.lyrics_scroll.borrow_mut();
+    if state.current_key.as_deref() == Some(key) {
+        return;
+    }
+
+    state.current_key = Some(key.to_string());
+    state.started_at = Some(Instant::now());
+    floating
+        .lyrics_viewport
+        .move_(&floating.lyrics_box, 0.0, LYRICS_SCROLL_OFFSET_PX as f64);
+    floating.lyrics_box.set_opacity(0.72);
+}
+
+fn update_lyrics_scroll_animation(floating: &FloatingWidgets) {
+    let Some(started_at) = floating.lyrics_scroll.borrow().started_at else {
+        return;
+    };
+
+    let elapsed = started_at.elapsed();
+    let progress = (elapsed.as_secs_f64() / LYRICS_SCROLL_DURATION.as_secs_f64()).clamp(0.0, 1.0);
+    let eased = ease_out_cubic(progress);
+    let offset = (LYRICS_SCROLL_OFFSET_PX as f64 * (1.0 - eased)).round() as i32;
+    let opacity = 0.72 + 0.28 * eased;
+
+    floating
+        .lyrics_viewport
+        .move_(&floating.lyrics_box, 0.0, offset as f64);
+    floating.lyrics_box.set_opacity(opacity);
+
+    if progress >= 1.0 {
+        let mut state = floating.lyrics_scroll.borrow_mut();
+        state.started_at = None;
+        floating
+            .lyrics_viewport
+            .move_(&floating.lyrics_box, 0.0, 0.0);
+        floating.lyrics_box.set_opacity(1.0);
+    }
+}
+
+fn ease_out_cubic(progress: f64) -> f64 {
+    1.0 - (1.0 - progress).powi(3)
+}
+
+fn set_lyric_slot(slot: &LyricSlotWidgets, value: &LyricSlotText) {
+    if let Some(karaoke) = &value.karaoke {
+        if let (Some(area), Some(state)) = (&slot.karaoke_area, &slot.karaoke_state) {
+            *state.borrow_mut() = karaoke.clone();
+            slot.text.set_visible(false);
+            area.set_visible(true);
+            area.queue_draw();
+        } else {
+            slot.text.set_label(&value.text);
+        }
+    } else {
+        slot.text.set_label(&value.text);
+        slot.text.set_visible(true);
+        if let Some(area) = &slot.karaoke_area {
+            area.set_visible(false);
+        }
+    }
+    slot.translation_state.borrow_mut().text = value.translation.clone();
+    slot.translation_area.set_visible(true);
+    slot.translation_area.queue_draw();
+    slot.translation_row.set_visible(true);
 }
 
 fn effective_position_ms(snapshot: &UiPlaybackSnapshot) -> Option<u64> {
@@ -1019,6 +1561,7 @@ fn format_duration(ms: u64) -> String {
 mod tests {
     use super::*;
     use crate::track::TrackMetadata;
+    use std::time::Duration;
 
     #[test]
     fn formats_progress_text() {
@@ -1084,6 +1627,85 @@ mod tests {
 
         assert!(effective_position_ms(&playing).unwrap() >= 11_000);
         assert_eq!(effective_position_ms(&paused), Some(10_000));
+    }
+
+    #[test]
+    fn active_syllable_fraction_tracks_progress_inside_syllable() {
+        let syllable = crate::lyrics::TimedSyllable {
+            start_ms: 1_000,
+            end_ms: 1_500,
+            text: "hello".to_string(),
+        };
+
+        assert_eq!(active_syllable_fraction(&syllable, 900), 0.0);
+        assert_eq!(active_syllable_fraction(&syllable, 1_250), 0.5);
+        assert_eq!(active_syllable_fraction(&syllable, 1_700), 1.0);
+    }
+
+    #[test]
+    fn ease_out_cubic_starts_fast_and_ends_at_one() {
+        assert_eq!(ease_out_cubic(0.0), 0.0);
+        assert_eq!(ease_out_cubic(1.0), 1.0);
+        assert!(ease_out_cubic(0.5) > 0.5);
+    }
+
+    #[test]
+    fn syllable_byte_range_tracks_repeated_words_in_order() {
+        let syllables = vec![
+            test_syllable(0, 100, "Please"),
+            test_syllable(100, 200, " "),
+            test_syllable(200, 300, "Please"),
+        ];
+
+        assert_eq!(
+            syllable_byte_range("Please Please", &syllables, 0),
+            Some(0..6)
+        );
+        assert_eq!(
+            syllable_byte_range("Please Please", &syllables, 1),
+            Some(6..7)
+        );
+        assert_eq!(
+            syllable_byte_range("Please Please", &syllables, 2),
+            Some(7..13)
+        );
+    }
+
+    #[test]
+    fn syllable_byte_range_handles_multibyte_text() {
+        let syllables = vec![test_syllable(0, 100, "你"), test_syllable(100, 200, "好")];
+
+        assert_eq!(syllable_byte_range("你好", &syllables, 0), Some(0..3));
+        assert_eq!(syllable_byte_range("你好", &syllables, 1), Some(3..6));
+    }
+
+    #[test]
+    fn line_text_hides_placeholder_translation() {
+        let mut line = TimedLine {
+            start_ms: 1_000,
+            end_ms: Some(2_000),
+            text: "Hello".to_string(),
+            syllables: Vec::new(),
+            translation: Some("//".to_string()),
+            romanization: None,
+            background: None,
+        };
+
+        let text = line_text(Some(&line), &AppConfig::default());
+        assert_eq!(text.text, "Hello");
+        assert!(text.translation.is_empty());
+
+        line.translation = Some("你好".to_string());
+        let text = line_text(Some(&line), &AppConfig::default());
+        assert_eq!(text.translation, "你好");
+    }
+
+    fn test_syllable(start_ms: u64, end_ms: u64, text: &str) -> crate::lyrics::TimedSyllable {
+        crate::lyrics::TimedSyllable {
+            start_ms,
+            end_ms,
+            text: text.to_string(),
+        }
     }
 
     fn test_state(playback_status: PlaybackStatus) -> SpotifyPlayerState {

@@ -39,7 +39,7 @@ fn configure_default_gtk_renderer() {
         // the app creates worker threads, so no other thread can concurrently read
         // or mutate the process environment from this code path.
         unsafe {
-            std::env::set_var("GSK_RENDERER", "ngl");
+            std::env::set_var("GSK_RENDERER", "gl");
         }
     }
 }

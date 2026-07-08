@@ -14,6 +14,7 @@ use crate::track::TrackMetadata;
 pub const SPOTIFY_MPRIS_PREFIX: &str = "org.mpris.MediaPlayer2.spotify";
 const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
 const PLAYER_IFACE: &str = "org.mpris.MediaPlayer2.Player";
+const TRACK_CHANGE_POSITION_RECHECK_DELAY: Duration = Duration::from_millis(250);
 
 pub fn is_spotify_mpris_name(name: &str) -> bool {
     name == SPOTIFY_MPRIS_PREFIX || name.starts_with("org.mpris.MediaPlayer2.spotify.")
@@ -102,8 +103,16 @@ async fn watch_player(
                 });
 
                 if player_changed {
-                    state = read_player_state(&player, &bus_name).await?;
+                    let next_state = read_player_state(&player, &bus_name).await?;
+                    let track_changed = player_track_fingerprint(&state)
+                        != player_track_fingerprint(&next_state);
+                    state = next_state;
                     let _ = sender.send(SpotifyWatcherEvent::Updated(state.clone()));
+                    if track_changed {
+                        tokio::time::sleep(TRACK_CHANGE_POSITION_RECHECK_DELAY).await;
+                        state = read_player_state(&player, &bus_name).await?;
+                        let _ = sender.send(SpotifyWatcherEvent::Updated(state.clone()));
+                    }
                 }
             }
             signal = seeked.next() => {
@@ -179,6 +188,10 @@ fn position_us_to_ms(position_us: i64) -> Option<u64> {
     } else {
         None
     }
+}
+
+fn player_track_fingerprint(state: &SpotifyPlayerState) -> Option<String> {
+    state.track.as_ref().map(TrackMetadata::fingerprint)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
