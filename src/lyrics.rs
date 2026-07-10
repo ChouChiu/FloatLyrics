@@ -201,6 +201,43 @@ mod tests {
     }
 
     #[test]
+    fn filters_chinese_standalone_credit_lines() {
+        // 词：XXX and 曲：XXX should be filtered (standalone single-char credits)
+        let raw = "\
+[0,314]BIZNESS(0,157) - XLOV(158,157)
+[315,314]词：(315,157)SCORE(473,157)
+[630,158]曲：(630,158)QSTNMRKS(788,0)
+[789,1000]Dance (789,300)dance(1089,700)";
+        let lines = timed_lines_from_raw(raw).unwrap();
+
+        assert_eq!(
+            lines.len(),
+            1,
+            "词：and 曲：credit lines should be filtered"
+        );
+        assert_eq!(lines[0].start_ms, 789);
+        assert_eq!(lines[0].text, "Dance dance");
+    }
+
+    #[test]
+    fn filters_english_composer_and_arranged_by_lines() {
+        // Composer：XXX and Arranged by：XXX should be filtered
+        let raw = "\
+[0,1060]Song(0,400) - Artist(400,660)
+[1060,1060]Composer：(1060,500)Zacharie Raymond(1560,500)
+[2120,1060]Arranged (2120,300)by：(2420,500)Charlie Puth(2920,500)
+[3180,1000]Hello (3180,400)World(3580,600)";
+        let lines = timed_lines_from_raw(raw).unwrap();
+
+        assert_eq!(
+            lines.len(),
+            1,
+            "Composer and Arranged by lines should be filtered"
+        );
+        assert_eq!(lines[0].text, "Hello World");
+    }
+
+    #[test]
     fn search_plan_filters_removed_lrclib_provider() {
         let plan = SearchPlan::new([
             LyricsProvider::LrcLib,
