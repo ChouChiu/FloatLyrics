@@ -51,6 +51,7 @@ pub(super) fn attach_floating_drag(
     content: &gtk::Box,
     fallback_width: i32,
     fallback_height: i32,
+    bottom_panel_height: i32,
 ) -> SharedPlacement {
     let drag_origin = Rc::new(RefCell::new(DragOrigin::default()));
     let placement = Rc::new(RefCell::new(WindowPlacement::default()));
@@ -61,8 +62,9 @@ pub(super) fn attach_floating_drag(
         let drag_origin = Rc::clone(&drag_origin);
         let placement = Rc::clone(&placement);
         gesture.connect_drag_begin(move |_, _, _| {
-            let geometry = floating_geometry(&window, fallback_width, fallback_height)
-                .unwrap_or_else(|| fallback_geometry(fallback_width, fallback_height));
+            let geometry =
+                floating_geometry(&window, fallback_width, fallback_height, bottom_panel_height)
+                    .unwrap_or_else(|| fallback_geometry(fallback_width, fallback_height));
             let bottom_margin = window.margin(Edge::Bottom);
             let origin = DragOrigin {
                 x: window.margin(Edge::Left),
@@ -226,6 +228,7 @@ fn floating_geometry(
     window: &gtk::ApplicationWindow,
     fallback_width: i32,
     fallback_height: i32,
+    bottom_panel_height: i32,
 ) -> Option<FloatingGeometry> {
     let monitor = window_monitor(window).or_else(first_monitor)?;
     let geometry = monitor.geometry();
@@ -234,7 +237,10 @@ fn floating_geometry(
 
     Some(FloatingGeometry {
         viewport_width: geometry.width().max(0),
-        viewport_height: geometry.height().max(0),
+        viewport_height: geometry
+            .height()
+            .saturating_sub(bottom_panel_height)
+            .max(0),
         surface_width,
         surface_height,
     })

@@ -48,6 +48,10 @@ pub struct WindowConfig {
     pub width: i32,
     #[serde(default = "default_opacity")]
     pub opacity: f64,
+    /// Height of a bottom panel (e.g. waybar) in pixels. The window will not
+    /// overlap this reserved area.
+    #[serde(default)]
+    pub bottom_panel_height: i32,
 }
 
 impl Default for WindowConfig {
@@ -57,6 +61,7 @@ impl Default for WindowConfig {
             margin: default_margin(),
             width: default_width(),
             opacity: default_opacity(),
+            bottom_panel_height: 36,
         }
     }
 }

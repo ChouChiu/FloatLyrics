@@ -70,7 +70,7 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig) -> OverlayView {
 
     window.init_layer_shell();
     window.set_namespace(Some("floatlyrics"));
-    window.set_layer(Layer::Overlay);
+    window.set_layer(Layer::Top);
     window.set_keyboard_mode(KeyboardMode::None);
     window.set_anchor(Edge::Bottom, true);
     window.set_anchor(Edge::Left, true);
@@ -166,6 +166,7 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig) -> OverlayView {
         &content,
         panel_width.saturating_add(PANEL_CHROME_WIDTH),
         FALLBACK_PANEL_HEIGHT,
+        config.window.bottom_panel_height,
     );
 
     let provider = gtk::CssProvider::new();
