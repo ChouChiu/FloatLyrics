@@ -559,41 +559,21 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "floatlyrics-core",
- "floatlyrics-support",
+ "directories",
+ "futures-util",
  "gtk4",
  "gtk4-layer-shell",
- "pangocairo",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "floatlyrics-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
  "lyrics-helper",
- "serde",
- "sha2",
- "thiserror",
-]
-
-[[package]]
-name = "floatlyrics-support"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "directories",
- "floatlyrics-core",
- "futures-util",
+ "pangocairo",
  "rusqlite",
  "serde",
  "serde_json",
  "sha2",
  "tempfile",
+ "thiserror",
  "tokio",
  "toml 0.9.12+spec-1.1.0",
+ "tracing",
  "tracing-subscriber",
  "zbus",
  "zvariant",

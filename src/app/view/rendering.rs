@@ -1,0 +1,338 @@
+//! Pango/Cairo text rendering for translations and syllable-level karaoke.
+
+use gtk::prelude::*;
+use std::{cell::RefCell, rc::Rc};
+
+use crate::lyrics::TimedSyllable;
+
+use super::super::model::{KaraokeRenderState, LyricSlotText, syllable_progress};
+
+const CURRENT_LYRIC_FONT_PX: i32 = 21;
+const CURRENT_TRANSLATION_FONT_PX: i32 = 13;
+
+#[derive(Debug, Clone)]
+pub(super) struct TextLineRenderState {
+    pub(super) text: String,
+    pub(super) style: TextLineStyle,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct TextLineStyle {
+    pub(super) font_px: i32,
+    pub(super) color: (f64, f64, f64, f64),
+}
+
+impl Default for TextLineRenderState {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            style: TextLineStyle {
+                font_px: 14,
+                color: (1.0, 1.0, 1.0, 1.0),
+            },
+        }
+    }
+}
+
+pub(super) fn lyric_content_width(measure_widget: &gtk::Label, value: &LyricSlotText) -> i32 {
+    let lyric_text = value
+        .karaoke
+        .as_ref()
+        .map_or(value.text.as_str(), |karaoke| karaoke.text.as_str());
+    let lyric_width = text_pixel_width(measure_widget, lyric_text, CURRENT_LYRIC_FONT_PX, true);
+    let translation_width = text_pixel_width(
+        measure_widget,
+        &value.translation,
+        CURRENT_TRANSLATION_FONT_PX,
+        false,
+    );
+
+    lyric_width.max(translation_width)
+}
+
+fn text_pixel_width(widget: &gtk::Label, text: &str, font_px: i32, bold: bool) -> i32 {
+    if text.trim().is_empty() {
+        return 0;
+    }
+
+    let layout = widget.create_pango_layout(Some(text));
+    let mut font =
+        gtk::pango::FontDescription::from_string(if bold { "Sans Bold" } else { "Sans" });
+    font.set_absolute_size(font_px as f64 * gtk::pango::SCALE as f64);
+    layout.set_font_description(Some(&font));
+    layout.set_single_paragraph_mode(true);
+    layout.pixel_size().0.max(0)
+}
+
+pub(super) fn text_line_area(
+    width: i32,
+    height: i32,
+    style: TextLineStyle,
+) -> (gtk::DrawingArea, Rc<RefCell<TextLineRenderState>>) {
+    let state = Rc::new(RefCell::new(TextLineRenderState {
+        text: String::new(),
+        style,
+    }));
+    let area = gtk::DrawingArea::builder()
+        .width_request(width)
+        .height_request(height)
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
+        .visible(false)
+        .build();
+    {
+        let state = Rc::clone(&state);
+        area.set_draw_func(move |area, cr, width, height| {
+            draw_text_line(area, cr, width, height, &state.borrow());
+        });
+    }
+
+    (area, state)
+}
+
+pub(super) fn lyric_text_widget(
+    text: &gtk::Label,
+    karaoke_size: Option<(i32, i32)>,
+) -> (
+    gtk::Widget,
+    Option<gtk::DrawingArea>,
+    Option<Rc<RefCell<KaraokeRenderState>>>,
+) {
+    let Some((width, height)) = karaoke_size else {
+        return (text.clone().upcast(), None, None);
+    };
+
+    let state = Rc::new(RefCell::new(KaraokeRenderState::default()));
+    let area = gtk::DrawingArea::builder()
+        .width_request(width)
+        .height_request(height)
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
+        .visible(false)
+        .build();
+    {
+        let state = Rc::clone(&state);
+        area.set_draw_func(move |area, cr, width, height| {
+            draw_karaoke_line(area, cr, width, height, &state.borrow());
+        });
+    }
+
+    let stack = gtk::Stack::new();
+    stack.set_halign(gtk::Align::Center);
+    stack.set_valign(gtk::Align::Center);
+    stack.add_child(text);
+    stack.add_child(&area);
+
+    (stack.upcast(), Some(area), Some(state))
+}
+
+fn draw_text_line(
+    area: &gtk::DrawingArea,
+    cr: &gtk::cairo::Context,
+    width: i32,
+    _height: i32,
+    state: &TextLineRenderState,
+) {
+    if state.text.trim().is_empty() {
+        return;
+    }
+
+    let layout = area.create_pango_layout(Some(&state.text));
+    let mut font = gtk::pango::FontDescription::from_string("Sans");
+    font.set_absolute_size(state.style.font_px as f64 * gtk::pango::SCALE as f64);
+    layout.set_font_description(Some(&font));
+    layout.set_single_paragraph_mode(true);
+    layout.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    layout.set_alignment(gtk::pango::Alignment::Center);
+    layout.set_width(width.saturating_mul(gtk::pango::SCALE));
+
+    draw_pango_layout(cr, &layout, 0.0, 0.0, state.style.color);
+}
+
+fn draw_karaoke_line(
+    area: &gtk::DrawingArea,
+    cr: &gtk::cairo::Context,
+    width: i32,
+    height: i32,
+    state: &KaraokeRenderState,
+) {
+    if state.text.trim().is_empty() {
+        return;
+    }
+
+    let layout = area.create_pango_layout(Some(&state.text));
+    let mut font = gtk::pango::FontDescription::from_string("Sans Bold");
+    font.set_absolute_size(CURRENT_LYRIC_FONT_PX as f64 * gtk::pango::SCALE as f64);
+    layout.set_font_description(Some(&font));
+    layout.set_single_paragraph_mode(true);
+
+    let (text_width, text_height) = layout.pixel_size();
+    let x = ((width - text_width).max(0) as f64) / 2.0;
+    let y = ((height - text_height).max(0) as f64) / 2.0;
+    let fill_width = karaoke_fill_width(&layout, state);
+
+    draw_pango_layout(cr, &layout, x, y, (0.62, 0.65, 0.70, 1.0));
+    if fill_width > 0.0 {
+        let _ = cr.save();
+        cr.rectangle(x, 0.0, fill_width, height as f64);
+        cr.clip();
+        draw_pango_layout(cr, &layout, x, y, (1.0, 1.0, 1.0, 1.0));
+        let _ = cr.restore();
+    }
+}
+
+fn draw_pango_layout(
+    cr: &gtk::cairo::Context,
+    layout: &gtk::pango::Layout,
+    x: f64,
+    y: f64,
+    color: (f64, f64, f64, f64),
+) {
+    cr.set_source_rgba(color.0, color.1, color.2, color.3);
+    cr.move_to(x, y);
+    pangocairo::functions::show_layout(cr, layout);
+}
+
+fn karaoke_fill_width(layout: &gtk::pango::Layout, state: &KaraokeRenderState) -> f64 {
+    for (index, syllable) in state.syllables.iter().enumerate() {
+        if state.position_ms < syllable.start_ms {
+            return index
+                .checked_sub(1)
+                .and_then(|previous| syllable_byte_range(&state.text, &state.syllables, previous))
+                .map_or(0.0, |range| layout_x_at_byte(layout, range.end));
+        }
+
+        if state.position_ms < syllable.end_ms {
+            let Some(range) = syllable_byte_range(&state.text, &state.syllables, index) else {
+                return fallback_syllable_fill_width(layout, &state.syllables, index);
+            };
+            let start_x = layout_x_at_byte(layout, range.start);
+            let end_x = layout_x_at_byte(layout, range.end);
+            let progress = syllable_progress(syllable, state.position_ms);
+
+            return start_x + (end_x - start_x).max(0.0) * progress;
+        }
+    }
+
+    layout.pixel_size().0.max(0) as f64
+}
+
+fn syllable_byte_range(
+    full_text: &str,
+    syllables: &[TimedSyllable],
+    target_index: usize,
+) -> Option<std::ops::Range<i32>> {
+    let mut search_from = 0usize;
+
+    for (index, syllable) in syllables.iter().enumerate() {
+        let syllable_text = syllable.text.as_str();
+        if syllable_text.is_empty() {
+            if index == target_index {
+                let byte = byte_index_i32(search_from.min(full_text.len()));
+                return Some(byte..byte);
+            }
+            continue;
+        }
+
+        let start = full_text
+            .get(search_from..)
+            .and_then(|remaining| remaining.find(syllable_text))
+            .map(|offset| search_from.saturating_add(offset));
+
+        let Some(start) = start else {
+            return fallback_syllable_byte_range(full_text, syllables, target_index);
+        };
+        let end = start
+            .saturating_add(syllable_text.len())
+            .min(full_text.len());
+
+        if index == target_index {
+            return Some(byte_index_i32(start)..byte_index_i32(end));
+        }
+
+        search_from = end;
+    }
+
+    None
+}
+
+fn fallback_syllable_byte_range(
+    full_text: &str,
+    syllables: &[TimedSyllable],
+    target_index: usize,
+) -> Option<std::ops::Range<i32>> {
+    let mut byte_index = 0usize;
+
+    for (index, syllable) in syllables.iter().enumerate() {
+        let start = byte_index.min(full_text.len());
+        byte_index = byte_index.saturating_add(syllable.text.len());
+        let end = byte_index.min(full_text.len());
+
+        if index == target_index {
+            return Some(byte_index_i32(start)..byte_index_i32(end));
+        }
+    }
+
+    None
+}
+
+fn fallback_syllable_fill_width(
+    layout: &gtk::pango::Layout,
+    syllables: &[TimedSyllable],
+    target_index: usize,
+) -> f64 {
+    let byte_index = syllables
+        .iter()
+        .take(target_index + 1)
+        .map(|syllable| syllable.text.len())
+        .sum::<usize>();
+
+    layout_x_at_byte(layout, byte_index_i32(byte_index))
+}
+
+fn byte_index_i32(byte_index: usize) -> i32 {
+    byte_index.try_into().unwrap_or(i32::MAX)
+}
+
+fn layout_x_at_byte(layout: &gtk::pango::Layout, byte_index: i32) -> f64 {
+    layout.index_to_pos(byte_index).x() as f64 / gtk::pango::SCALE as f64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn syllable_ranges_track_repeated_words_in_order() {
+        let syllables = vec![syllable("Please"), syllable(" "), syllable("Please")];
+
+        assert_eq!(
+            syllable_byte_range("Please Please", &syllables, 0),
+            Some(0..6)
+        );
+        assert_eq!(
+            syllable_byte_range("Please Please", &syllables, 1),
+            Some(6..7)
+        );
+        assert_eq!(
+            syllable_byte_range("Please Please", &syllables, 2),
+            Some(7..13)
+        );
+    }
+
+    #[test]
+    fn syllable_ranges_use_utf8_byte_offsets() {
+        let syllables = vec![syllable("你"), syllable("好")];
+
+        assert_eq!(syllable_byte_range("你好", &syllables, 0), Some(0..3));
+        assert_eq!(syllable_byte_range("你好", &syllables, 1), Some(3..6));
+    }
+
+    fn syllable(text: &str) -> TimedSyllable {
+        TimedSyllable {
+            start_ms: 0,
+            end_ms: 100,
+            text: text.to_string(),
+        }
+    }
+}

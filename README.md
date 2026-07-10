@@ -24,15 +24,17 @@ Default paths:
 
 ## Architecture
 
-The repository is a Cargo workspace built around a fat application library and a
-one-call binary entry point:
+The repository is a single Cargo package with internal modules separated by
+responsibility:
 
-- `src/lib.rs`: CLI, startup, application assembly, and public crate facade.
-- `src/app.rs`: GTK floating-window presentation and UI orchestration.
+- `src/lib.rs`: CLI, startup, and the public module facade.
+- `src/app.rs`: application composition root and dependency wiring.
+- `src/app/`: playback controller, GTK-independent presentation model, and GTK view.
 - `src/main.rs`: thin binary delegating to `floatlyrics::run()`.
-- `crates/core`: track domain plus lyrics providers, parsing, matching, and timing.
-- `crates/support`: SQLite persistence, configuration, MPRIS, application paths,
-  and tracing infrastructure.
+- `src/lyrics/`: lyrics models, parsing, provider search, and timeline calculations.
+- `src/mpris/`: D-Bus watcher, player models, and position synchronization.
+- `src/cache.rs`, `src/config.rs`, `src/paths.rs`, `src/telemetry.rs`: local
+  infrastructure concerns.
 
 ## MVP Scope
 

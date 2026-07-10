@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 
-use floatlyrics_core::lyrics::LyricsProvider;
+use crate::lyrics::LyricsProvider;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
@@ -113,7 +113,7 @@ fn default_margin() -> i32 {
 }
 
 fn default_width() -> i32 {
-    960
+    520
 }
 
 fn default_opacity() -> f64 {
@@ -142,5 +142,10 @@ mod tests {
             AppConfig::default().lyrics.provider_order,
             vec![LyricsProvider::QqMusic, LyricsProvider::NetEase]
         );
+    }
+
+    #[test]
+    fn default_window_uses_compact_width() {
+        assert_eq!(AppConfig::default().window.width, 520);
     }
 }

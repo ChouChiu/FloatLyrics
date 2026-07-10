@@ -1,7 +1,11 @@
 pub mod app;
-
-pub use floatlyrics_core::{lyrics, track};
-pub use floatlyrics_support::{cache, config, mpris, paths, telemetry};
+pub mod cache;
+pub mod config;
+pub mod lyrics;
+pub mod mpris;
+pub mod paths;
+pub mod telemetry;
+pub mod track;
 
 use anyhow::Result;
 use clap::Parser;
