@@ -113,7 +113,7 @@ fn default_margin() -> i32 {
 }
 
 fn default_width() -> i32 {
-    520
+    600
 }
 
 fn default_opacity() -> f64 {
@@ -146,6 +146,6 @@ mod tests {
 
     #[test]
     fn default_window_uses_compact_width() {
-        assert_eq!(AppConfig::default().window.width, 520);
+        assert_eq!(AppConfig::default().window.width, 600);
     }
 }

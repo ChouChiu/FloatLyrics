@@ -17,7 +17,7 @@ use rendering::{
 };
 
 const MIN_PANEL_WIDTH: i32 = 320;
-const MAX_PANEL_WIDTH: i32 = 560;
+const MAX_PANEL_WIDTH: i32 = 640;
 const MAX_EXPANDED_PANEL_WIDTH: i32 = 960;
 const PANEL_HORIZONTAL_GUTTER: i32 = 32;
 const PANEL_CHROME_WIDTH: i32 = 28;
@@ -185,15 +185,15 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig) -> OverlayView {
         }
 
         .floating-song-info {
-            color: rgba(255,255,255,0.86);
-            font-size: 14px;
+            color: rgba(255,255,255,0.60);
+            font-size: 16px;
             font-weight: 650;
             text-shadow: 0 2px 8px rgba(0,0,0,0.85);
         }
 
         .floating-lyric-current {
             color: white;
-            font-size: 21px;
+            font-size: 24px;
             font-weight: 750;
             text-shadow: 0 2px 8px rgba(0,0,0,0.85);
         }
