@@ -26,5 +26,5 @@ Default paths:
 
 - Spotify-only MPRIS tracking.
 - Lyrics provider order: QQ Music, NetEase Cloud Music.
-- GTK4/libadwaita settings window plus Wayland layer-shell floating lyrics window.
+- GTK4 Wayland layer-shell floating lyrics window.
 - SQLite cache for tracks, lyrics, manual matches, provider results, and settings.

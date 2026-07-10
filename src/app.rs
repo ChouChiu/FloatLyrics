@@ -1,5 +1,5 @@
-use adw::prelude::*;
 use anyhow::{Context, Result};
+use gtk::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::{cell::RefCell, rc::Rc, sync::mpsc, time::Instant};
 
@@ -32,16 +32,14 @@ pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
 
     let cache = Cache::open(&paths.database_file)?;
 
-    let app = adw::Application::builder()
+    let app = gtk::Application::builder()
         .application_id("io.github.chouchiu.FloatLyrics")
         .build();
 
     let config = Rc::new(config);
-    let paths = Rc::new(paths);
     let cache = Rc::new(cache);
 
     app.connect_activate(move |app| {
-        let settings = build_settings_window(app, &paths);
         let floating = build_floating_window(app, &config);
         let (spotify_sender, spotify_receiver) = mpsc::channel();
         let (lyrics_sender, lyrics_receiver) = mpsc::channel();
@@ -54,7 +52,6 @@ pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
                 sender: lyrics_sender,
                 runtime: runtime_handle.clone(),
             },
-            settings,
             floating,
             Rc::clone(&cache),
             Rc::clone(&config),
@@ -63,11 +60,6 @@ pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
 
     app.run();
     Ok(())
-}
-
-#[derive(Clone)]
-struct SettingsWidgets {
-    player_row: adw::ActionRow,
 }
 
 #[derive(Clone)]
@@ -153,7 +145,6 @@ struct UiPlaybackSnapshot {
 struct LyricsDisplayState {
     track_fingerprint: Option<String>,
     lines: Vec<TimedLine>,
-    source_label: Option<String>,
     status_message: Option<String>,
 }
 
@@ -170,7 +161,6 @@ struct LyricsFetchHandles {
 }
 
 struct SpotifyUiContext<'a> {
-    settings: &'a SettingsWidgets,
     floating: &'a FloatingWidgets,
     cache: &'a Cache,
     config: &'a AppConfig,
@@ -180,44 +170,7 @@ struct SpotifyUiContext<'a> {
     lyrics_state: &'a Rc<RefCell<LyricsDisplayState>>,
 }
 
-fn build_settings_window(app: &adw::Application, paths: &AppPaths) -> SettingsWidgets {
-    let window = adw::ApplicationWindow::builder()
-        .application(app)
-        .title("FloatLyrics")
-        .default_width(560)
-        .default_height(420)
-        .build();
-
-    let header = adw::HeaderBar::new();
-    let toolbar = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    toolbar.append(&header);
-
-    let status_group = adw::PreferencesGroup::builder().title("Spotify").build();
-    let player_row = adw::ActionRow::builder()
-        .title("Player")
-        .subtitle("Waiting for Spotify MPRIS")
-        .build();
-    status_group.add(&player_row);
-
-    let cache_group = adw::PreferencesGroup::builder().title("Cache").build();
-    let db_row = adw::ActionRow::builder()
-        .title("Database")
-        .subtitle(paths.database_file.display().to_string())
-        .build();
-    cache_group.add(&db_row);
-
-    let page = adw::PreferencesPage::new();
-    page.add(&status_group);
-    page.add(&cache_group);
-    toolbar.append(&page);
-
-    window.set_content(Some(&toolbar));
-    window.present();
-
-    SettingsWidgets { player_row }
-}
-
-fn build_floating_window(app: &adw::Application, config: &AppConfig) -> FloatingWidgets {
+fn build_floating_window(app: &gtk::Application, config: &AppConfig) -> FloatingWidgets {
     let panel_width = config.window.width.clamp(360, 720);
     let window = gtk::ApplicationWindow::builder()
         .application(app)
@@ -863,7 +816,6 @@ fn first_monitor() -> Option<gtk::gdk::Monitor> {
 fn attach_spotify_events(
     receiver: mpsc::Receiver<SpotifyWatcherEvent>,
     lyrics: LyricsFetchHandles,
-    settings: SettingsWidgets,
     floating: FloatingWidgets,
     cache: Rc<Cache>,
     config: Rc<AppConfig>,
@@ -878,7 +830,6 @@ fn attach_spotify_events(
     let tick_widget = floating.lyrics_stack.clone();
     tick_widget.add_tick_callback(move |_, _| {
         let ctx = SpotifyUiContext {
-            settings: &settings,
             floating: &floating,
             cache: &cache,
             config: &config,
@@ -895,7 +846,6 @@ fn attach_spotify_events(
         for event in lyrics_receiver.borrow().try_iter() {
             handle_lyrics_fetch_event(
                 event,
-                ctx.settings,
                 ctx.floating,
                 ctx.cache,
                 ctx.config,
@@ -905,13 +855,7 @@ fn attach_spotify_events(
         }
 
         if let Some(snapshot) = ctx.latest.borrow().as_ref() {
-            refresh_progress_from_clock(
-                snapshot,
-                ctx.settings,
-                ctx.floating,
-                ctx.config,
-                ctx.lyrics_state,
-            );
+            refresh_progress_from_clock(snapshot, ctx.floating, ctx.config, ctx.lyrics_state);
         }
 
         gtk::glib::ControlFlow::Continue
@@ -944,9 +888,6 @@ fn handle_spotify_event(event: &SpotifyWatcherEvent, ctx: &SpotifyUiContext<'_>)
         SpotifyWatcherEvent::Disconnected => {
             *ctx.latest.borrow_mut() = None;
             *ctx.lyrics_state.borrow_mut() = LyricsDisplayState::default();
-            ctx.settings
-                .player_row
-                .set_subtitle("Waiting for Spotify MPRIS");
             ctx.floating.song_info.set_label("FloatLyrics");
             set_status_lyrics(ctx.floating, "Open Spotify to start tracking");
             reset_progress(ctx.floating);
@@ -954,9 +895,7 @@ fn handle_spotify_event(event: &SpotifyWatcherEvent, ctx: &SpotifyUiContext<'_>)
         SpotifyWatcherEvent::Error(message) => {
             *ctx.latest.borrow_mut() = None;
             *ctx.lyrics_state.borrow_mut() = LyricsDisplayState::default();
-            ctx.settings
-                .player_row
-                .set_subtitle(&format!("Listener error: {message}"));
+            tracing::warn!(%message, "Spotify listener error");
             ctx.floating.song_info.set_label("FloatLyrics");
             set_status_lyrics(ctx.floating, "Spotify listener needs attention");
             reset_progress(ctx.floating);
@@ -965,13 +904,9 @@ fn handle_spotify_event(event: &SpotifyWatcherEvent, ctx: &SpotifyUiContext<'_>)
 }
 
 fn update_spotify_state(state: &SpotifyPlayerState, ctx: &SpotifyUiContext<'_>) {
-    let status = playback_status_label(&state.playback_status);
-
     if let Some(track) = &state.track {
         if let Err(error) = ctx.cache.upsert_track(track) {
-            ctx.settings
-                .player_row
-                .set_subtitle(&format!("Spotify tracked, cache error: {error}"));
+            tracing::warn!(%error, "failed to cache Spotify track");
         }
         ensure_lyrics_loaded(
             track,
@@ -983,16 +918,12 @@ fn update_spotify_state(state: &SpotifyPlayerState, ctx: &SpotifyUiContext<'_>) 
         );
         update_track_display(
             state,
-            ctx.settings,
             ctx.floating,
             ctx.config,
             ctx.lyrics_state,
             state.position_ms,
         );
     } else {
-        ctx.settings
-            .player_row
-            .set_subtitle(&format!("{status} via {}", state.bus_name));
         ctx.floating.song_info.set_label("FloatLyrics");
         set_status_lyrics(ctx.floating, "Waiting for Spotify metadata");
         reset_progress(ctx.floating);
@@ -1001,7 +932,6 @@ fn update_spotify_state(state: &SpotifyPlayerState, ctx: &SpotifyUiContext<'_>) 
 
 fn refresh_progress_from_clock(
     snapshot: &UiPlaybackSnapshot,
-    settings: &SettingsWidgets,
     floating: &FloatingWidgets,
     config: &AppConfig,
     lyrics_state: &Rc<RefCell<LyricsDisplayState>>,
@@ -1009,7 +939,6 @@ fn refresh_progress_from_clock(
     if snapshot.state.track.is_some() {
         update_track_display(
             &snapshot.state,
-            settings,
             floating,
             config,
             lyrics_state,
@@ -1020,7 +949,6 @@ fn refresh_progress_from_clock(
 
 fn update_track_display(
     state: &SpotifyPlayerState,
-    settings: &SettingsWidgets,
     floating: &FloatingWidgets,
     config: &AppConfig,
     lyrics_state: &Rc<RefCell<LyricsDisplayState>>,
@@ -1030,21 +958,7 @@ fn update_track_display(
         return;
     };
 
-    let status = playback_status_label(&state.playback_status);
     let artist = track.display_artist();
-    let progress_suffix = progress_text(position_ms, track.duration_ms)
-        .map(|text| format!(" ({text})"))
-        .unwrap_or_default();
-    let lyrics_suffix = lyrics_state
-        .borrow()
-        .source_label
-        .as_deref()
-        .map(|source| format!(" · lyrics: {source}"))
-        .unwrap_or_default();
-    settings.player_row.set_subtitle(&format!(
-        "{status} via {}: {} - {}{}{}",
-        state.bus_name, track.title, artist, progress_suffix, lyrics_suffix
-    ));
     floating
         .song_info
         .set_label(&format!("{} - {}", track.title, artist));
@@ -1104,7 +1018,7 @@ fn load_lyrics_for_track(
         };
     };
 
-    let state = lyrics_state_from_cached(track, fingerprint.clone(), cached);
+    let state = lyrics_state_from_cached(fingerprint.clone(), cached);
     if config.lyrics.show_translation && !has_cached_translation(&state) {
         spawn_lyrics_fetch(
             runtime,
@@ -1117,17 +1031,12 @@ fn load_lyrics_for_track(
     state
 }
 
-fn lyrics_state_from_cached(
-    track: &TrackMetadata,
-    fingerprint: String,
-    cached: CachedLyrics,
-) -> LyricsDisplayState {
+fn lyrics_state_from_cached(fingerprint: String, cached: CachedLyrics) -> LyricsDisplayState {
     let lines = match timed_lines_from_raw(&cached.raw_lyrics) {
         Ok(lines) => lines,
         Err(error) => {
             return LyricsDisplayState {
                 track_fingerprint: Some(fingerprint),
-                source_label: Some(format!("{} #{}", cached.provider, cached.id)),
                 status_message: Some(format!("Lyrics parse error: {error}")),
                 ..LyricsDisplayState::default()
             };
@@ -1143,17 +1052,12 @@ fn lyrics_state_from_cached(
     LyricsDisplayState {
         track_fingerprint: Some(fingerprint),
         lines,
-        source_label: Some(format!(
-            "{} #{} for {}",
-            cached.provider, cached.id, track.title
-        )),
         status_message,
     }
 }
 
 fn handle_lyrics_fetch_event(
     event: LyricsFetchEvent,
-    settings: &SettingsWidgets,
     floating: &FloatingWidgets,
     cache: &Cache,
     config: &AppConfig,
@@ -1188,7 +1092,7 @@ fn handle_lyrics_fetch_event(
                 };
             } else {
                 *lyrics_state.borrow_mut() =
-                    load_cached_lyrics_after_fetch(track, cache, config, event.track_fingerprint);
+                    load_cached_lyrics_after_fetch(cache, config, event.track_fingerprint);
             }
         }
         Err(message) => {
@@ -1202,7 +1106,6 @@ fn handle_lyrics_fetch_event(
 
     update_track_display(
         &snapshot.state,
-        settings,
         floating,
         config,
         lyrics_state,
@@ -1211,14 +1114,13 @@ fn handle_lyrics_fetch_event(
 }
 
 fn load_cached_lyrics_after_fetch(
-    track: &TrackMetadata,
     cache: &Cache,
     config: &AppConfig,
     fingerprint: String,
 ) -> LyricsDisplayState {
     let provider_order = active_provider_order(config);
     match cache.lyrics_for_track(&fingerprint, &provider_order) {
-        Ok(Some(cached)) => lyrics_state_from_cached(track, fingerprint, cached),
+        Ok(Some(cached)) => lyrics_state_from_cached(fingerprint, cached),
         Ok(None) => LyricsDisplayState {
             track_fingerprint: Some(fingerprint),
             status_message: Some("Downloaded lyrics were not stored".to_string()),
@@ -1509,15 +1411,6 @@ fn apply_position_sample(
     snapshot.state.position_ms = Some(position_ms);
     snapshot.received_at = sampled_at;
     true
-}
-
-fn playback_status_label(status: &PlaybackStatus) -> &str {
-    match status {
-        PlaybackStatus::Playing => "Playing",
-        PlaybackStatus::Paused => "Paused",
-        PlaybackStatus::Stopped => "Stopped",
-        PlaybackStatus::Unknown(_) => "Unknown",
-    }
 }
 
 fn update_progress(floating: &FloatingWidgets, position_ms: Option<u64>, duration_ms: Option<u64>) {
