@@ -36,21 +36,36 @@ struct SpotifyUiContext<'a> {
     lyrics_state: &'a Rc<RefCell<LyricsDisplayState>>,
 }
 
+#[derive(Clone)]
+pub(super) struct ControllerHandle {
+    lyrics_state: Rc<RefCell<LyricsDisplayState>>,
+}
+
+impl ControllerHandle {
+    pub(super) fn reload_lyrics(&self) {
+        self.lyrics_state.borrow_mut().track_fingerprint = None;
+    }
+}
+
 pub(super) fn attach(
     receiver: mpsc::Receiver<SpotifyWatcherEvent>,
     runtime: tokio::runtime::Handle,
     floating: OverlayView,
     cache: Rc<Cache>,
-    config: Rc<AppConfig>,
-) {
+    config: Rc<RefCell<AppConfig>>,
+) -> ControllerHandle {
     let receiver = Rc::new(RefCell::new(receiver));
     let (lyrics_sender, lyrics_receiver) = mpsc::channel();
     let lyrics_receiver = Rc::new(RefCell::new(lyrics_receiver));
     let latest = Rc::new(RefCell::new(None::<PlaybackSnapshot>));
     let lyrics_state = Rc::new(RefCell::new(LyricsDisplayState::default()));
+    let handle = ControllerHandle {
+        lyrics_state: Rc::clone(&lyrics_state),
+    };
 
     let tick_widget = floating.tick_widget();
     tick_widget.add_tick_callback(move |_, _| {
+        let config = config.borrow().clone();
         let ctx = SpotifyUiContext {
             floating: &floating,
             cache: &cache,
@@ -77,11 +92,23 @@ pub(super) fn attach(
         }
 
         if let Some(snapshot) = ctx.latest.borrow().as_ref() {
+            if let Some(track) = snapshot.state.track.as_ref() {
+                ensure_lyrics_loaded(
+                    track,
+                    ctx.cache,
+                    ctx.config,
+                    ctx.runtime,
+                    ctx.lyrics_sender,
+                    ctx.lyrics_state,
+                );
+            }
             refresh_progress_from_clock(snapshot, ctx.floating, ctx.config, ctx.lyrics_state);
         }
 
         gtk::glib::ControlFlow::Continue
     });
+
+    handle
 }
 
 fn handle_spotify_event(event: &SpotifyWatcherEvent, ctx: &SpotifyUiContext<'_>) {

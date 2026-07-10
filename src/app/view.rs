@@ -2,7 +2,10 @@
 
 use gtk::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
 use crate::config::AppConfig;
 mod positioning;
@@ -33,7 +36,8 @@ const FALLBACK_PANEL_HEIGHT: i32 = 84;
 pub(super) struct OverlayView {
     window: gtk::ApplicationWindow,
     content: gtk::Box,
-    compact_width: i32,
+    compact_width: Rc<Cell<i32>>,
+    opacity_provider: gtk::CssProvider,
     placement: SharedPlacement,
     song_info: gtk::Label,
     progress: gtk::ProgressBar,
@@ -81,7 +85,7 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig) -> OverlayView {
         Edge::Left,
         initial_x(panel_width.saturating_add(PANEL_CHROME_WIDTH)).unwrap_or_default(),
     );
-    window.set_margin(Edge::Bottom, config.window.margin);
+    window.set_margin(Edge::Bottom, effective_bottom_margin(config));
     window.set_exclusive_zone(-1);
     window.add_css_class("floating-window");
 
@@ -285,13 +289,24 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig) -> OverlayView {
         );
     }
 
+    let opacity_provider = gtk::CssProvider::new();
+    load_opacity_css(&opacity_provider, config.window.opacity);
+    if let Some(display) = gtk::gdk::Display::default() {
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &opacity_provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
+        );
+    }
+
     window.set_child(Some(&content));
     window.present();
 
     OverlayView {
         window,
         content,
-        compact_width: panel_width,
+        compact_width: Rc::new(Cell::new(panel_width)),
+        opacity_provider,
         placement,
         song_info,
         progress,
@@ -373,6 +388,21 @@ fn translation_line_height(style: TextLineStyle) -> i32 {
 
 fn compact_panel_width(configured_width: i32) -> i32 {
     configured_width.clamp(MIN_PANEL_WIDTH, MAX_PANEL_WIDTH)
+}
+
+fn effective_bottom_margin(config: &AppConfig) -> i32 {
+    config
+        .window
+        .margin
+        .max(config.window.bottom_panel_height)
+        .max(0)
+}
+
+fn load_opacity_css(provider: &gtk::CssProvider, opacity: f64) {
+    let opacity = opacity.clamp(0.15, 1.0);
+    provider.load_from_string(&format!(
+        ".floating-panel {{ background: rgba(10, 12, 16, {opacity:.3}); }}"
+    ));
 }
 
 fn expanded_panel_width(compact_width: i32, content_width: i32, maximum_width: i32) -> i32 {
@@ -470,6 +500,31 @@ fn reset_progress(floating: &OverlayView) {
 }
 
 impl OverlayView {
+    pub(super) fn apply_config(&self, config: &AppConfig) {
+        let width = compact_panel_width(config.window.width);
+        self.compact_width.set(width);
+        self.content.set_width_request(width);
+        self.lyrics_stack.set_width_request(width);
+        for slot in &self.lyric_slots {
+            slot.translation_area.set_width_request(width);
+            if let Some(area) = &slot.karaoke_area {
+                area.set_width_request(width);
+            }
+        }
+        self.window
+            .set_margin(Edge::Bottom, effective_bottom_margin(config));
+        if let Some(left_margin) = left_margin_for_width(
+            &self.window,
+            &self.placement.borrow(),
+            width.saturating_add(PANEL_CHROME_WIDTH),
+        ) {
+            self.window.set_margin(Edge::Left, left_margin);
+        }
+        load_opacity_css(&self.opacity_provider, config.window.opacity);
+        self.lyrics_transition.borrow_mut().current_key = None;
+        self.sync_snap_classes();
+    }
+
     fn resize_for_lyrics(&self, value: &LyricSlotText) {
         let measured_width =
             lyric_content_width(&self.song_info, value).saturating_add(TEXT_HORIZONTAL_PADDING);
@@ -477,7 +532,7 @@ impl OverlayView {
             .unwrap_or(MAX_EXPANDED_PANEL_WIDTH)
             .saturating_sub(PANEL_CHROME_WIDTH)
             .min(MAX_EXPANDED_PANEL_WIDTH);
-        let width = expanded_panel_width(self.compact_width, measured_width, available_width);
+        let width = expanded_panel_width(self.compact_width.get(), measured_width, available_width);
         let next_surface_width = width.saturating_add(PANEL_CHROME_WIDTH);
         let next_left_margin =
             left_margin_for_width(&self.window, &self.placement.borrow(), next_surface_width);
@@ -551,5 +606,16 @@ mod tests {
         assert_eq!(expanded_panel_width(520, 400, 900), 520);
         assert_eq!(expanded_panel_width(520, 740, 900), 740);
         assert_eq!(expanded_panel_width(520, 1_100, 900), 900);
+    }
+
+    #[test]
+    fn bottom_panel_reservation_is_never_undercut() {
+        let mut config = AppConfig::default();
+        config.window.margin = 12;
+        config.window.bottom_panel_height = 36;
+        assert_eq!(effective_bottom_margin(&config), 36);
+
+        config.window.margin = 96;
+        assert_eq!(effective_bottom_margin(&config), 96);
     }
 }

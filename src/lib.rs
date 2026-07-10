@@ -24,6 +24,10 @@ struct Cli {
 
     #[arg(long)]
     reset_window: bool,
+
+    /// Opens the settings window (also suitable for a desktop-shell button).
+    #[arg(long)]
+    settings: bool,
 }
 
 /// Runs FloatLyrics using command-line arguments from the current process.
@@ -52,5 +56,17 @@ fn configure_default_gtk_renderer() {
         unsafe {
             std::env::set_var("GSK_RENDERER", "gl");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_settings_entry_point() {
+        let cli = Cli::try_parse_from(["floatlyrics", "--settings"]).unwrap();
+
+        assert!(cli.settings);
     }
 }
