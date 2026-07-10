@@ -62,9 +62,13 @@ pub(super) fn attach_floating_drag(
         let drag_origin = Rc::clone(&drag_origin);
         let placement = Rc::clone(&placement);
         gesture.connect_drag_begin(move |_, _, _| {
-            let geometry =
-                floating_geometry(&window, fallback_width, fallback_height, bottom_panel_height)
-                    .unwrap_or_else(|| fallback_geometry(fallback_width, fallback_height));
+            let geometry = floating_geometry(
+                &window,
+                fallback_width,
+                fallback_height,
+                bottom_panel_height,
+            )
+            .unwrap_or_else(|| fallback_geometry(fallback_width, fallback_height));
             let bottom_margin = window.margin(Edge::Bottom);
             let origin = DragOrigin {
                 x: window.margin(Edge::Left),
@@ -78,6 +82,7 @@ pub(super) fn attach_floating_drag(
 
     {
         let window = window.clone();
+        let content = content.clone();
         let drag_origin = Rc::clone(&drag_origin);
         let placement = Rc::clone(&placement);
         gesture.connect_drag_update(move |_, offset_x, offset_y| {
@@ -88,6 +93,7 @@ pub(super) fn attach_floating_drag(
             *placement.borrow_mut() = next_placement;
             window.set_margin(Edge::Left, next_left);
             window.set_margin(Edge::Bottom, next_bottom);
+            apply_snap_css_classes(&content, &next_placement);
         });
     }
 
@@ -237,10 +243,7 @@ fn floating_geometry(
 
     Some(FloatingGeometry {
         viewport_width: geometry.width().max(0),
-        viewport_height: geometry
-            .height()
-            .saturating_sub(bottom_panel_height)
-            .max(0),
+        viewport_height: geometry.height().saturating_sub(bottom_panel_height).max(0),
         surface_width,
         surface_height,
     })
@@ -285,6 +288,41 @@ fn first_monitor() -> Option<gtk::gdk::Monitor> {
         .item(0)?
         .downcast::<gtk::gdk::Monitor>()
         .ok()
+}
+
+const SNAP_CSS_CLASSES: &[&str] = &[
+    "snapped-left",
+    "snapped-right",
+    "snapped-top",
+    "snapped-bottom",
+];
+
+pub(super) fn snap_css_classes(placement: &WindowPlacement) -> Vec<&'static str> {
+    let mut classes = Vec::new();
+    match placement.horizontal {
+        AxisAnchor::Start => classes.push("snapped-left"),
+        AxisAnchor::End => classes.push("snapped-right"),
+        _ => {}
+    }
+    match placement.vertical {
+        AxisAnchor::Start => classes.push("snapped-top"),
+        AxisAnchor::End => classes.push("snapped-bottom"),
+        _ => {}
+    }
+    classes
+}
+
+pub(super) fn apply_snap_css_classes(content: &gtk::Box, placement: &WindowPlacement) {
+    let wanted = snap_css_classes(placement);
+    for cls in SNAP_CSS_CLASSES {
+        if wanted.contains(cls) {
+            if !content.has_css_class(cls) {
+                content.add_css_class(cls);
+            }
+        } else {
+            content.remove_css_class(cls);
+        }
+    }
 }
 
 #[cfg(test)]

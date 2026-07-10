@@ -10,7 +10,8 @@ mod rendering;
 
 use super::model::{KaraokeRenderState, LyricSlotText, progress_fraction, progress_text};
 use positioning::{
-    SharedPlacement, attach_floating_drag, available_panel_width, initial_x, left_margin_for_width,
+    SharedPlacement, apply_snap_css_classes, attach_floating_drag, available_panel_width,
+    initial_x, left_margin_for_width,
 };
 use rendering::{
     TextLineRenderState, TextLineStyle, lyric_content_width, lyric_text_widget, text_line_area,
@@ -253,6 +254,26 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig) -> OverlayView {
             margin: 3px 0 1px 0;
             background: rgba(255,255,255,0.24);
         }
+
+        .floating-panel.snapped-left {
+            border-top-left-radius: 0;
+            border-bottom-left-radius: 0;
+        }
+
+        .floating-panel.snapped-right {
+            border-top-right-radius: 0;
+            border-bottom-right-radius: 0;
+        }
+
+        .floating-panel.snapped-top {
+            border-top-left-radius: 0;
+            border-top-right-radius: 0;
+        }
+
+        .floating-panel.snapped-bottom {
+            border-bottom-left-radius: 0;
+            border-bottom-right-radius: 0;
+        }
         "#
     .replace("__PANEL_ALPHA__", &format!("{panel_alpha:.3}"));
     provider.load_from_string(&css);
@@ -473,6 +494,11 @@ impl OverlayView {
         if let Some(left_margin) = next_left_margin {
             self.window.set_margin(Edge::Left, left_margin);
         }
+        self.sync_snap_classes();
+    }
+
+    fn sync_snap_classes(&self) {
+        apply_snap_css_classes(&self.content, &self.placement.borrow());
     }
 
     pub(super) fn tick_widget(&self) -> gtk::Stack {
