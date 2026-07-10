@@ -1,12 +1,7 @@
 use adw::prelude::*;
 use anyhow::{Context, Result};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
-use std::{
-    cell::RefCell,
-    rc::Rc,
-    sync::mpsc,
-    time::{Duration, Instant},
-};
+use std::{cell::RefCell, rc::Rc, sync::mpsc, time::Instant};
 
 use crate::{
     cache::{Cache, CachedLyrics, ProviderResultInsert},
@@ -24,8 +19,7 @@ const CURRENT_LYRIC_FONT_PX: i32 = 24;
 const CURRENT_KARAOKE_HEIGHT: i32 = 42;
 const CURRENT_TRANSLATION_HEIGHT: i32 = 20;
 const LYRICS_VIEWPORT_HEIGHT: i32 = CURRENT_KARAOKE_HEIGHT + CURRENT_TRANSLATION_HEIGHT;
-const LYRICS_SCROLL_DURATION: Duration = Duration::from_millis(180);
-const LYRICS_SCROLL_OFFSET_PX: i32 = 14;
+const LYRICS_TRANSITION_DURATION_MS: u32 = 180;
 
 pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -81,10 +75,9 @@ struct FloatingWidgets {
     song_info: gtk::Label,
     progress: gtk::ProgressBar,
     progress_label: gtk::Label,
-    lyrics_viewport: gtk::Fixed,
-    lyrics_box: gtk::Box,
-    lyrics_scroll: Rc<RefCell<LyricsScrollState>>,
-    current: LyricSlotWidgets,
+    lyrics_stack: gtk::Stack,
+    lyric_slots: [LyricSlotWidgets; 2],
+    lyrics_transition: Rc<RefCell<LyricsTransitionState>>,
 }
 
 #[derive(Clone)]
@@ -118,9 +111,9 @@ struct TextLineStyle {
 }
 
 #[derive(Debug, Clone, Default)]
-struct LyricsScrollState {
+struct LyricsTransitionState {
     current_key: Option<String>,
-    started_at: Option<Instant>,
+    active_slot: usize,
 }
 
 impl Default for TextLineRenderState {
@@ -280,7 +273,7 @@ fn build_floating_window(app: &adw::Application, config: &AppConfig) -> Floating
     let separator = gtk::Separator::new(gtk::Orientation::Horizontal);
     separator.add_css_class("floating-separator");
 
-    let current = lyric_slot(
+    let primary = lyric_slot(
         ["floating-slot-current"],
         ["floating-lyric-current"],
         ["floating-translation-current"],
@@ -289,20 +282,30 @@ fn build_floating_window(app: &adw::Application, config: &AppConfig) -> Floating
         translation_style(true),
         panel_width,
     );
+    let secondary = lyric_slot(
+        ["floating-slot-current"],
+        ["floating-lyric-current"],
+        ["floating-translation-current"],
+        "",
+        Some((panel_width, CURRENT_KARAOKE_HEIGHT)),
+        translation_style(true),
+        panel_width,
+    );
 
-    let lyrics_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    lyrics_box.set_halign(gtk::Align::Center);
-    lyrics_box.set_valign(gtk::Align::Center);
-    lyrics_box.set_size_request(panel_width, -1);
-    lyrics_box.append(&current.container);
-    let lyrics_viewport = gtk::Fixed::builder()
+    let lyrics_stack = gtk::Stack::builder()
         .width_request(panel_width)
         .height_request(LYRICS_VIEWPORT_HEIGHT)
         .halign(gtk::Align::Center)
         .valign(gtk::Align::Center)
+        .hhomogeneous(true)
+        .vhomogeneous(true)
+        .transition_type(gtk::StackTransitionType::Crossfade)
+        .transition_duration(LYRICS_TRANSITION_DURATION_MS)
         .build();
-    lyrics_viewport.put(&lyrics_box, 0.0, 0.0);
-    let lyrics_scroll = Rc::new(RefCell::new(LyricsScrollState::default()));
+    lyrics_stack.add_named(&primary.container, Some("primary"));
+    lyrics_stack.add_named(&secondary.container, Some("secondary"));
+    lyrics_stack.set_visible_child(&primary.container);
+    let lyrics_transition = Rc::new(RefCell::new(LyricsTransitionState::default()));
 
     let content = gtk::Box::new(gtk::Orientation::Vertical, 5);
     content.set_halign(gtk::Align::Center);
@@ -312,7 +315,7 @@ fn build_floating_window(app: &adw::Application, config: &AppConfig) -> Floating
     content.append(&song_info);
     content.append(&progress_row);
     content.append(&separator);
-    content.append(&lyrics_viewport);
+    content.append(&lyrics_stack);
     attach_floating_drag(&window, &content, panel_width, 96);
 
     let provider = gtk::CssProvider::new();
@@ -418,10 +421,9 @@ fn build_floating_window(app: &adw::Application, config: &AppConfig) -> Floating
         song_info,
         progress,
         progress_label,
-        lyrics_viewport,
-        lyrics_box,
-        lyrics_scroll,
-        current,
+        lyrics_stack,
+        lyric_slots: [primary, secondary],
+        lyrics_transition,
     }
 }
 
@@ -873,7 +875,7 @@ fn attach_spotify_events(
     let latest = Rc::new(RefCell::new(None::<UiPlaybackSnapshot>));
     let lyrics_state = Rc::new(RefCell::new(LyricsDisplayState::default()));
 
-    let tick_widget = floating.current.container.clone();
+    let tick_widget = floating.lyrics_stack.clone();
     tick_widget.add_tick_callback(move |_, _| {
         let ctx = SpotifyUiContext {
             settings: &settings,
@@ -885,8 +887,6 @@ fn attach_spotify_events(
             latest: &latest,
             lyrics_state: &lyrics_state,
         };
-
-        update_lyrics_scroll_animation(ctx.floating);
 
         for event in receiver.borrow().try_iter() {
             handle_spotify_event(&event, &ctx);
@@ -926,6 +926,20 @@ fn handle_spotify_event(event: &SpotifyWatcherEvent, ctx: &SpotifyUiContext<'_>)
                 received_at: Instant::now(),
             });
             update_spotify_state(state, ctx);
+        }
+        SpotifyWatcherEvent::PositionUpdated {
+            track_fingerprint,
+            position_ms,
+            sampled_at,
+        } => {
+            if let Some(snapshot) = ctx.latest.borrow_mut().as_mut() {
+                apply_position_sample(
+                    snapshot,
+                    track_fingerprint.as_deref(),
+                    *position_ms,
+                    *sampled_at,
+                );
+            }
         }
         SpotifyWatcherEvent::Disconnected => {
             *ctx.latest.borrow_mut() = None;
@@ -1403,8 +1417,14 @@ fn is_placeholder_text(value: &str) -> bool {
 }
 
 fn set_lyrics_slots(floating: &FloatingWidgets, current: LyricSlotText, animation_key: &str) {
-    start_lyrics_scroll_if_needed(floating, animation_key);
-    set_lyric_slot(&floating.current, &current);
+    let (slot_index, should_transition) =
+        select_lyric_slot(&mut floating.lyrics_transition.borrow_mut(), animation_key);
+    let slot = &floating.lyric_slots[slot_index];
+    set_lyric_slot(slot, &current);
+
+    if should_transition {
+        floating.lyrics_stack.set_visible_child(&slot.container);
+    }
 }
 
 fn set_status_lyrics(floating: &FloatingWidgets, message: &str) {
@@ -1415,48 +1435,18 @@ fn set_status_lyrics(floating: &FloatingWidgets, message: &str) {
     );
 }
 
-fn start_lyrics_scroll_if_needed(floating: &FloatingWidgets, key: &str) {
-    let mut state = floating.lyrics_scroll.borrow_mut();
+fn select_lyric_slot(state: &mut LyricsTransitionState, key: &str) -> (usize, bool) {
     if state.current_key.as_deref() == Some(key) {
-        return;
+        return (state.active_slot, false);
     }
 
+    let is_first_value = state.current_key.is_none();
     state.current_key = Some(key.to_string());
-    state.started_at = Some(Instant::now());
-    floating
-        .lyrics_viewport
-        .move_(&floating.lyrics_box, 0.0, LYRICS_SCROLL_OFFSET_PX as f64);
-    floating.lyrics_box.set_opacity(0.72);
-}
-
-fn update_lyrics_scroll_animation(floating: &FloatingWidgets) {
-    let Some(started_at) = floating.lyrics_scroll.borrow().started_at else {
-        return;
-    };
-
-    let elapsed = started_at.elapsed();
-    let progress = (elapsed.as_secs_f64() / LYRICS_SCROLL_DURATION.as_secs_f64()).clamp(0.0, 1.0);
-    let eased = ease_out_cubic(progress);
-    let offset = (LYRICS_SCROLL_OFFSET_PX as f64 * (1.0 - eased)).round() as i32;
-    let opacity = 0.72 + 0.28 * eased;
-
-    floating
-        .lyrics_viewport
-        .move_(&floating.lyrics_box, 0.0, offset as f64);
-    floating.lyrics_box.set_opacity(opacity);
-
-    if progress >= 1.0 {
-        let mut state = floating.lyrics_scroll.borrow_mut();
-        state.started_at = None;
-        floating
-            .lyrics_viewport
-            .move_(&floating.lyrics_box, 0.0, 0.0);
-        floating.lyrics_box.set_opacity(1.0);
+    if !is_first_value {
+        state.active_slot = 1 - state.active_slot;
     }
-}
 
-fn ease_out_cubic(progress: f64) -> f64 {
-    1.0 - (1.0 - progress).powi(3)
+    (state.active_slot, !is_first_value)
 }
 
 fn set_lyric_slot(slot: &LyricSlotWidgets, value: &LyricSlotText) {
@@ -1499,6 +1489,26 @@ fn effective_position_ms(snapshot: &UiPlaybackSnapshot) -> Option<u64> {
             .and_then(|track| track.duration_ms)
             .map_or(position, |duration| position.min(duration)),
     )
+}
+
+fn apply_position_sample(
+    snapshot: &mut UiPlaybackSnapshot,
+    track_fingerprint: Option<&str>,
+    position_ms: u64,
+    sampled_at: Instant,
+) -> bool {
+    let current_fingerprint = snapshot
+        .state
+        .track
+        .as_ref()
+        .map(TrackMetadata::fingerprint);
+    if current_fingerprint.as_deref() != track_fingerprint {
+        return false;
+    }
+
+    snapshot.state.position_ms = Some(position_ms);
+    snapshot.received_at = sampled_at;
+    true
 }
 
 fn playback_status_label(status: &PlaybackStatus) -> &str {
@@ -1630,6 +1640,44 @@ mod tests {
     }
 
     #[test]
+    fn authoritative_position_sample_reanchors_the_local_clock() {
+        let mut snapshot = UiPlaybackSnapshot {
+            state: test_state(PlaybackStatus::Playing),
+            received_at: Instant::now() - Duration::from_secs(2),
+        };
+        assert!(effective_position_ms(&snapshot).unwrap() >= 12_000);
+
+        let fingerprint = snapshot.state.track.as_ref().unwrap().fingerprint();
+        let sampled_at = Instant::now();
+        assert!(apply_position_sample(
+            &mut snapshot,
+            Some(&fingerprint),
+            10_500,
+            sampled_at,
+        ));
+        assert!(effective_position_ms(&snapshot).unwrap() < 10_600);
+        assert_eq!(snapshot.received_at, sampled_at);
+    }
+
+    #[test]
+    fn position_sample_from_another_track_is_ignored() {
+        let mut snapshot = UiPlaybackSnapshot {
+            state: test_state(PlaybackStatus::Playing),
+            received_at: Instant::now(),
+        };
+        let received_at = snapshot.received_at;
+
+        assert!(!apply_position_sample(
+            &mut snapshot,
+            Some("another-track"),
+            500,
+            Instant::now(),
+        ));
+        assert_eq!(snapshot.state.position_ms, Some(10_000));
+        assert_eq!(snapshot.received_at, received_at);
+    }
+
+    #[test]
     fn active_syllable_fraction_tracks_progress_inside_syllable() {
         let syllable = crate::lyrics::TimedSyllable {
             start_ms: 1_000,
@@ -1643,10 +1691,13 @@ mod tests {
     }
 
     #[test]
-    fn ease_out_cubic_starts_fast_and_ends_at_one() {
-        assert_eq!(ease_out_cubic(0.0), 0.0);
-        assert_eq!(ease_out_cubic(1.0), 1.0);
-        assert!(ease_out_cubic(0.5) > 0.5);
+    fn lyric_slot_selection_only_switches_when_the_key_changes() {
+        let mut state = LyricsTransitionState::default();
+
+        assert_eq!(select_lyric_slot(&mut state, "line:0"), (0, false));
+        assert_eq!(select_lyric_slot(&mut state, "line:0"), (0, false));
+        assert_eq!(select_lyric_slot(&mut state, "line:1"), (1, true));
+        assert_eq!(select_lyric_slot(&mut state, "line:2"), (0, true));
     }
 
     #[test]

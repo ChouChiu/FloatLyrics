@@ -1,7 +1,11 @@
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::mpsc::Sender, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::mpsc::Sender,
+    time::{Duration, Instant},
+};
 use zbus::{
     Connection, Proxy,
     fdo::{DBusProxy, PropertiesProxy},
@@ -14,7 +18,8 @@ use crate::track::TrackMetadata;
 pub const SPOTIFY_MPRIS_PREFIX: &str = "org.mpris.MediaPlayer2.spotify";
 const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
 const PLAYER_IFACE: &str = "org.mpris.MediaPlayer2.Player";
-const TRACK_CHANGE_POSITION_RECHECK_DELAY: Duration = Duration::from_millis(250);
+const PLAYBACK_POSITION_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const PLAYER_HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(30);
 
 pub fn is_spotify_mpris_name(name: &str) -> bool {
     name == SPOTIFY_MPRIS_PREFIX || name.starts_with("org.mpris.MediaPlayer2.spotify.")
@@ -81,6 +86,12 @@ async fn watch_player(
 
     let mut state = read_player_state(&player, &bus_name).await?;
     let _ = sender.send(SpotifyWatcherEvent::Connected(state.clone()));
+    let mut position_poll = tokio::time::interval(PLAYBACK_POSITION_POLL_INTERVAL);
+    position_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    position_poll.tick().await;
+    let mut health_check = tokio::time::interval(PLAYER_HEALTH_CHECK_INTERVAL);
+    health_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    health_check.tick().await;
 
     loop {
         tokio::select! {
@@ -103,16 +114,8 @@ async fn watch_player(
                 });
 
                 if player_changed {
-                    let next_state = read_player_state(&player, &bus_name).await?;
-                    let track_changed = player_track_fingerprint(&state)
-                        != player_track_fingerprint(&next_state);
-                    state = next_state;
+                    state = read_player_state(&player, &bus_name).await?;
                     let _ = sender.send(SpotifyWatcherEvent::Updated(state.clone()));
-                    if track_changed {
-                        tokio::time::sleep(TRACK_CHANGE_POSITION_RECHECK_DELAY).await;
-                        state = read_player_state(&player, &bus_name).await?;
-                        let _ = sender.send(SpotifyWatcherEvent::Updated(state.clone()));
-                    }
                 }
             }
             signal = seeked.next() => {
@@ -126,7 +129,18 @@ async fn watch_player(
                     let _ = sender.send(SpotifyWatcherEvent::Updated(state.clone()));
                 }
             }
-            _ = tokio::time::sleep(Duration::from_secs(30)) => {
+            _ = position_poll.tick(), if matches!(state.playback_status, PlaybackStatus::Playing) => {
+                if let Some(position_ms) = read_player_position(&player).await {
+                    let sampled_at = Instant::now();
+                    state.position_ms = Some(position_ms);
+                    let _ = sender.send(SpotifyWatcherEvent::PositionUpdated {
+                        track_fingerprint: player_track_fingerprint(&state),
+                        position_ms,
+                        sampled_at,
+                    });
+                }
+            }
+            _ = health_check.tick() => {
                 match read_player_state(&player, &bus_name).await {
                     Ok(next_state) => {
                         state = next_state;
@@ -182,6 +196,14 @@ async fn read_player_state(player: &Proxy<'_>, bus_name: &str) -> Result<Spotify
     })
 }
 
+async fn read_player_position(player: &Proxy<'_>) -> Option<u64> {
+    player
+        .get_property::<i64>("Position")
+        .await
+        .ok()
+        .and_then(position_us_to_ms)
+}
+
 fn position_us_to_ms(position_us: i64) -> Option<u64> {
     if position_us >= 0 {
         Some(position_us as u64 / 1_000)
@@ -198,6 +220,11 @@ fn player_track_fingerprint(state: &SpotifyPlayerState) -> Option<String> {
 pub enum SpotifyWatcherEvent {
     Connected(SpotifyPlayerState),
     Updated(SpotifyPlayerState),
+    PositionUpdated {
+        track_fingerprint: Option<String>,
+        position_ms: u64,
+        sampled_at: Instant,
+    },
     Disconnected,
     Error(String),
 }
