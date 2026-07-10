@@ -872,14 +872,14 @@ fn handle_spotify_event(event: &SpotifyWatcherEvent, ctx: &SpotifyUiContext<'_>)
             update_spotify_state(state, ctx);
         }
         SpotifyWatcherEvent::PositionUpdated {
-            track_fingerprint,
+            track_identity,
             position_ms,
             sampled_at,
         } => {
             if let Some(snapshot) = ctx.latest.borrow_mut().as_mut() {
                 apply_position_sample(
                     snapshot,
-                    track_fingerprint.as_deref(),
+                    track_identity.as_deref(),
                     *position_ms,
                     *sampled_at,
                 );
@@ -1395,16 +1395,16 @@ fn effective_position_ms(snapshot: &UiPlaybackSnapshot) -> Option<u64> {
 
 fn apply_position_sample(
     snapshot: &mut UiPlaybackSnapshot,
-    track_fingerprint: Option<&str>,
+    track_identity: Option<&str>,
     position_ms: u64,
     sampled_at: Instant,
 ) -> bool {
-    let current_fingerprint = snapshot
+    let current_identity = snapshot
         .state
         .track
         .as_ref()
-        .map(TrackMetadata::fingerprint);
-    if current_fingerprint.as_deref() != track_fingerprint {
+        .map(TrackMetadata::playback_identity);
+    if current_identity.as_deref() != track_identity {
         return false;
     }
 
@@ -1540,11 +1540,11 @@ mod tests {
         };
         assert!(effective_position_ms(&snapshot).unwrap() >= 12_000);
 
-        let fingerprint = snapshot.state.track.as_ref().unwrap().fingerprint();
+        let identity = snapshot.state.track.as_ref().unwrap().playback_identity();
         let sampled_at = Instant::now();
         assert!(apply_position_sample(
             &mut snapshot,
-            Some(&fingerprint),
+            Some(&identity),
             10_500,
             sampled_at,
         ));

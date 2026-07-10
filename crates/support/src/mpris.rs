@@ -20,6 +20,7 @@ const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
 const PLAYER_IFACE: &str = "org.mpris.MediaPlayer2.Player";
 const PLAYBACK_POSITION_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const PLAYER_HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(30);
+const NEW_TRACK_POSITION_TOLERANCE: Duration = Duration::from_millis(1_500);
 
 pub fn is_spotify_mpris_name(name: &str) -> bool {
     name == SPOTIFY_MPRIS_PREFIX || name.starts_with("org.mpris.MediaPlayer2.spotify.")
@@ -85,6 +86,7 @@ async fn watch_player(
     let mut seeked = player.receive_signal("Seeked").await?;
 
     let mut state = read_player_state(&player, &bus_name).await?;
+    let mut position_sync = TrackPositionSync::new(&state, Instant::now());
     let _ = sender.send(SpotifyWatcherEvent::Connected(state.clone()));
     let mut position_poll = tokio::time::interval(PLAYBACK_POSITION_POLL_INTERVAL);
     position_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -114,7 +116,23 @@ async fn watch_player(
                 });
 
                 if player_changed {
-                    state = read_player_state(&player, &bus_name).await?;
+                    let mut next_state = read_player_state(&player, &bus_name).await?;
+                    let observed_at = Instant::now();
+                    let track_changed = position_sync.observe_track(&next_state, observed_at);
+                    if !position_sync.accepts(
+                        next_state.position_ms,
+                        &next_state.playback_status,
+                        observed_at,
+                    ) {
+                        next_state.position_ms = if track_changed {
+                            Some(0)
+                        } else {
+                            position_sync
+                                .estimated_position(observed_at)
+                                .or(state.position_ms)
+                        };
+                    }
+                    state = next_state;
                     let _ = sender.send(SpotifyWatcherEvent::Updated(state.clone()));
                 }
             }
@@ -125,24 +143,46 @@ async fn watch_player(
                 };
 
                 if let Some(position_ms) = seeked_position_ms(&signal) {
+                    position_sync.trust_position();
                     state.position_ms = Some(position_ms);
                     let _ = sender.send(SpotifyWatcherEvent::Updated(state.clone()));
                 }
             }
-            _ = position_poll.tick(), if matches!(state.playback_status, PlaybackStatus::Playing) => {
+            _ = position_poll.tick() => {
                 if let Some(position_ms) = read_player_position(&player).await {
                     let sampled_at = Instant::now();
-                    state.position_ms = Some(position_ms);
-                    let _ = sender.send(SpotifyWatcherEvent::PositionUpdated {
-                        track_fingerprint: player_track_fingerprint(&state),
-                        position_ms,
+                    if position_sync.accepts(
+                        Some(position_ms),
+                        &state.playback_status,
                         sampled_at,
-                    });
+                    ) {
+                        state.position_ms = Some(position_ms);
+                        let _ = sender.send(SpotifyWatcherEvent::PositionUpdated {
+                            track_identity: player_track_identity(&state),
+                            position_ms,
+                            sampled_at,
+                        });
+                    }
                 }
             }
             _ = health_check.tick() => {
                 match read_player_state(&player, &bus_name).await {
-                    Ok(next_state) => {
+                    Ok(mut next_state) => {
+                        let observed_at = Instant::now();
+                        let track_changed = position_sync.observe_track(&next_state, observed_at);
+                        if !position_sync.accepts(
+                            next_state.position_ms,
+                            &next_state.playback_status,
+                            observed_at,
+                        ) {
+                            next_state.position_ms = if track_changed {
+                                Some(0)
+                            } else {
+                                position_sync
+                                    .estimated_position(observed_at)
+                                    .or(state.position_ms)
+                            };
+                        }
                         state = next_state;
                         let _ = sender.send(SpotifyWatcherEvent::Updated(state.clone()));
                     }
@@ -212,8 +252,69 @@ fn position_us_to_ms(position_us: i64) -> Option<u64> {
     }
 }
 
-fn player_track_fingerprint(state: &SpotifyPlayerState) -> Option<String> {
-    state.track.as_ref().map(TrackMetadata::fingerprint)
+fn player_track_identity(state: &SpotifyPlayerState) -> Option<String> {
+    state.track.as_ref().map(TrackMetadata::playback_identity)
+}
+
+#[derive(Debug, Clone)]
+struct TrackPositionSync {
+    track_identity: Option<String>,
+    detected_at: Instant,
+    synchronized: bool,
+}
+
+impl TrackPositionSync {
+    fn new(state: &SpotifyPlayerState, now: Instant) -> Self {
+        Self {
+            track_identity: player_track_identity(state),
+            detected_at: now,
+            synchronized: true,
+        }
+    }
+
+    fn observe_track(&mut self, state: &SpotifyPlayerState, now: Instant) -> bool {
+        let identity = player_track_identity(state);
+        if self.track_identity == identity {
+            return false;
+        }
+
+        self.track_identity = identity;
+        self.detected_at = now;
+        self.synchronized = false;
+        true
+    }
+
+    fn accepts(
+        &mut self,
+        position_ms: Option<u64>,
+        playback_status: &PlaybackStatus,
+        now: Instant,
+    ) -> bool {
+        let Some(position_ms) = position_ms else {
+            return false;
+        };
+        if self.synchronized || !matches!(playback_status, PlaybackStatus::Playing) {
+            self.synchronized = true;
+            return true;
+        }
+
+        let elapsed_ms = now.duration_since(self.detected_at).as_millis() as u64;
+        let tolerance_ms = NEW_TRACK_POSITION_TOLERANCE.as_millis() as u64;
+        if position_ms <= elapsed_ms.saturating_add(tolerance_ms) {
+            self.synchronized = true;
+            return true;
+        }
+
+        false
+    }
+
+    fn trust_position(&mut self) {
+        self.synchronized = true;
+    }
+
+    fn estimated_position(&self, now: Instant) -> Option<u64> {
+        (!self.synchronized).then(|| now.duration_since(self.detected_at).as_millis() as u64)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -221,7 +322,7 @@ pub enum SpotifyWatcherEvent {
     Connected(SpotifyPlayerState),
     Updated(SpotifyPlayerState),
     PositionUpdated {
-        track_fingerprint: Option<String>,
+        track_identity: Option<String>,
         position_ms: u64,
         sampled_at: Instant,
     },
@@ -398,5 +499,46 @@ mod tests {
     fn converts_mpris_position_to_milliseconds() {
         assert_eq!(position_us_to_ms(12_345_678), Some(12_345));
         assert_eq!(position_us_to_ms(-1), None);
+    }
+
+    #[test]
+    fn rejects_a_stale_position_when_the_track_changes() {
+        let now = Instant::now();
+        let mut sync = TrackPositionSync::new(&test_state("old", 120_000), now);
+        let next = test_state("new", 120_250);
+
+        assert!(sync.observe_track(&next, now));
+        assert!(!sync.accepts(next.position_ms, &PlaybackStatus::Playing, now));
+        assert_eq!(sync.estimated_position(now), Some(0));
+
+        let settled_at = now + Duration::from_millis(500);
+        assert!(sync.accepts(Some(500), &PlaybackStatus::Playing, settled_at));
+    }
+
+    #[test]
+    fn paused_or_seeked_positions_are_trusted_immediately() {
+        let now = Instant::now();
+        let mut sync = TrackPositionSync::new(&test_state("old", 120_000), now);
+        assert!(sync.observe_track(&test_state("new", 120_250), now));
+        assert!(sync.accepts(Some(60_000), &PlaybackStatus::Paused, now));
+
+        sync.synchronized = false;
+        sync.trust_position();
+        assert!(sync.accepts(Some(90_000), &PlaybackStatus::Playing, now));
+    }
+
+    fn test_state(track_id: &str, position_ms: u64) -> SpotifyPlayerState {
+        SpotifyPlayerState {
+            bus_name: SPOTIFY_MPRIS_PREFIX.to_string(),
+            playback_status: PlaybackStatus::Playing,
+            position_ms: Some(position_ms),
+            track: Some(TrackMetadata {
+                title: track_id.to_string(),
+                artists: vec!["Artist".to_string()],
+                album: None,
+                duration_ms: Some(180_000),
+                mpris_track_id: Some(format!("/track/{track_id}")),
+            }),
+        }
     }
 }

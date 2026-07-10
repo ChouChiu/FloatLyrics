@@ -23,6 +23,12 @@ impl TrackMetadata {
     pub fn display_artist(&self) -> String {
         self.artists.join(", ")
     }
+
+    pub fn playback_identity(&self) -> String {
+        self.mpris_track_id
+            .clone()
+            .unwrap_or_else(|| self.fingerprint())
+    }
 }
 
 pub fn track_fingerprint(
@@ -77,5 +83,22 @@ mod tests {
         let b = track_fingerprint("song name", &artists_b, Some("album"), Some(180_400));
 
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn playback_identity_prefers_the_stable_mpris_track_id() {
+        let mut track = TrackMetadata {
+            title: "Song".to_string(),
+            artists: vec!["Artist".to_string()],
+            album: None,
+            duration_ms: None,
+            mpris_track_id: Some("/org/mpris/MediaPlayer2/track/42".to_string()),
+        };
+        let identity = track.playback_identity();
+
+        track.album = Some("Album loaded later".to_string());
+        track.duration_ms = Some(180_000);
+
+        assert_eq!(track.playback_identity(), identity);
     }
 }
