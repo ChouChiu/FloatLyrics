@@ -167,7 +167,6 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig) -> OverlayView {
         &content,
         panel_width.saturating_add(PANEL_CHROME_WIDTH),
         FALLBACK_PANEL_HEIGHT,
-        config.window.bottom_panel_height,
     );
 
     let provider = gtk::CssProvider::new();
