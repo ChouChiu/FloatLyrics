@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 use std::{path::Path, str::FromStr};
 
-use crate::{lyrics::LyricsProvider, track::TrackMetadata};
+use floatlyrics_core::{lyrics::LyricsProvider, track::TrackMetadata};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CachedLyrics {
@@ -130,7 +130,7 @@ impl Cache {
         raw_lyrics: &str,
     ) -> Result<i64> {
         let artists_json = serde_json::to_string(artists)?;
-        let content_hash = crate::track::track_fingerprint(title, artists, None, None)
+        let content_hash = floatlyrics_core::track::track_fingerprint(title, artists, None, None)
             + ":"
             + &hash_content(raw_lyrics);
 

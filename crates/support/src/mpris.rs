@@ -13,7 +13,7 @@ use zbus::{
 };
 use zvariant::{OwnedObjectPath, OwnedValue};
 
-use crate::track::TrackMetadata;
+use floatlyrics_core::track::TrackMetadata;
 
 pub const SPOTIFY_MPRIS_PREFIX: &str = "org.mpris.MediaPlayer2.spotify";
 const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
