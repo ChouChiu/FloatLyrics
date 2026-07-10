@@ -17,41 +17,8 @@ floatlyrics --debug
 floatlyrics --config <path>
 floatlyrics --reset-window
 floatlyrics --settings
+floatlyrics --select-lyrics
 ```
-
-`--settings` 会在已有的 FloatLyrics 进程中打开设置窗口，因此可以直接作为桌面栏按钮的
-点击命令，不会重复启动 Spotify 监听器。
-
-## 在 Niri 的 Noctalia Shell 中使用
-
-Noctalia Shell v4 已内置 `CustomButton` 桌面栏组件，不需要安装额外插件：
-
-1. 打开 **Noctalia 设置 → 状态栏 → 小组间**，将 **CustomButton** 添加到顶栏的左侧、中央或
-   右侧区域。
-2. 打开该组件的设置，将图标设为 `music`，提示设为 `打开 FloatLyrics 设置`，
-   并将**左键点击命令**设为：
-
-   ```bash
-   floatlyrics --settings
-   ```
-
-   `floatlyrics` 必须已经安装到 `PATH`。开发期间可以改用
-   `target/debug/floatlyrics` 的绝对路径。
-
-Niri 会将设置页识别为普通窗口。若要让它以居中的浮动窗口打开，请将以下规则添加到
-`~/.config/niri/config.kdl`：
-
-```kdl
-window-rule {
-    match app-id=r#"^io\.github\.chouchiu\.FloatLyrics$"#
-    open-floating true
-    default-column-width { fixed 680; }
-    default-window-height { fixed 500; }
-}
-```
-
-设置分类位于窗口顶部工具栏，整体结构参考了
-[LyricsX 偏好设置](https://github.com/MxIris-LyricsX-Project/LyricsX)的紧凑工具栏布局。
 
 默认数据路径：
 
@@ -75,5 +42,6 @@ window-rule {
 
 - 通过 MPRIS 监听 Spotify 播放状态。
 - 按配置顺序从 QQ 音乐和网易云音乐获取歌词。
+- 搜索、预览并为当前歌曲持久绑定手动选择的歌词。
 - 使用 GTK4 与 Wayland layer-shell 显示悬浮歌词窗口。
 - 使用 SQLite 缓存歌曲、歌词、手动匹配、歌词源结果与设置。

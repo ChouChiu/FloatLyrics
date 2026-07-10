@@ -72,3 +72,15 @@ pub struct FetchedLyrics {
     pub score: f64,
     pub raw_lyrics: String,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LyricsCandidate {
+    pub provider: LyricsProvider,
+    pub provider_track_id: String,
+    pub numeric_id: Option<i64>,
+    pub title: String,
+    pub artists: Vec<String>,
+    pub album: String,
+    pub duration_ms: Option<i32>,
+    pub match_score: i32,
+}

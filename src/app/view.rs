@@ -40,6 +40,8 @@ pub(super) struct OverlayView {
     opacity_provider: gtk::CssProvider,
     placement: SharedPlacement,
     song_info: gtk::Label,
+    manual_search_button: gtk::Button,
+    settings_button: gtk::Button,
     progress: gtk::ProgressBar,
     progress_label: gtk::Label,
     lyrics_stack: gtk::Stack,
@@ -98,6 +100,23 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig) -> OverlayView {
         .single_line_mode(true)
         .css_classes(["floating-song-info"])
         .build();
+
+    let manual_search_button = gtk::Button::builder()
+        .icon_name("system-search-symbolic")
+        .tooltip_text("手动选择歌词")
+        .valign(gtk::Align::Center)
+        .css_classes(["flat", "circular", "floating-action-button"])
+        .build();
+    let settings_button = gtk::Button::builder()
+        .icon_name("preferences-system-symbolic")
+        .tooltip_text("打开设置")
+        .valign(gtk::Align::Center)
+        .css_classes(["flat", "circular", "floating-action-button"])
+        .build();
+    let title_row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    title_row.append(&song_info);
+    title_row.append(&manual_search_button);
+    title_row.append(&settings_button);
 
     let progress = gtk::ProgressBar::builder()
         .fraction(0.0)
@@ -162,7 +181,7 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig) -> OverlayView {
     content.set_valign(gtk::Align::Center);
     content.set_size_request(panel_width, -1);
     content.add_css_class("floating-panel");
-    content.append(&song_info);
+    content.append(&title_row);
     content.append(&progress_row);
     content.append(&separator);
     content.append(&lyrics_stack);
@@ -194,6 +213,13 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig) -> OverlayView {
             font-size: 16px;
             font-weight: 650;
             text-shadow: 0 2px 8px rgba(0,0,0,0.85);
+        }
+
+        .floating-action-button {
+            min-width: 20px;
+            min-height: 20px;
+            padding: 2px;
+            color: rgba(255,255,255,0.72);
         }
 
         .floating-lyric-current {
@@ -309,6 +335,8 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig) -> OverlayView {
         opacity_provider,
         placement,
         song_info,
+        manual_search_button,
+        settings_button,
         progress,
         progress_label,
         lyrics_stack,
@@ -500,6 +528,15 @@ fn reset_progress(floating: &OverlayView) {
 }
 
 impl OverlayView {
+    pub(super) fn connect_manual_search(&self, callback: impl Fn() + 'static) {
+        self.manual_search_button
+            .connect_clicked(move |_| callback());
+    }
+
+    pub(super) fn connect_settings(&self, callback: impl Fn() + 'static) {
+        self.settings_button.connect_clicked(move |_| callback());
+    }
+
     pub(super) fn apply_config(&self, config: &AppConfig) {
         let width = compact_panel_width(config.window.width);
         self.compact_width.set(width);

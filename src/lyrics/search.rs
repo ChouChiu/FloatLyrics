@@ -1,11 +1,111 @@
 use anyhow::Result;
+use std::{cmp::Reverse, collections::HashSet};
 
 use crate::track::TrackMetadata;
 
 use super::{
-    model::{FetchedLyrics, LyricsProvider},
+    model::{FetchedLyrics, LyricsCandidate, LyricsProvider},
     parsing::combine_lyrics_with_translation,
 };
+
+const MANUAL_SEARCH_LIMIT: usize = 12;
+
+pub async fn search_lyrics_candidates(
+    track: &TrackMetadata,
+    provider_order: &[LyricsProvider],
+) -> Result<Vec<LyricsCandidate>> {
+    use lyrics_helper::searchers::{
+        netease::NeteaseSearcher, qq_music::QQMusicSearcher, search_with_refinement,
+    };
+
+    let metadata = lyrics_helper_metadata(track);
+    let mut candidates = Vec::new();
+    for provider in provider_order {
+        let results = match provider {
+            LyricsProvider::QqMusic => {
+                search_with_refinement(&QQMusicSearcher, &metadata, false).await
+            }
+            LyricsProvider::NetEase => {
+                search_with_refinement(&NeteaseSearcher, &metadata, false).await
+            }
+            LyricsProvider::LrcLib => Vec::new(),
+        };
+        candidates.extend(results.into_iter().map(|result| LyricsCandidate {
+            provider: *provider,
+            provider_track_id: result.id,
+            numeric_id: result.numeric_id,
+            title: result.title,
+            artists: result.artists,
+            album: result.album,
+            duration_ms: result.duration_ms,
+            match_score: result.match_type.map_or(0, |value| value as i32),
+        }));
+    }
+
+    Ok(finalize_candidates(candidates))
+}
+
+fn finalize_candidates(mut candidates: Vec<LyricsCandidate>) -> Vec<LyricsCandidate> {
+    candidates.sort_by_key(|candidate| Reverse(candidate.match_score));
+    let mut seen = HashSet::new();
+    candidates.retain(|candidate| {
+        seen.insert((
+            candidate.provider.as_str(),
+            candidate.provider_track_id.clone(),
+        ))
+    });
+    candidates.truncate(MANUAL_SEARCH_LIMIT);
+    candidates
+}
+
+pub async fn fetch_candidate_lyrics(candidate: &LyricsCandidate) -> Result<Option<FetchedLyrics>> {
+    let raw_lyrics = fetch_candidate_raw_lyrics(candidate).await;
+    let Some(raw_lyrics) = raw_lyrics.map(|value| value.trim().to_string()) else {
+        return Ok(None);
+    };
+    if raw_lyrics.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(FetchedLyrics {
+        provider: candidate.provider,
+        provider_track_id: Some(candidate.provider_track_id.clone()),
+        title: candidate.title.clone(),
+        artists: candidate.artists.clone(),
+        score: candidate.match_score as f64,
+        raw_lyrics,
+    }))
+}
+
+async fn fetch_candidate_raw_lyrics(candidate: &LyricsCandidate) -> Option<String> {
+    use lyrics_helper::search::providers::web::{netease, qq_music};
+
+    match candidate.provider {
+        LyricsProvider::QqMusic => qq_music::api::get_lyrics(
+            &candidate.provider_track_id,
+            candidate.numeric_id,
+            &candidate.title,
+            &candidate.artists.join(", "),
+            &candidate.album,
+            candidate.duration_ms,
+        )
+        .await
+        .and_then(|(lyric, translation)| {
+            lyric.map(|lyric| combine_lyrics_with_translation(&lyric, translation.as_deref()))
+        }),
+        LyricsProvider::NetEase => {
+            let song_id = candidate.provider_track_id.parse().ok()?;
+            netease::api::get_lyrics(song_id)
+                .await
+                .and_then(|(lyric, translation)| {
+                    lyric.map(|lyric| {
+                        combine_lyrics_with_translation(&lyric, translation.as_deref())
+                    })
+                })
+        }
+        LyricsProvider::LrcLib => None,
+    }
+}
 
 pub async fn search_best_lyrics(
     track: &TrackMetadata,
@@ -128,5 +228,36 @@ impl SearchPlan {
 
     pub fn providers(&self) -> &[LyricsProvider] {
         &self.providers
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn manual_candidates_are_ranked_and_deduplicated() {
+        let candidates = finalize_candidates(vec![
+            candidate(LyricsProvider::QqMusic, "same", 70),
+            candidate(LyricsProvider::NetEase, "other", 99),
+            candidate(LyricsProvider::QqMusic, "same", 95),
+        ]);
+
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].provider, LyricsProvider::NetEase);
+        assert_eq!(candidates[1].match_score, 95);
+    }
+
+    fn candidate(provider: LyricsProvider, id: &str, score: i32) -> LyricsCandidate {
+        LyricsCandidate {
+            provider,
+            provider_track_id: id.to_string(),
+            numeric_id: None,
+            title: "Song".to_string(),
+            artists: vec!["Artist".to_string()],
+            album: String::new(),
+            duration_ms: Some(180_000),
+            match_score: score,
+        }
     }
 }

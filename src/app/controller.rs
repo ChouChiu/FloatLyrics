@@ -39,11 +39,19 @@ struct SpotifyUiContext<'a> {
 #[derive(Clone)]
 pub(super) struct ControllerHandle {
     lyrics_state: Rc<RefCell<LyricsDisplayState>>,
+    latest: Rc<RefCell<Option<PlaybackSnapshot>>>,
 }
 
 impl ControllerHandle {
     pub(super) fn reload_lyrics(&self) {
         self.lyrics_state.borrow_mut().track_fingerprint = None;
+    }
+
+    pub(super) fn current_track(&self) -> Option<TrackMetadata> {
+        self.latest
+            .borrow()
+            .as_ref()
+            .and_then(|snapshot| snapshot.state.track.clone())
     }
 }
 
@@ -61,6 +69,7 @@ pub(super) fn attach(
     let lyrics_state = Rc::new(RefCell::new(LyricsDisplayState::default()));
     let handle = ControllerHandle {
         lyrics_state: Rc::clone(&lyrics_state),
+        latest: Rc::clone(&latest),
     };
 
     let tick_widget = floating.tick_widget();

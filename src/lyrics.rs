@@ -10,13 +10,16 @@ mod timeline;
 
 pub use lyrics_helper::{LineInfo, LyricsData, LyricsTypes, generate_string, parse_auto};
 pub use model::{
-    FetchedLyrics, LyricsProvider, LyricsProviderParseError, TimedLine, TimedSyllable,
+    FetchedLyrics, LyricsCandidate, LyricsProvider, LyricsProviderParseError, TimedLine,
+    TimedSyllable,
 };
 pub use parsing::{
     combine_lyrics_with_translation, export_lyrics, parse_local_lyrics, timed_lines_from_data,
     timed_lines_from_raw,
 };
-pub use search::{SearchPlan, search_best_lyrics};
+pub use search::{
+    SearchPlan, fetch_candidate_lyrics, search_best_lyrics, search_lyrics_candidates,
+};
 pub use timeline::{active_line_index, line_index_at_or_before};
 
 #[cfg(test)]

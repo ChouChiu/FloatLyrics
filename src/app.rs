@@ -4,6 +4,7 @@
 //! orchestration, presentation state, and GTK rendering live in focused modules.
 
 mod controller;
+mod manual_search;
 mod model;
 mod settings;
 mod view;
@@ -17,6 +18,7 @@ use crate::{cache::Cache, config::AppConfig, mpris::spawn_spotify_watcher, paths
 struct ApplicationUi {
     _overlay: view::OverlayView,
     settings: settings::SettingsWindow,
+    manual_search: manual_search::ManualSearchWindow,
     _controller: controller::ControllerHandle,
 }
 
@@ -59,6 +61,16 @@ pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
                 Rc::clone(&config),
             );
             let controller_for_settings = controller.clone();
+            let manual_search = manual_search::ManualSearchWindow::new(
+                app,
+                runtime_handle.clone(),
+                Rc::clone(&cache),
+                controller.clone(),
+            );
+            {
+                let manual_search = manual_search.clone();
+                overlay.connect_manual_search(move || manual_search.present());
+            }
             let settings = settings::SettingsWindow::new(
                 app,
                 config.borrow().clone(),
@@ -77,10 +89,15 @@ pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
                     }
                 },
             );
+            {
+                let settings = settings.clone();
+                overlay.connect_settings(move || settings.present());
+            }
 
             *ui.borrow_mut() = Some(ApplicationUi {
                 _overlay: overlay,
                 settings,
+                manual_search,
                 _controller: controller,
             });
         });
@@ -93,6 +110,11 @@ pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
             if command_requests_settings(&command_line.arguments()) {
                 if let Some(ui) = ui.borrow().as_ref() {
                     ui.settings.present();
+                }
+            }
+            if command_requests_manual_search(&command_line.arguments()) {
+                if let Some(ui) = ui.borrow().as_ref() {
+                    ui.manual_search.present();
                 }
             }
             gtk::glib::ExitCode::SUCCESS
@@ -109,6 +131,12 @@ fn command_requests_settings(arguments: &[std::ffi::OsString]) -> bool {
         .any(|argument| argument == OsStr::new("--settings"))
 }
 
+fn command_requests_manual_search(arguments: &[std::ffi::OsString]) -> bool {
+    arguments
+        .iter()
+        .any(|argument| argument == OsStr::new("--select-lyrics"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,6 +150,14 @@ mod tests {
         assert!(!command_requests_settings(&[
             "floatlyrics".into(),
             "--settings-file".into(),
+        ]));
+    }
+
+    #[test]
+    fn recognizes_manual_lyrics_command() {
+        assert!(command_requests_manual_search(&[
+            "floatlyrics".into(),
+            "--select-lyrics".into(),
         ]));
     }
 }
