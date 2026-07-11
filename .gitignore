@@ -27,3 +27,9 @@ rustc-ice-*.txt
 *.sqlite3-shm
 *.sqlite3-wal
 .reasonix/
+
+# makepkg / AUR packaging artifacts
+pkg/
+src/
+*.pkg.tar.*
+*.tar.gz

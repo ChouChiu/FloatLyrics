@@ -27,8 +27,8 @@ env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 jobs:
-  build-deb:
-    name: Build .deb package
+  build-packages:
+    name: Build .deb and .rpm packages
     runs-on: ubuntu-24.04
     timeout-minutes: 45
 
@@ -89,11 +89,16 @@ jobs:
       - name: Build release binary
         run: cargo build --locked --release
 
-      - name: Install cargo-deb
-        run: cargo install cargo-deb --locked
+      - name: Install cargo-deb and cargo-generate-rpm
+        run: |
+          cargo install cargo-deb --locked
+          cargo install cargo-generate-rpm --locked
 
       - name: Build .deb package
         run: cargo deb
+
+      - name: Build .rpm package
+        run: cargo generate-rpm
 
       - name: Upload .deb artifact
         uses: actions/upload-artifact@v7
@@ -103,9 +108,17 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Upload .rpm artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: floatlyrics-${{ env.RELEASE_TAG }}-rpm
+          path: target/generate-rpm/*.rpm
+          if-no-files-found: error
+          retention-days: 14
+
   publish:
     name: Publish GitHub Release
-    needs: build-deb
+    needs: build-packages
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -117,16 +130,23 @@ jobs:
           name: floatlyrics-${{ env.RELEASE_TAG }}-deb
           path: dist
 
+      - name: Download .rpm artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: floatlyrics-${{ env.RELEASE_TAG }}-rpm
+          path: dist
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           deb_file=$(ls dist/*.deb | head -1)
+          rpm_file=$(ls dist/*.rpm | head -1)
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "$deb_file" \
+            gh release upload "$RELEASE_TAG" "$deb_file" "$rpm_file" \
               --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$RELEASE_TAG" "$deb_file" \
+            gh release create "$RELEASE_TAG" "$deb_file" "$rpm_file" \
               --repo "$GITHUB_REPOSITORY" \
               --title "FloatLyrics ${RELEASE_TAG#v}" \
               --generate-notes \
@@ -135,7 +155,7 @@ jobs:
 
   aur-update:
     name: Update AUR package
-    needs: build-deb
+    needs: build-packages
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container:

@@ -70,3 +70,34 @@ assets = [
     ["data/icons/hicolor/symbolic/apps/io.github.chouchiu.floatlyrics-symbolic.svg", "usr/share/icons/hicolor/symbolic/apps/io.github.chouchiu.floatlyrics-symbolic.svg", "644"],
     ["LICENSE", "usr/share/doc/floatlyrics/LICENSE", "644"],
 ]
+
+[package.metadata.generate-rpm]
+summary = "Floating synchronized lyrics for Spotify on Linux Wayland"
+description = """\
+FloatLyrics follows Spotify playback through MPRIS and displays synchronized \
+lyrics in a lightweight GTK4 layer-shell overlay. Lyrics can be searched \
+manually and cached locally."""
+assets = [
+    { source = "target/release/floatlyrics", dest = "/usr/bin/floatlyrics", mode = "755" },
+    { source = "data/io.github.chouchiu.floatlyrics.desktop", dest = "/usr/share/applications/io.github.chouchiu.floatlyrics.desktop", mode = "644" },
+    { source = "data/io.github.chouchiu.floatlyrics.metainfo.xml", dest = "/usr/share/metainfo/io.github.chouchiu.floatlyrics.metainfo.xml", mode = "644" },
+    { source = "data/icons/hicolor/16x16/apps/io.github.chouchiu.floatlyrics.png", dest = "/usr/share/icons/hicolor/16x16/apps/io.github.chouchiu.floatlyrics.png", mode = "644" },
+    { source = "data/icons/hicolor/24x24/apps/io.github.chouchiu.floatlyrics.png", dest = "/usr/share/icons/hicolor/24x24/apps/io.github.chouchiu.floatlyrics.png", mode = "644" },
+    { source = "data/icons/hicolor/32x32/apps/io.github.chouchiu.floatlyrics.png", dest = "/usr/share/icons/hicolor/32x32/apps/io.github.chouchiu.floatlyrics.png", mode = "644" },
+    { source = "data/icons/hicolor/48x48/apps/io.github.chouchiu.floatlyrics.png", dest = "/usr/share/icons/hicolor/48x48/apps/io.github.chouchiu.floatlyrics.png", mode = "644" },
+    { source = "data/icons/hicolor/64x64/apps/io.github.chouchiu.floatlyrics.png", dest = "/usr/share/icons/hicolor/64x64/apps/io.github.chouchiu.floatlyrics.png", mode = "644" },
+    { source = "data/icons/hicolor/128x128/apps/io.github.chouchiu.floatlyrics.png", dest = "/usr/share/icons/hicolor/128x128/apps/io.github.chouchiu.floatlyrics.png", mode = "644" },
+    { source = "data/icons/hicolor/256x256/apps/io.github.chouchiu.floatlyrics.png", dest = "/usr/share/icons/hicolor/256x256/apps/io.github.chouchiu.floatlyrics.png", mode = "644" },
+    { source = "data/icons/hicolor/512x512/apps/io.github.chouchiu.floatlyrics.png", dest = "/usr/share/icons/hicolor/512x512/apps/io.github.chouchiu.floatlyrics.png", mode = "644" },
+    { source = "data/icons/hicolor/scalable/apps/io.github.chouchiu.floatlyrics.svg", dest = "/usr/share/icons/hicolor/scalable/apps/io.github.chouchiu.floatlyrics.svg", mode = "644" },
+    { source = "data/icons/hicolor/symbolic/apps/io.github.chouchiu.floatlyrics-symbolic.svg", dest = "/usr/share/icons/hicolor/symbolic/apps/io.github.chouchiu.floatlyrics-symbolic.svg", mode = "644" },
+    { source = "LICENSE", dest = "/usr/share/licenses/floatlyrics/LICENSE", mode = "644" },
+]
+
+[package.metadata.generate-rpm.requires]
+gtk4 = "*"
+"gtk4-layer-shell" = "*"
+pango = "*"
+cairo = "*"
+glib2 = "*"
+"openssl-libs" = "*"
