@@ -17,7 +17,7 @@ use zvariant::OwnedValue;
 
 use super::{
     model::{PlaybackStatus, SpotifyPlayerState, SpotifyWatcherEvent, spotify_metadata_from_mpris},
-    position::{TrackPositionSync, player_track_identity, position_us_to_ms},
+    position::{player_track_identity, position_us_to_ms},
 };
 
 pub const SPOTIFY_MPRIS_PREFIX: &str = "org.mpris.MediaPlayer2.spotify";
@@ -122,9 +122,9 @@ async fn watch_player(
     let mut changes = properties.receive_properties_changed().await?;
     let mut seeked = player.receive_signal("Seeked").await?;
 
-    let mut state = read_player_state(&player, &bus_name).await?;
-    let mut position_sync = TrackPositionSync::new(&state, Instant::now());
+    let state = read_player_state(&player, &bus_name).await?;
     let _ = sender.send(SpotifyWatcherEvent::Connected(state.clone()));
+
     let mut position_poll = tokio::time::interval(PLAYBACK_POSITION_POLL_INTERVAL);
     position_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     position_poll.tick().await;
@@ -153,24 +153,8 @@ async fn watch_player(
                 });
 
                 if player_changed {
-                    let mut next_state = read_player_state(&player, &bus_name).await?;
-                    let observed_at = Instant::now();
-                    let track_changed = position_sync.observe_track(&next_state, observed_at);
-                    if !position_sync.accepts(
-                        next_state.position_ms,
-                        &next_state.playback_status,
-                        observed_at,
-                    ) {
-                        next_state.position_ms = if track_changed {
-                            Some(0)
-                        } else {
-                            position_sync
-                                .estimated_position(observed_at)
-                                .or(state.position_ms)
-                        };
-                    }
-                    state = next_state;
-                    let _ = sender.send(SpotifyWatcherEvent::Updated(state.clone()));
+                    let state = read_player_state(&player, &bus_name).await?;
+                    let _ = sender.send(SpotifyWatcherEvent::Updated(state));
                 }
             }
             signal = seeked.next() => {
@@ -180,48 +164,29 @@ async fn watch_player(
                 };
 
                 if let Some(position_ms) = seeked_position_ms(&signal) {
-                    position_sync.trust_position();
+                    // Re-read full state so the event carries the current track metadata.
+                    let mut state = read_player_state(&player, &bus_name).await?;
                     state.position_ms = Some(position_ms);
-                    let _ = sender.send(SpotifyWatcherEvent::Updated(state.clone()));
+                    let _ = sender.send(SpotifyWatcherEvent::Updated(state));
                 }
             }
             _ = position_poll.tick() => {
                 if let Some(position_ms) = read_player_position(&player).await {
                     let sampled_at = Instant::now();
-                    if position_sync.accepts(
-                        Some(position_ms),
-                        &state.playback_status,
+                    // Re-read full state on each poll so track_identity stays current
+                    // even when the D-Bus properties-changed signal is delayed.
+                    let state = read_player_state(&player, &bus_name).await?;
+                    let _ = sender.send(SpotifyWatcherEvent::PositionUpdated {
+                        track_identity: player_track_identity(&state),
+                        position_ms,
                         sampled_at,
-                    ) {
-                        state.position_ms = Some(position_ms);
-                        let _ = sender.send(SpotifyWatcherEvent::PositionUpdated {
-                            track_identity: player_track_identity(&state),
-                            position_ms,
-                            sampled_at,
-                        });
-                    }
+                    });
                 }
             }
             _ = health_check.tick() => {
                 match read_player_state(&player, &bus_name).await {
-                    Ok(mut next_state) => {
-                        let observed_at = Instant::now();
-                        let track_changed = position_sync.observe_track(&next_state, observed_at);
-                        if !position_sync.accepts(
-                            next_state.position_ms,
-                            &next_state.playback_status,
-                            observed_at,
-                        ) {
-                            next_state.position_ms = if track_changed {
-                                Some(0)
-                            } else {
-                                position_sync
-                                    .estimated_position(observed_at)
-                                    .or(state.position_ms)
-                            };
-                        }
-                        state = next_state;
-                        let _ = sender.send(SpotifyWatcherEvent::Updated(state.clone()));
+                    Ok(state) => {
+                        let _ = sender.send(SpotifyWatcherEvent::Updated(state));
                     }
                     Err(_) => {
                         let _ = sender.send(SpotifyWatcherEvent::Disconnected);

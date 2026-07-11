@@ -21,13 +21,9 @@ pub use watcher::{
 
 #[cfg(test)]
 mod tests {
-    use super::position::{TrackPositionSync, position_us_to_ms};
+    use super::position::position_us_to_ms;
     use super::*;
-    use crate::track::TrackMetadata;
-    use std::{
-        collections::HashMap,
-        time::{Duration, Instant},
-    };
+    use std::collections::HashMap;
     use zvariant::{OwnedValue, Value};
 
     fn owned(value: impl Into<Value<'static>>) -> OwnedValue {
@@ -93,46 +89,5 @@ mod tests {
     fn converts_mpris_position_to_milliseconds() {
         assert_eq!(position_us_to_ms(12_345_678), Some(12_345));
         assert_eq!(position_us_to_ms(-1), None);
-    }
-
-    #[test]
-    fn rejects_a_stale_position_when_the_track_changes() {
-        let now = Instant::now();
-        let mut sync = TrackPositionSync::new(&test_state("old", 120_000), now);
-        let next = test_state("new", 120_250);
-
-        assert!(sync.observe_track(&next, now));
-        assert!(!sync.accepts(next.position_ms, &PlaybackStatus::Playing, now));
-        assert_eq!(sync.estimated_position(now), Some(0));
-
-        let settled_at = now + Duration::from_millis(500);
-        assert!(sync.accepts(Some(500), &PlaybackStatus::Playing, settled_at));
-    }
-
-    #[test]
-    fn paused_or_seeked_positions_are_trusted_immediately() {
-        let now = Instant::now();
-        let mut sync = TrackPositionSync::new(&test_state("old", 120_000), now);
-        assert!(sync.observe_track(&test_state("new", 120_250), now));
-        assert!(sync.accepts(Some(60_000), &PlaybackStatus::Paused, now));
-
-        sync.synchronized = false;
-        sync.trust_position();
-        assert!(sync.accepts(Some(90_000), &PlaybackStatus::Playing, now));
-    }
-
-    fn test_state(track_id: &str, position_ms: u64) -> SpotifyPlayerState {
-        SpotifyPlayerState {
-            bus_name: SPOTIFY_MPRIS_PREFIX.to_string(),
-            playback_status: PlaybackStatus::Playing,
-            position_ms: Some(position_ms),
-            track: Some(TrackMetadata {
-                title: track_id.to_string(),
-                artists: vec!["Artist".to_string()],
-                album: None,
-                duration_ms: Some(180_000),
-                mpris_track_id: Some(format!("/track/{track_id}")),
-            }),
-        }
     }
 }
