@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: 2026 ChouChiu
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[Desktop Entry]
+Type=Application
+Name=FloatLyrics
+GenericName=Floating Lyrics
+GenericName[zh_CN]=桌面悬浮歌词
+GenericName[zh_TW]=桌面懸浮歌詞
+Comment=Show synchronized Spotify lyrics on the Wayland desktop
+Comment[zh_CN]=在 Wayland 桌面显示同步的 Spotify 歌词
+Comment[zh_TW]=在 Wayland 桌面顯示同步的 Spotify 歌詞
+Exec=floatlyrics
+TryExec=floatlyrics
+Icon=io.github.chouchiu.floatlyrics
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=lyrics;Spotify;MPRIS;Wayland;
+Keywords[zh_CN]=歌词;Spotify;MPRIS;Wayland;
+Keywords[zh_TW]=歌詞;Spotify;MPRIS;Wayland;
+StartupNotify=true
+Actions=Settings;SelectLyrics;
+
+[Desktop Action Settings]
+Name=Settings
+Name[zh_CN]=设置
+Name[zh_TW]=設定
+Exec=floatlyrics --settings
+
+[Desktop Action SelectLyrics]
+Name=Select Lyrics
+Name[zh_CN]=选择歌词
+Name[zh_TW]=選擇歌詞
+Exec=floatlyrics --select-lyrics

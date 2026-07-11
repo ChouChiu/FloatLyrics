@@ -1,0 +1,224 @@
+# SPDX-FileCopyrightText: 2026 ChouChiu
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (for example, v1.0.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    name: Verify and package release
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container:
+      image: archlinux:latest
+
+    steps:
+      - name: Install system dependencies
+        run: >-
+          pacman -Syu --noconfirm --needed
+          appstream
+          base-devel
+          curl
+          desktop-file-utils
+          git
+          gtk4
+          gtk4-layer-shell
+          namcap
+          openssl
+          rust
+          zstd
+
+      - name: Check out release tag
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Validate tag and package version
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+          version=$(cargo pkgid --locked | sed 's/.*@//')
+          test "$RELEASE_TAG" = "v$version"
+          test "$(git describe --tags --exact-match)" = "$RELEASE_TAG"
+
+      - name: Cache Cargo dependencies and build output
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-arch-release-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-arch-release-cargo-
+            ${{ runner.os }}-arch-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --locked --all-targets --all-features
+
+      - name: Build release binary
+        run: cargo build --locked --release
+
+      - name: Validate desktop integration
+        run: |
+          desktop-file-validate data/io.github.chouchiu.floatlyrics.desktop
+          appstreamcli validate --no-net data/io.github.chouchiu.floatlyrics.metainfo.xml
+
+      - name: Create generic Linux bundle
+        run: |
+          version=${RELEASE_TAG#v}
+          stage="$RUNNER_TEMP/floatlyrics-root"
+          asset="floatlyrics-$version-linux-x86_64.tar.zst"
+          epoch=$(git log -1 --format=%ct)
+          ./packaging/install.sh "$stage" target/release/floatlyrics
+          strip "$stage/usr/bin/floatlyrics"
+          mkdir -p dist
+          tar --zstd --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner \
+            -cf "dist/$asset" -C "$stage" .
+
+      - name: Finalize and build AUR package
+        run: |
+          ./packaging/update-aur-checksum.sh --checksum-only
+          useradd --create-home builder
+          install -d -o builder -g builder /home/builder/aur-build
+          cp PKGBUILD /home/builder/aur-build/
+          chown builder:builder /home/builder/aur-build/PKGBUILD
+          su builder -s /bin/bash -c \
+            'cd /home/builder/aur-build && makepkg --printsrcinfo > .SRCINFO'
+          su builder -s /bin/bash -c \
+            'cd /home/builder/aur-build && makepkg --printsrcinfo' \
+            | diff -u /home/builder/aur-build/.SRCINFO -
+          namcap /home/builder/aur-build/PKGBUILD
+          su builder -s /bin/bash -c \
+            'cd /home/builder/aur-build && makepkg --cleanbuild --noconfirm --noprogressbar'
+          cp /home/builder/aur-build/floatlyrics-*.pkg.tar.zst dist/
+          cp /home/builder/aur-build/PKGBUILD /home/builder/aur-build/.SRCINFO dist/
+
+      - name: Generate SHA-256 checksums
+        run: |
+          cd dist
+          sha256sum floatlyrics-*.tar.zst > SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: floatlyrics-${{ env.RELEASE_TAG }}-release
+          path: dist/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: floatlyrics-${{ env.RELEASE_TAG }}-release
+          path: dist
+
+      - name: Verify checksums
+        run: cd dist && sha256sum --check SHA256SUMS
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/* \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "FloatLyrics ${RELEASE_TAG#v}" \
+              --generate-notes \
+              --verify-tag
+          fi
+
+  publish-aur:
+    name: Publish AUR package
+    if: ${{ vars.PUBLISH_AUR == 'true' }}
+    needs:
+      - build
+      - publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Download generated AUR metadata
+        uses: actions/download-artifact@v8
+        with:
+          name: floatlyrics-${{ env.RELEASE_TAG }}-release
+          path: dist
+
+      - name: Configure dedicated AUR SSH key
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          test -n "$AUR_SSH_PRIVATE_KEY"
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$HOME/.ssh/aur"
+          chmod 600 "$HOME/.ssh/aur"
+          ssh-keyscan -T 30 -t ed25519 aur.archlinux.org > "$HOME/.ssh/known_hosts"
+          fingerprint=$(ssh-keygen -lf "$HOME/.ssh/known_hosts" -E sha256 \
+            | awk '{print $2}' | sort -u)
+          test "$fingerprint" = 'SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4'
+          cat > "$HOME/.ssh/config" <<'EOF'
+          Host aur.archlinux.org
+            User aur
+            IdentityFile ~/.ssh/aur
+            IdentitiesOnly yes
+          EOF
+          chmod 600 "$HOME/.ssh/config" "$HOME/.ssh/known_hosts"
+
+      - name: Push package recipe to AUR
+        run: |
+          git -c init.defaultBranch=master clone \
+            ssh://aur@aur.archlinux.org/floatlyrics.git aur-floatlyrics
+          install -m 644 dist/PKGBUILD aur-floatlyrics/PKGBUILD
+          install -m 644 dist/.SRCINFO aur-floatlyrics/.SRCINFO
+          cd aur-floatlyrics
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add PKGBUILD .SRCINFO
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "chore: release ${RELEASE_TAG#v}"
+          git push origin HEAD:master

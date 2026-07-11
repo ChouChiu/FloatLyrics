@@ -1,7 +1,12 @@
+# SPDX-FileCopyrightText: 2026 ChouChiu
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 name: Build
 
 on:
   push:
+    branches:
+      - "**"
   pull_request:
   workflow_dispatch:
 
@@ -14,11 +19,13 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
 
 jobs:
-  build:
-    name: Check, test, and build
+  quality:
+    name: Check, test, build, and package
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     container:
       image: archlinux:latest
 
@@ -26,24 +33,30 @@ jobs:
       - name: Install system dependencies
         run: >-
           pacman -Syu --noconfirm --needed
+          appstream
           base-devel
+          desktop-file-utils
           git
           gtk4
           gtk4-layer-shell
+          namcap
           openssl
           rust
+          zstd
 
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Cache Cargo dependencies and build output
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-arch-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-arch-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-arch-cargo-
 
@@ -54,14 +67,47 @@ jobs:
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
       - name: Run tests
-        run: cargo test --locked
+        run: cargo test --locked --all-targets --all-features
 
       - name: Build release binary
         run: cargo build --locked --release
 
-      - name: Upload release binary
-        uses: actions/upload-artifact@v4
+      - name: Validate packaging metadata
+        run: |
+          useradd --create-home builder
+          su builder -s /bin/bash -c \
+            "cd '$GITHUB_WORKSPACE' && makepkg --printsrcinfo" | diff -u .SRCINFO -
+          namcap PKGBUILD
+          desktop-file-validate data/io.github.chouchiu.floatlyrics.desktop
+          appstreamcli validate --no-net data/io.github.chouchiu.floatlyrics.metainfo.xml
+
+      - name: Stage installable filesystem
+        run: |
+          stage="$RUNNER_TEMP/floatlyrics-root"
+          rm -rf "$stage"
+          ./packaging/install.sh "$stage" target/release/floatlyrics
+          strip "$stage/usr/bin/floatlyrics"
+          test -x "$stage/usr/bin/floatlyrics"
+          if ldd "$stage/usr/bin/floatlyrics" | grep -q 'not found'; then
+            ldd "$stage/usr/bin/floatlyrics"
+            exit 1
+          fi
+
+      - name: Create Linux artifact and checksums
+        run: |
+          version=$(cargo pkgid --locked | sed 's/.*@//')
+          stage="$RUNNER_TEMP/floatlyrics-root"
+          asset="floatlyrics-$version-linux-x86_64.tar.zst"
+          epoch=$(git log -1 --format=%ct)
+          mkdir -p dist
+          tar --zstd --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner \
+            -cf "dist/$asset" -C "$stage" .
+          (cd dist && sha256sum "$asset" > SHA256SUMS)
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v7
         with:
           name: floatlyrics-linux-x86_64
-          path: target/release/floatlyrics
+          path: dist/
           if-no-files-found: error
+          retention-days: 14

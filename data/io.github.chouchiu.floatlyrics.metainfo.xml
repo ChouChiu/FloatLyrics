@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-FileCopyrightText: 2026 ChouChiu
+  SPDX-License-Identifier: CC0-1.0
+-->
+<component type="desktop-application">
+  <id>io.github.chouchiu.floatlyrics</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <name>FloatLyrics</name>
+  <summary>Floating synchronized lyrics for Spotify on Wayland</summary>
+  <summary xml:lang="zh-CN">Wayland 桌面上的 Spotify 同步悬浮歌词</summary>
+  <summary xml:lang="zh-TW">Wayland 桌面上的 Spotify 同步懸浮歌詞</summary>
+
+  <description>
+    <p>
+      FloatLyrics follows Spotify playback through MPRIS and displays synchronized lyrics in a
+      lightweight GTK4 layer-shell overlay. Lyrics can be searched manually and cached locally.
+    </p>
+    <p xml:lang="zh-CN">
+      FloatLyrics 通过 MPRIS 跟随 Spotify 播放状态，并在轻量的 GTK4 layer-shell 悬浮窗中显示
+      同步歌词。用户也可以手动搜索歌词，结果会缓存在本地。
+    </p>
+    <p xml:lang="zh-TW">
+      FloatLyrics 透過 MPRIS 跟隨 Spotify 播放狀態，並在輕量的 GTK4 layer-shell 懸浮視窗中顯示
+      同步歌詞。使用者也可以手動搜尋歌詞，結果會快取在本機。
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.github.chouchiu.floatlyrics.desktop</launchable>
+  <provides>
+    <binary>floatlyrics</binary>
+  </provides>
+  <developer id="io.github.chouchiu">
+    <name>ChouChiu</name>
+  </developer>
+  <url type="homepage">https://github.com/ChouChiu/FloatLyrics</url>
+  <url type="bugtracker">https://github.com/ChouChiu/FloatLyrics/issues</url>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/ChouChiu/FloatLyrics/v1.0.0/docs/screenshots/floatlyrics.png</image>
+      <caption>Settings with runtime language selection</caption>
+      <caption xml:lang="zh-CN">支持动态语言切换的设置界面</caption>
+      <caption xml:lang="zh-TW">支援動態語言切換的設定介面</caption>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="1.0.0" date="2026-07-11">
+      <description>
+        <p>First stable release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

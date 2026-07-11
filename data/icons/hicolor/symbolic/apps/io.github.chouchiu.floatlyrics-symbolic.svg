@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  FloatLyrics symbolic icon
+  Copyright (C) 2026 ChouChiu
+  SPDX-License-Identifier: GPL-3.0-or-later
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <g fill="none" stroke="#2e3436" stroke-linecap="round">
+    <path d="M4 4.25h8" stroke-width="1.5"/>
+    <path d="M2.5 7.25c2.2 0 2.8-.5 4.5-.5s2.6.5 4.5.5" stroke-width="1.75"/>
+    <path d="M4 10.25h8" stroke-width="1.5"/>
+    <path d="M2.5 13.25c1.8-1.45 3.25-1.55 4.6-.8 1.55.85 2.8.5 4.4-.85" stroke-width="1.5"/>
+  </g>
+</svg>
