@@ -1,31 +1,76 @@
-# Repository Guidelines
+# AGENTS.md
 
-## Project Structure & Module Organization
+## Workspace
 
-FloatLyrics is a single Rust 2024 package for a Linux Wayland desktop app. `src/main.rs` is the entry point, `src/lib.rs` handles startup, and `src/app.rs` is the application composition root. Playback orchestration, presentation state, and GTK rendering live under `src/app/`. Lyrics models, providers, parsing, matching, and timing live under `src/lyrics/`; MPRIS watching and synchronization live under `src/mpris/`. Configuration, paths, SQLite caching, track types, and telemetry are focused top-level modules in `src/`. Tests sit beside their implementations in `#[cfg(test)]` modules; there are no separate `tests/` or asset directories.
+Cargo workspace with three crates. Dependency direction:
+`floatlyrics` (root) -> `floatlyrics-lyrics` -> `floatlyrics-core`.
 
-## Build, Test, and Development Commands
+- `floatlyrics-core` — paths, i18n, telemetry, track fingerprinting. No GTK or DBus.
+- `floatlyrics-lyrics` — lyrics models, parsing, search, timeline, SQLite cache (rusqlite `bundled`).
+- `floatlyrics` — CLI, GTK4 layer-shell UI, MPRIS/DBus watcher, app composition root.
 
-- `cargo run -- --debug` runs the app with verbose logging; full functionality requires Spotify, MPRIS, Wayland, GTK4, and layer-shell.
-- `cargo build` compiles the application package.
-- `cargo test` runs all tests; use a module filter such as `cargo test lyrics::` to focus on one area.
-- `cargo fmt --all -- --check` verifies formatting without changing files; run `cargo fmt --all` to apply it.
-- `cargo clippy --all-targets --all-features -- -D warnings` treats lint findings as errors.
+Rust edition 2024, MSRV 1.92 (stable, see `rust-toolchain.toml`).
 
-The stable toolchain, `rustfmt`, and Clippy are declared in `rust-toolchain.toml`.
+## Commands
 
-## Coding Style & Naming Conventions
+All commands use `--locked`:
 
-Follow `rustfmt` output (four-space indentation). Use `snake_case` for modules, functions, and variables; `PascalCase` for types and traits; and `SCREAMING_SNAKE_CASE` for constants. Keep `main.rs` minimal, place reusable domain behavior in focused modules such as `lyrics` and `track`, and isolate OS, database, and configuration concerns from GTK presentation.
+```bash
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-targets --all-features
+cargo build --locked --release
+```
 
-## Testing Guidelines
+Filter tests by module: `cargo test lyrics::`, `cargo test mpris::`, etc.
 
-Add focused `#[test]` functions to the source module being changed and name them after observable behavior, such as `parses_enhanced_lrc`. Use `tempfile` for filesystem or database isolation. Tests should not require a live Spotify session, D-Bus, or network access. No coverage threshold is configured; protect parsing, timing, persistence, and MPRIS edge cases with regression tests.
+`make validate-data` is mentioned in README but **does not exist** — no Makefile in repo.
 
-## Commit & Pull Request Guidelines
+## App ID
 
-Use Conventional Commits: `<type>(<scope>): <description>`, with a short, imperative, lowercase description. Common types include `feat`, `fix`, `refactor`, `test`, `docs`, and `chore`; useful scopes include `app`, `lyrics`, `mpris`, `infra`, and `ui` (for example, `fix(mpris): handle missing player position`). Mark breaking changes with `!` or a `BREAKING CHANGE:` footer. Keep each commit scoped and explain non-obvious behavior in its body. Pull requests should summarize the change, list verification commands, and link relevant issues. Include screenshots or a short recording for lyrics layout/window changes, and call out new configuration keys, schema changes, or Linux system dependencies.
+`io.github.chouchiu.floatlyrics` — used in `gtk::Application`, desktop file, metainfo, and packaging scripts.
 
-## Configuration & Generated Files
+## GTK runtime expectations
 
-Do not commit local SQLite files or anything under `target/`. Default user data lives at `~/.config/floatlyrics/config.toml` and `~/.local/share/floatlyrics/floatlyrics.sqlite3`; use `--config <path>` when testing alternate configuration.
+`src/lib.rs:54-67` sets `GSK_RENDERER=gl` and `GTK_A11Y=none` at process startup (before GTK init). The app requires a Wayland compositor with layer-shell support and a running D-Bus session bus.
+
+## i18n
+
+Translations are **compiled in** (`floatlyrics-core/src/i18n.rs`), not loaded from external files. Three languages: English, Simplified Chinese, Traditional Chinese. Supported via a const function dispatch (`language.text(key)`) and an `I18n` subscriber pattern for GTK widgets. The `data/locale/` directory exists only for potential future use — it is not currently shipped.
+
+When adding a new user-visible string:
+1. Add a variant to `Text` enum.
+2. Add entries to `english()`, `simplified_chinese()`, and `traditional_chinese()`.
+
+## SPDX headers
+
+Every source file must start with:
+```rust
+// SPDX-FileCopyrightText: 2026 ChouChiu
+// SPDX-License-Identifier: GPL-3.0-or-later
+```
+`.toml` files use `#` instead of `//`.
+
+## Build script
+
+`build.rs` generates `dep_list.rs` in `OUT_DIR` from `Cargo.toml` + `Cargo.lock` + `cargo metadata`. Used by the about dialog to list open-source dependencies. Re-runs when `Cargo.toml`, `Cargo.lock`, or `build.rs` change.
+
+## Testing rules
+
+- Tests are `#[cfg(test)]` modules pointing to `test/` subdirectories via `#[path = "test/xxx_test.rs"]`.
+- Unit tests **must not** depend on a running Spotify instance, D-Bus session, or network.
+- Use `tempfile` for filesystem/database isolation.
+
+## Config
+
+`src/config.rs` — written atomically (temp file + rename). Config path: `~/.config/floatlyrics/config.toml`. Database: `~/.local/share/floatlyrics/floatlyrics.sqlite3`.
+
+## Commits
+
+Conventional Commits: `<type>(<scope>): <description>`. Common scopes: `app`, `lyrics`, `mpris`, `infra`, `ui`.
+
+## CI
+
+- `build.yml` runs on every push/PR in `archlinux:latest`. Builds .deb and .rpm artifacts.
+- `release.yml` triggers on tags `v*.*.*`, runs on `ubuntu-24.04`, validates tag matches Cargo.toml version.
+- Both workflows cache `~/.cargo/registry`, `~/.cargo/git`, and `target`.
