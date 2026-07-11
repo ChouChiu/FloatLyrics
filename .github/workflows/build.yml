@@ -39,6 +39,7 @@ jobs:
           gtk4-layer-shell
           openssl
           rust
+          dpkg
 
       - name: Check out repository
         uses: actions/checkout@v7
@@ -68,10 +69,35 @@ jobs:
       - name: Build release binary
         run: cargo build --locked --release
 
+      - name: Install cargo-deb and cargo-generate-rpm
+        run: |
+          cargo install cargo-deb --locked
+          cargo install cargo-generate-rpm --locked
+
+      - name: Build .deb package
+        run: cargo deb
+
+      - name: Build .rpm package
+        run: cargo generate-rpm
+
       - name: Upload binary
         uses: actions/upload-artifact@v7
         with:
           name: floatlyrics-linux-x86_64
           path: target/release/floatlyrics
+          if-no-files-found: error
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: floatlyrics-deb
+          path: target/debian/*.deb
+          if-no-files-found: error
+
+      - name: Upload .rpm artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: floatlyrics-rpm
+          path: target/generate-rpm/*.rpm
           if-no-files-found: error
 
