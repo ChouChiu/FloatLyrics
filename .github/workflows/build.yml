@@ -68,3 +68,10 @@ jobs:
       - name: Build release binary
         run: cargo build --locked --release
 
+      - name: Upload binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: floatlyrics-linux-x86_64
+          path: target/release/floatlyrics
+          if-no-files-found: error
+
