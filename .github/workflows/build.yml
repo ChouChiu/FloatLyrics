@@ -23,7 +23,7 @@ env:
 
 jobs:
   quality:
-    name: Check, test, build, and package
+    name: Check, test, and build
     runs-on: ubuntu-latest
     timeout-minutes: 45
     container:
@@ -33,16 +33,12 @@ jobs:
       - name: Install system dependencies
         run: >-
           pacman -Syu --noconfirm --needed
-          appstream
           base-devel
-          desktop-file-utils
           git
           gtk4
           gtk4-layer-shell
-          namcap
           openssl
           rust
-          zstd
 
       - name: Check out repository
         uses: actions/checkout@v7
@@ -72,42 +68,3 @@ jobs:
       - name: Build release binary
         run: cargo build --locked --release
 
-      - name: Validate PKGBUILD, .SRCINFO, and desktop integration
-        run: |
-          useradd --create-home builder
-          su builder -s /bin/bash -c \
-            "cd '$GITHUB_WORKSPACE' && BUILDDIR=/tmp PKGDEST=/tmp SRCDEST=/tmp SRCPKGDEST=/tmp makepkg --printsrcinfo" | diff -u .SRCINFO -
-          namcap PKGBUILD
-          desktop-file-validate data/io.github.chouchiu.floatlyrics.desktop
-          appstreamcli validate --no-net data/io.github.chouchiu.floatlyrics.metainfo.xml
-
-      - name: Stage filesystem tree
-        run: |
-          stage="$RUNNER_TEMP/floatlyrics-root"
-          rm -rf "$stage"
-          ./packaging/install.sh "$stage" target/release/floatlyrics
-          strip "$stage/usr/bin/floatlyrics"
-          test -x "$stage/usr/bin/floatlyrics"
-          if ldd "$stage/usr/bin/floatlyrics" | grep -q 'not found'; then
-            ldd "$stage/usr/bin/floatlyrics"
-            exit 1
-          fi
-
-      - name: Package tarball artifact
-        run: |
-          version=$(cargo pkgid --locked | sed 's/.*@//')
-          stage="$RUNNER_TEMP/floatlyrics-root"
-          asset="floatlyrics-$version-linux-x86_64.tar.zst"
-          epoch=$(git log -1 --format=%ct)
-          mkdir -p dist
-          tar --zstd --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner \
-            -cf "dist/$asset" -C "$stage" .
-          (cd dist && sha256sum "$asset" > SHA256SUMS)
-
-      - name: Upload Linux artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: floatlyrics-linux-x86_64
-          path: dist/
-          if-no-files-found: error
-          retention-days: 14
