@@ -117,6 +117,10 @@ pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
                 let settings = settings.clone();
                 overlay.connect_settings(move || settings.present());
             }
+            {
+                let app = app.clone();
+                overlay.connect_close(move || app.quit());
+            }
 
             *ui.borrow_mut() = Some(ApplicationUi {
                 _overlay: overlay,

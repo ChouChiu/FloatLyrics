@@ -229,6 +229,7 @@ pub enum Text {
     MatchScore,
     OpenSourceTitle,
     OpenSourceDescription,
+    CloseTooltip,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -351,6 +352,7 @@ const fn english(key: Text) -> &'static str {
         Text::OpenSourceDescription => {
             "FloatLyrics is built with these great open source projects."
         }
+        Text::CloseTooltip => "Close FloatLyrics",
     }
 }
 
@@ -442,6 +444,7 @@ const fn simplified_chinese(key: Text) -> &'static str {
         Text::MatchScore => "匹配度",
         Text::OpenSourceTitle => "开源库",
         Text::OpenSourceDescription => "FloatLyrics 使用了以下优秀的开源项目。",
+        Text::CloseTooltip => "关闭 FloatLyrics",
     }
 }
 
@@ -533,6 +536,7 @@ const fn traditional_chinese(key: Text) -> &'static str {
         Text::MatchScore => "符合度",
         Text::OpenSourceTitle => "開源庫",
         Text::OpenSourceDescription => "FloatLyrics 使用了以下優秀的開源專案。",
+        Text::CloseTooltip => "關閉 FloatLyrics",
     }
 }
 

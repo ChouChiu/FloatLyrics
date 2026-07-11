@@ -49,6 +49,7 @@ pub(super) struct OverlayView {
     song_info: gtk::Label,
     manual_search_button: gtk::Button,
     settings_button: gtk::Button,
+    close_button: gtk::Button,
     progress: gtk::ProgressBar,
     progress_label: gtk::Label,
     lyrics_stack: gtk::Stack,
@@ -102,8 +103,9 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig, i18n: I18n) -> O
 
     let song_info = gtk::Label::builder()
         .label("FloatLyrics")
-        .halign(gtk::Align::Center)
+        .halign(gtk::Align::Start)
         .valign(gtk::Align::Center)
+        .hexpand(true)
         .ellipsize(gtk::pango::EllipsizeMode::End)
         .max_width_chars(48)
         .single_line_mode(true)
@@ -122,10 +124,19 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig, i18n: I18n) -> O
         .css_classes(["flat", "circular", "floating-action-button"])
         .build();
     bind_button_tooltip(&settings_button, &i18n, Text::OpenSettingsTooltip);
+    let close_button = gtk::Button::builder()
+        .icon_name("window-close-symbolic")
+        .valign(gtk::Align::Center)
+        .css_classes(["flat", "circular", "floating-action-button"])
+        .build();
+    bind_button_tooltip(&close_button, &i18n, Text::CloseTooltip);
+    let button_box = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    button_box.append(&manual_search_button);
+    button_box.append(&settings_button);
+    button_box.append(&close_button);
     let title_row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     title_row.append(&song_info);
-    title_row.append(&manual_search_button);
-    title_row.append(&settings_button);
+    title_row.append(&button_box);
 
     let progress = gtk::ProgressBar::builder()
         .fraction(0.0)
@@ -358,6 +369,7 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig, i18n: I18n) -> O
         song_info,
         manual_search_button,
         settings_button,
+        close_button,
         progress,
         progress_label,
         lyrics_stack,
@@ -567,6 +579,10 @@ impl OverlayView {
 
     pub(super) fn connect_settings(&self, callback: impl Fn() + 'static) {
         self.settings_button.connect_clicked(move |_| callback());
+    }
+
+    pub(super) fn connect_close(&self, callback: impl Fn() + 'static) {
+        self.close_button.connect_clicked(move |_| callback());
     }
 
     pub(super) fn apply_config(&self, config: &AppConfig) {

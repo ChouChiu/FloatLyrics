@@ -30,6 +30,5 @@ rustc-ice-*.txt
 
 # makepkg / AUR packaging artifacts
 pkg/
-src/
 *.pkg.tar.*
 *.tar.gz
