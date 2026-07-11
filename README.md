@@ -1,80 +1,111 @@
 # FloatLyrics
 
-FloatLyrics 是一款使用 Rust 编写的 Linux Wayland 桌面歌词应用，当前主要支持通过
-Spotify MPRIS 获取播放状态并显示悬浮歌词。
+Linux Wayland 桌面悬浮歌词应用，基于 Rust 与 GTK4 layer-shell 构建，
+通过 MPRIS 跟踪 Spotify 播放状态并显示同步歌词。
 
 ## 环境要求
 
-- Linux Wayland 会话
-- GTK 4.12 或更新版本
+- Linux Wayland 合成器，需支持 **layer-shell** 协议
+- GTK 4.12+
 - gtk4-layer-shell
-- 支持 MPRIS 的 Spotify 客户端
-- Rust 1.92 或更新版本（从源码构建时）
+- Spotify 客户端（或使用匹配 MPRIS 总线名前缀的兼容客户端）
+- 从源码构建需 Rust 1.92+
 
-## 运行
+## 安装
+
+每个 [release](https://github.com/ChouChiu/FloatLyrics/releases) 提供预构建的
+`.deb` 和 `.rpm` 包。
+
+### 从源码构建
 
 ```bash
-cargo run -- --debug
+git clone https://github.com/ChouChiu/FloatLyrics.git
+cd FloatLyrics
+cargo build --locked --release
 ```
 
-支持以下命令行参数：
+二进制文件位于 `target/release/floatlyrics`。
+
+## 使用
 
 ```bash
 floatlyrics
-floatlyrics --debug
-floatlyrics --config <path>
-floatlyrics --reset-window
-floatlyrics --settings
-floatlyrics --select-lyrics
 ```
 
-默认数据路径：
+| 参数 | 说明 |
+|---|---|
+| `--debug` | 启用详细日志 |
+| `--config <path>` | 使用指定的配置文件 |
+| `--reset-window` | 将窗口位置和大小重置为默认值 |
+| `--settings` | 直接打开设置窗口 |
+| `--select-lyrics` | 打开当前曲目的手动歌词搜索 |
 
-- 配置文件：`~/.config/floatlyrics/config.toml`
-- 数据库：`~/.local/share/floatlyrics/floatlyrics.sqlite3`
+## 配置
 
-配置文件会在首次启动时生成。若 Spotify 客户端使用非标准的 MPRIS 总线名前缀，
-可以覆盖对应配置并重启 FloatLyrics：
+配置文件位于 `~/.config/floatlyrics/config.toml`（首次启动自动生成）。若 Spotify
+客户端使用非标准 MPRIS 总线名前缀，可覆盖配置项：
 
 ```toml
 [spotify]
 mpris_prefix = "org.mpris.MediaPlayer2.spotify"
 ```
 
-## 开发验证
+数据库与缓存：`~/.local/share/floatlyrics/floatlyrics.sqlite3`。
 
-```bash
-cargo fmt --all -- --check
-cargo test --locked
-cargo clippy --locked --all-targets --all-features -- -D warnings
-cargo build --locked --release
-make validate-data
-```
+## 架构
 
-## 项目架构
+Cargo 工作空间，包含三个 crate，自上而下分层：
 
-项目由单个 Cargo 包组成，内部模块按职责划分：
+| Crate | 职责 |
+|---|---|
+| `floatlyrics` | CLI、GTK4 layer-shell 界面、MPRIS 监听、应用组合根 |
+| `floatlyrics-lyrics` | 歌词模型、解析、搜索、时间轴、SQLite 缓存 |
+| `floatlyrics-core` | 应用路径、i18n、遥测、曲目指纹 |
 
-- `src/lib.rs`：命令行解析、启动流程与公开模块入口。
-- `src/app.rs`：应用组合根与依赖装配。
-- `src/app/`：播放控制器、独立于 GTK 的展示模型、设置页与 GTK 视图。
-- `src/main.rs`：精简的二进制入口，调用 `floatlyrics::run()`。
-- `src/lyrics/`：歌词模型、解析、歌词源搜索与时间轴计算。
-- `src/mpris/`：D-Bus 监听、播放器模型与播放位置同步。
-- `src/cache.rs`、`src/config.rs`、`src/paths.rs`、`src/telemetry.rs`：缓存、配置、
-  本地路径与遥测等基础设施。
+依赖方向：`floatlyrics` → `floatlyrics-lyrics` → `floatlyrics-core`。
 
-## 当前功能范围
+主要源模块：
 
-- 通过 MPRIS 监听 Spotify 播放状态。
-- 按配置顺序从 QQ 音乐和网易云音乐获取歌词。
-- 搜索、预览并为当前歌曲持久绑定手动选择的歌词。
-- 使用 GTK4 与 Wayland layer-shell 显示悬浮歌词窗口。
-- 使用 SQLite 缓存歌曲、歌词、手动匹配、歌词源结果与设置。
+- `src/lib.rs` — 命令行解析、GTK 渲染器初始化、启动流程
+- `src/app/controller.rs` — 播放控制器与状态机
+- `src/app/model.rs` — 独立于 GTK 的展示模型
+- `src/app/view.rs`、`src/app/view/` — GTK 组件与 layer-shell 窗口
+- `src/app/settings.rs`、`src/app/manual_search.rs`、`src/app/about.rs` — 设置、搜索、关于页面
+- `src/mpris/` — D-Bus MPRIS 监听与播放位置同步
+- `src/config.rs` — 原子化配置读写（临时文件 + 重命名）
+- `floatlyrics-core/src/i18n.rs` — 编译期 i18n（English / 简体中文 / 繁體中文）
+- `floatlyrics-lyrics/src/lyrics/` — LRC 解析、QQ 音乐与网易云音乐搜索、时间轴
+
+## 功能
+
+- 通过 MPRIS 跟踪 Spotify 播放状态
+- GTK4 layer-shell 悬浮歌词显示
+- 按可配置顺序从 QQ 音乐和网易云音乐自动抓取歌词
+- 手动搜索歌词并持久绑定到当前曲目
+- SQLite 缓存曲目、歌词、手动匹配及设置
+- 支持英文、简体中文、繁體中文
+- 设置窗口、开源依赖列表的关于页面
 
 ## 已知限制
 
-- 仅支持 Wayland，且桌面环境或合成器必须支持 layer-shell。
-- 当前只自动跟踪 Spotify 及使用所配置 MPRIS 前缀的兼容客户端。
-- 在线歌词依赖 QQ 音乐和网易云音乐的非稳定公共接口，可能因服务端变化暂时不可用。
-- 自动切歌后歌词进度可能较歌曲进度快，可以手动暂停后恢复以校准。
+- 仅支持 Wayland，且合成器须支持 layer-shell 协议
+- 仅自动跟踪 Spotify（或使用配置的 MPRIS 前缀的兼容客户端）
+- QQ 音乐与网易云音乐的歌词接口为非官方接口，可能因服务端变更而暂时不可用
+- 自动切歌后歌词进度可能超前，可手动暂停后恢复以重新校准
+
+## 开发
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-targets --all-features
+cargo build --locked --release
+```
+
+筛选测试：`cargo test lyrics::`、`cargo test mpris::` 等。
+
+提交规范与工作流详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 许可证
+
+[GPL-3.0-or-later](LICENSE)
