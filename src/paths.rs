@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 ChouChiu
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use anyhow::{Context, Result};
 use directories::BaseDirs;
 use std::path::{Path, PathBuf};

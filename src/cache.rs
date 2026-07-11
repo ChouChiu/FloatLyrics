@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 ChouChiu
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 use std::{path::Path, str::FromStr};
@@ -89,6 +92,9 @@ impl Cache {
                 value TEXT NOT NULL,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE INDEX IF NOT EXISTS provider_results_track_provider_score
+                ON provider_results(track_fingerprint, provider, score DESC, id DESC);
             "#,
         )?;
         Ok(())
@@ -97,6 +103,7 @@ impl Cache {
     pub fn upsert_track(&self, track: &TrackMetadata) -> Result<String> {
         let fingerprint = track.fingerprint();
         let artists_json = serde_json::to_string(&track.artists)?;
+        let duration_ms: Option<i64> = track.duration_ms.and_then(|value| value.try_into().ok());
         self.conn.execute(
             r#"
             INSERT INTO tracks (fingerprint, title, artists_json, album, duration_ms, mpris_track_id)
@@ -114,7 +121,7 @@ impl Cache {
                 track.title,
                 artists_json,
                 track.album,
-                track.duration_ms.map(|value| value as i64),
+                duration_ms,
                 track.mpris_track_id,
             ],
         )?;
@@ -336,5 +343,24 @@ mod tests {
 
         assert_eq!(lyrics.provider, LyricsProvider::LrcLib);
         assert!(lyrics.raw_lyrics.contains("manual"));
+    }
+
+    #[test]
+    fn oversized_duration_is_stored_as_unknown() {
+        let cache = Cache::open_memory().unwrap();
+        let mut track = track();
+        track.duration_ms = Some(u64::MAX);
+        let fingerprint = cache.upsert_track(&track).unwrap();
+
+        let stored: Option<i64> = cache
+            .conn
+            .query_row(
+                "SELECT duration_ms FROM tracks WHERE fingerprint = ?1",
+                params![fingerprint],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(stored, None);
     }
 }

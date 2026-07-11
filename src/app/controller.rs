@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 ChouChiu
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Coordinates playback events, lyrics retrieval, caching, and view updates.
 
 use std::{cell::RefCell, rc::Rc, sync::mpsc, time::Instant};
@@ -7,6 +10,7 @@ use gtk::prelude::*;
 use crate::{
     cache::{Cache, CachedLyrics, ProviderResultInsert},
     config::AppConfig,
+    i18n::{Message, Text},
     lyrics::{FetchedLyrics, SearchPlan, search_best_lyrics, timed_lines_from_raw},
     mpris::{SpotifyPlayerState, SpotifyWatcherEvent},
     track::TrackMetadata,
@@ -23,7 +27,13 @@ use super::{
 #[derive(Debug)]
 struct LyricsFetchEvent {
     track_fingerprint: String,
-    result: std::result::Result<FetchedLyrics, String>,
+    result: std::result::Result<FetchedLyrics, LyricsFetchFailure>,
+}
+
+#[derive(Debug)]
+enum LyricsFetchFailure {
+    NotFound,
+    Other(String),
 }
 
 struct SpotifyUiContext<'a> {
@@ -147,7 +157,7 @@ fn handle_spotify_event(event: &SpotifyWatcherEvent, ctx: &SpotifyUiContext<'_>)
             *ctx.latest.borrow_mut() = None;
             *ctx.lyrics_state.borrow_mut() = LyricsDisplayState::default();
             ctx.floating.set_song_info("FloatLyrics");
-            ctx.floating.show_status("Open Spotify to start tracking");
+            ctx.floating.show_status(Text::OpenSpotify);
             ctx.floating.reset_progress();
         }
         SpotifyWatcherEvent::Error(message) => {
@@ -155,7 +165,7 @@ fn handle_spotify_event(event: &SpotifyWatcherEvent, ctx: &SpotifyUiContext<'_>)
             *ctx.lyrics_state.borrow_mut() = LyricsDisplayState::default();
             tracing::warn!(%message, "Spotify listener error");
             ctx.floating.set_song_info("FloatLyrics");
-            ctx.floating.show_status("Spotify listener needs attention");
+            ctx.floating.show_status(Text::SpotifyAttention);
             ctx.floating.reset_progress();
         }
     }
@@ -183,7 +193,7 @@ fn update_spotify_state(state: &SpotifyPlayerState, ctx: &SpotifyUiContext<'_>) 
         );
     } else {
         ctx.floating.set_song_info("FloatLyrics");
-        ctx.floating.show_status("Waiting for Spotify metadata");
+        ctx.floating.show_status(Text::WaitingForMetadata);
         ctx.floating.reset_progress();
     }
 }
@@ -218,7 +228,12 @@ fn update_track_display(
 
     floating.set_song_info(&format!("{} - {}", track.title, track.display_artist()));
     floating.set_progress(position_ms, track.duration_ms);
-    let frame = lyrics_frame(&lyrics_state.borrow(), config, position_ms);
+    let frame = lyrics_frame(
+        &lyrics_state.borrow(),
+        config,
+        position_ms,
+        config.general.language,
+    );
     floating.show_lyrics(frame.content, &frame.key);
 }
 
@@ -253,7 +268,7 @@ fn load_lyrics_for_track(
         Err(error) => {
             return LyricsDisplayState {
                 track_fingerprint: Some(fingerprint),
-                status_message: Some(format!("Lyrics cache error: {error}")),
+                status_message: Some(Message::Detail(Text::LyricsCacheError, error.to_string())),
                 ..LyricsDisplayState::default()
             };
         }
@@ -269,7 +284,7 @@ fn load_lyrics_for_track(
         );
         return LyricsDisplayState {
             track_fingerprint: Some(fingerprint),
-            status_message: Some("Searching lyrics...".to_string()),
+            status_message: Some(Message::Text(Text::SearchingLyrics)),
             ..LyricsDisplayState::default()
         };
     };
@@ -293,14 +308,14 @@ fn lyrics_state_from_cached(fingerprint: String, cached: CachedLyrics) -> Lyrics
         Err(error) => {
             return LyricsDisplayState {
                 track_fingerprint: Some(fingerprint),
-                status_message: Some(format!("Lyrics parse error: {error}")),
+                status_message: Some(Message::Detail(Text::LyricsParseError, error.to_string())),
                 ..LyricsDisplayState::default()
             };
         }
     };
 
     let status_message = if lines.is_empty() {
-        Some("Cached lyrics are not time-synced".to_string())
+        Some(Message::Text(Text::CachedLyricsNotSynced))
     } else {
         None
     };
@@ -343,7 +358,10 @@ fn handle_lyrics_fetch_event(
             }) {
                 *lyrics_state.borrow_mut() = LyricsDisplayState {
                     track_fingerprint: Some(event.track_fingerprint),
-                    status_message: Some(format!("Lyrics cache write error: {error}")),
+                    status_message: Some(Message::Detail(
+                        Text::LyricsCacheWriteError,
+                        error.to_string(),
+                    )),
                     ..LyricsDisplayState::default()
                 };
             } else {
@@ -351,10 +369,16 @@ fn handle_lyrics_fetch_event(
                     load_cached_lyrics_after_fetch(cache, config, event.track_fingerprint);
             }
         }
-        Err(message) => {
+        Err(failure) => {
+            let message = match failure {
+                LyricsFetchFailure::NotFound => Message::Text(Text::NoLyricsFound),
+                LyricsFetchFailure::Other(detail) => {
+                    Message::Detail(Text::LyricsSearchFailed, detail)
+                }
+            };
             *lyrics_state.borrow_mut() = LyricsDisplayState {
                 track_fingerprint: Some(event.track_fingerprint),
-                status_message: Some(format!("Lyrics search failed: {message}")),
+                status_message: Some(message),
                 ..LyricsDisplayState::default()
             };
         }
@@ -379,12 +403,12 @@ fn load_cached_lyrics_after_fetch(
         Ok(Some(cached)) => lyrics_state_from_cached(fingerprint, cached),
         Ok(None) => LyricsDisplayState {
             track_fingerprint: Some(fingerprint),
-            status_message: Some("Downloaded lyrics were not stored".to_string()),
+            status_message: Some(Message::Text(Text::DownloadedLyricsNotStored)),
             ..LyricsDisplayState::default()
         },
         Err(error) => LyricsDisplayState {
             track_fingerprint: Some(fingerprint),
-            status_message: Some(format!("Lyrics cache error: {error}")),
+            status_message: Some(Message::Detail(Text::LyricsCacheError, error.to_string())),
             ..LyricsDisplayState::default()
         },
     }
@@ -400,8 +424,8 @@ fn spawn_lyrics_fetch(
     runtime.spawn(async move {
         let result = match search_best_lyrics(&track, &provider_order).await {
             Ok(Some(fetched)) => Ok(fetched),
-            Ok(None) => Err("No lyrics found from configured providers".to_string()),
-            Err(error) => Err(error.to_string()),
+            Ok(None) => Err(LyricsFetchFailure::NotFound),
+            Err(error) => Err(LyricsFetchFailure::Other(error.to_string())),
         };
 
         let _ = sender.send(LyricsFetchEvent {

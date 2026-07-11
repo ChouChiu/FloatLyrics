@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 ChouChiu
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Spotify MPRIS facade.
 //!
 //! The public API is stable while D-Bus watching, metadata models, and position
@@ -12,7 +15,8 @@ pub use model::{
     spotify_metadata_from_mpris,
 };
 pub use watcher::{
-    SPOTIFY_MPRIS_PREFIX, is_spotify_mpris_name, spawn_spotify_watcher, spotify_mpris_names,
+    SPOTIFY_MPRIS_PREFIX, is_spotify_mpris_name, spawn_spotify_watcher,
+    spawn_spotify_watcher_with_prefix, spotify_mpris_names,
 };
 
 #[cfg(test)]

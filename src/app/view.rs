@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 ChouChiu
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! GTK widget construction and the narrow UI API used by the controller.
 
 use gtk::prelude::*;
@@ -7,14 +10,18 @@ use std::{
     rc::Rc,
 };
 
-use crate::config::AppConfig;
+use crate::{
+    config::AppConfig,
+    i18n::{I18n, Text},
+};
 mod positioning;
 mod rendering;
 
+use super::localization::bind_button_tooltip;
 use super::model::{KaraokeRenderState, LyricSlotText, progress_fraction, progress_text};
 use positioning::{
     SharedPlacement, apply_snap_css_classes, attach_floating_drag, available_panel_width,
-    initial_x, left_margin_for_width,
+    bottom_margin_from_placement, initial_x, left_margin_for_width,
 };
 use rendering::{
     TextLineRenderState, TextLineStyle, lyric_content_width, lyric_text_widget, text_line_area,
@@ -47,6 +54,8 @@ pub(super) struct OverlayView {
     lyrics_stack: gtk::Stack,
     lyric_slots: [LyricSlotWidgets; 2],
     lyrics_transition: Rc<RefCell<LyricsTransitionState>>,
+    i18n: I18n,
+    static_status: Rc<RefCell<Option<Text>>>,
 }
 
 #[derive(Clone)]
@@ -66,7 +75,7 @@ struct LyricsTransitionState {
     active_slot: usize,
 }
 
-pub(super) fn build(app: &gtk::Application, config: &AppConfig) -> OverlayView {
+pub(super) fn build(app: &gtk::Application, config: &AppConfig, i18n: I18n) -> OverlayView {
     let panel_width = compact_panel_width(config.window.width);
     let window = gtk::ApplicationWindow::builder()
         .application(app)
@@ -103,16 +112,16 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig) -> OverlayView {
 
     let manual_search_button = gtk::Button::builder()
         .icon_name("system-search-symbolic")
-        .tooltip_text("手动选择歌词")
         .valign(gtk::Align::Center)
         .css_classes(["flat", "circular", "floating-action-button"])
         .build();
+    bind_button_tooltip(&manual_search_button, &i18n, Text::ManualSearchTooltip);
     let settings_button = gtk::Button::builder()
         .icon_name("preferences-system-symbolic")
-        .tooltip_text("打开设置")
         .valign(gtk::Align::Center)
         .css_classes(["flat", "circular", "floating-action-button"])
         .build();
+    bind_button_tooltip(&settings_button, &i18n, Text::OpenSettingsTooltip);
     let title_row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     title_row.append(&song_info);
     title_row.append(&manual_search_button);
@@ -146,7 +155,7 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig) -> OverlayView {
         ["floating-slot-current"],
         ["floating-lyric-current"],
         ["floating-translation-current"],
-        "Open Spotify to start tracking",
+        i18n.text(Text::OpenSpotify),
         Some((panel_width, CURRENT_KARAOKE_HEIGHT)),
         translation_style(true),
         panel_width,
@@ -204,8 +213,10 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig) -> OverlayView {
 
         .floating-panel {
             padding: 7px 14px 8px 14px;
-            border-radius: 7px;
+            border: 1px solid rgba(255,255,255,0.10);
+            border-radius: 11px;
             background: rgba(10, 12, 16, __PANEL_ALPHA__);
+            box-shadow: 0 8px 28px rgba(0,0,0,0.34);
         }
 
         .floating-song-info {
@@ -220,6 +231,16 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig) -> OverlayView {
             min-height: 20px;
             padding: 2px;
             color: rgba(255,255,255,0.72);
+            transition: 140ms ease;
+        }
+
+        .floating-action-button:hover {
+            color: white;
+            background: rgba(255,255,255,0.12);
+        }
+
+        .floating-action-button:active {
+            background: rgba(255,255,255,0.20);
         }
 
         .floating-lyric-current {
@@ -270,7 +291,7 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig) -> OverlayView {
         .floating-progress progress {
             min-height: 4px;
             border-radius: 2px;
-            background: rgba(255,255,255,0.82);
+            background: @accent_color;
         }
 
         .floating-progress-label {
@@ -328,7 +349,7 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig) -> OverlayView {
     window.set_child(Some(&content));
     window.present();
 
-    OverlayView {
+    let overlay = OverlayView {
         window,
         content,
         compact_width: Rc::new(Cell::new(panel_width)),
@@ -342,7 +363,18 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig) -> OverlayView {
         lyrics_stack,
         lyric_slots: [primary, secondary],
         lyrics_transition,
+        i18n: i18n.clone(),
+        static_status: Rc::new(RefCell::new(Some(Text::OpenSpotify))),
+    };
+    {
+        let overlay = overlay.clone();
+        i18n.subscribe(move |language| {
+            if let Some(key) = *overlay.static_status.borrow() {
+                set_status_lyrics(&overlay, language.text(key), key);
+            }
+        });
     }
+    overlay
 }
 
 fn lyric_slot(
@@ -466,11 +498,11 @@ fn set_lyrics_slots(floating: &OverlayView, current: LyricSlotText, animation_ke
     }
 }
 
-fn set_status_lyrics(floating: &OverlayView, message: &str) {
+fn set_status_lyrics(floating: &OverlayView, message: &str, key: Text) {
     set_lyrics_slots(
         floating,
         LyricSlotText::message(message),
-        &format!("status:{message}"),
+        &format!("status:{key:?}"),
     );
 }
 
@@ -548,8 +580,16 @@ impl OverlayView {
                 area.set_width_request(width);
             }
         }
-        self.window
-            .set_margin(Edge::Bottom, effective_bottom_margin(config));
+        self.window.set_margin(
+            Edge::Bottom,
+            bottom_margin_from_placement(
+                &self.window,
+                &self.placement.borrow(),
+                width.saturating_add(PANEL_CHROME_WIDTH),
+                FALLBACK_PANEL_HEIGHT,
+            )
+            .unwrap_or_else(|| effective_bottom_margin(config)),
+        );
         if let Some(left_margin) = left_margin_for_width(
             &self.window,
             &self.placement.borrow(),
@@ -601,11 +641,13 @@ impl OverlayView {
     }
 
     pub(super) fn show_lyrics(&self, value: LyricSlotText, key: &str) {
+        *self.static_status.borrow_mut() = None;
         set_lyrics_slots(self, value, key);
     }
 
-    pub(super) fn show_status(&self, message: &str) {
-        set_status_lyrics(self, message);
+    pub(super) fn show_status(&self, key: Text) {
+        *self.static_status.borrow_mut() = Some(key);
+        set_status_lyrics(self, self.i18n.text(key), key);
     }
 
     pub(super) fn set_progress(&self, position_ms: Option<u64>, duration_ms: Option<u64>) {

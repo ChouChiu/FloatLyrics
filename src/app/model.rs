@@ -1,9 +1,13 @@
+// SPDX-FileCopyrightText: 2026 ChouChiu
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! GTK-independent presentation state and playback clock calculations.
 
 use std::time::Instant;
 
 use crate::{
     config::AppConfig,
+    i18n::{Language, Message, Text},
     lyrics::{TimedLine, TimedSyllable, active_line_index, line_index_at_or_before},
     mpris::{PlaybackStatus, SpotifyPlayerState},
     track::TrackMetadata,
@@ -13,7 +17,7 @@ use crate::{
 pub(super) struct LyricsDisplayState {
     pub(super) track_fingerprint: Option<String>,
     pub(super) lines: Vec<TimedLine>,
-    pub(super) status_message: Option<String>,
+    pub(super) status_message: Option<Message>,
 }
 
 #[derive(Clone)]
@@ -59,15 +63,16 @@ pub(super) fn lyrics_frame(
     state: &LyricsDisplayState,
     config: &AppConfig,
     position_ms: Option<u64>,
+    language: Language,
 ) -> LyricsFrame {
     if let Some(message) = &state.status_message {
-        return status_frame(message);
+        return status_frame(message, language);
     }
     if state.lines.is_empty() {
-        return status_frame("Waiting for lyrics");
+        return status_frame(&Message::Text(Text::WaitingForLyrics), language);
     }
     let Some(position_ms) = position_ms else {
-        return status_frame("Waiting for playback position");
+        return status_frame(&Message::Text(Text::WaitingForPosition), language);
     };
 
     let index = active_line_index(&state.lines, position_ms, config.lyrics.offset_ms)
@@ -84,10 +89,10 @@ pub(super) fn lyrics_frame(
     }
 }
 
-fn status_frame(message: &str) -> LyricsFrame {
+fn status_frame(message: &Message, language: Language) -> LyricsFrame {
     LyricsFrame {
-        key: format!("status:{message}"),
-        content: LyricSlotText::message(message),
+        key: format!("status:{}", message.key()),
+        content: LyricSlotText::message(&message.render(language)),
     }
 }
 
@@ -96,23 +101,22 @@ fn line_text(line: Option<&TimedLine>, config: &AppConfig) -> LyricSlotText {
         return LyricSlotText::empty();
     };
     let mut text = line.text.trim().to_string();
-    if config.lyrics.show_translation {
-        if let Some(translation) = line.translation.as_deref().map(str::trim) {
-            if !translation.is_empty() && !is_placeholder_text(translation) {
-                return LyricSlotText {
-                    text,
-                    karaoke: None,
-                    translation: translation.to_string(),
-                };
-            }
-        }
+    if config.lyrics.show_translation
+        && let Some(translation) = line.translation.as_deref().map(str::trim)
+        && !translation.is_empty()
+        && !is_placeholder_text(translation)
+    {
+        return LyricSlotText {
+            text,
+            karaoke: None,
+            translation: translation.to_string(),
+        };
     }
-    if config.lyrics.show_romanization {
-        if let Some(romanization) = line.romanization.as_deref().map(str::trim) {
-            if !romanization.is_empty() {
-                text = format!("{text}  /  {romanization}");
-            }
-        }
+    if config.lyrics.show_romanization
+        && let Some(romanization) = line.romanization.as_deref().map(str::trim)
+        && !romanization.is_empty()
+    {
+        text = format!("{text}  /  {romanization}");
     }
     LyricSlotText {
         text,
@@ -141,7 +145,7 @@ fn current_line_text(
 }
 
 fn adjusted_position_ms(position_ms: u64, offset_ms: i64) -> u64 {
-    (position_ms as i128 + offset_ms as i128).max(0) as u64
+    (position_ms as i128 + offset_ms as i128).clamp(0, u64::MAX as i128) as u64
 }
 
 pub(super) fn syllable_progress(syllable: &TimedSyllable, position_ms: u64) -> f64 {
@@ -318,9 +322,20 @@ mod tests {
             ..LyricsDisplayState::default()
         };
 
-        let frame = lyrics_frame(&state, &AppConfig::default(), Some(1_500));
+        let frame = lyrics_frame(
+            &state,
+            &AppConfig::default(),
+            Some(1_500),
+            Language::English,
+        );
         assert_eq!(frame.key, "line:0");
         assert_eq!(frame.content.text, "Hello");
+    }
+
+    #[test]
+    fn adjusted_position_is_saturated_at_both_bounds() {
+        assert_eq!(adjusted_position_ms(0, -1), 0);
+        assert_eq!(adjusted_position_ms(u64::MAX, i64::MAX), u64::MAX);
     }
 
     fn snapshot(status: PlaybackStatus, elapsed: Duration) -> PlaybackSnapshot {

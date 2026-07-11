@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 ChouChiu
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -55,7 +58,7 @@ pub fn track_fingerprint(
     hasher.update(b"\0");
 
     if let Some(duration_ms) = duration_ms {
-        let rounded_seconds = (duration_ms + 500) / 1000;
+        let rounded_seconds = duration_ms.saturating_add(500) / 1000;
         hasher.update(rounded_seconds.to_string().as_bytes());
     }
 
@@ -100,5 +103,14 @@ mod tests {
         track.duration_ms = Some(180_000);
 
         assert_eq!(track.playback_identity(), identity);
+    }
+
+    #[test]
+    fn fingerprint_handles_maximum_duration_without_overflowing() {
+        let artists = vec!["Artist".to_string()];
+
+        let fingerprint = track_fingerprint("Song", &artists, None, Some(u64::MAX));
+
+        assert_eq!(fingerprint.len(), 64);
     }
 }

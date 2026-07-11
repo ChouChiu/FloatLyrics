@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 ChouChiu
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Pango/Cairo text rendering for translations and syllable-level karaoke.
 
 use gtk::prelude::*;

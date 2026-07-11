@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 ChouChiu
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use std::{
@@ -22,40 +25,72 @@ const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
 const PLAYER_IFACE: &str = "org.mpris.MediaPlayer2.Player";
 const PLAYBACK_POSITION_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const PLAYER_HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(30);
+const PLAYER_RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
 pub fn is_spotify_mpris_name(name: &str) -> bool {
-    name == SPOTIFY_MPRIS_PREFIX || name.starts_with("org.mpris.MediaPlayer2.spotify.")
+    is_mpris_name_with_prefix(name, SPOTIFY_MPRIS_PREFIX)
 }
 
 pub async fn spotify_mpris_names(connection: &Connection) -> zbus::Result<Vec<String>> {
+    mpris_names_with_prefix(connection, SPOTIFY_MPRIS_PREFIX).await
+}
+
+async fn mpris_names_with_prefix(
+    connection: &Connection,
+    prefix: &str,
+) -> zbus::Result<Vec<String>> {
     let proxy = DBusProxy::new(connection).await?;
     let names = proxy.list_names().await?;
 
     Ok(names
         .into_iter()
         .map(|name| name.to_string())
-        .filter(|name| is_spotify_mpris_name(name))
+        .filter(|name| is_mpris_name_with_prefix(name, prefix))
         .collect())
+}
+
+fn is_mpris_name_with_prefix(name: &str, prefix: &str) -> bool {
+    name == prefix
+        || name
+            .strip_prefix(prefix)
+            .is_some_and(|suffix| suffix.starts_with('.'))
 }
 
 pub fn spawn_spotify_watcher(
     runtime: &tokio::runtime::Handle,
     sender: Sender<SpotifyWatcherEvent>,
 ) {
+    spawn_spotify_watcher_with_prefix(runtime, sender, SPOTIFY_MPRIS_PREFIX.to_string());
+}
+
+pub fn spawn_spotify_watcher_with_prefix(
+    runtime: &tokio::runtime::Handle,
+    sender: Sender<SpotifyWatcherEvent>,
+    mpris_prefix: String,
+) {
     runtime.spawn(async move {
-        if let Err(error) = watch_spotify(sender.clone()).await {
+        if let Err(error) = watch_spotify(sender.clone(), mpris_prefix).await {
             let _ = sender.send(SpotifyWatcherEvent::Error(error.to_string()));
         }
     });
 }
 
-async fn watch_spotify(sender: Sender<SpotifyWatcherEvent>) -> Result<()> {
+async fn watch_spotify(
+    sender: Sender<SpotifyWatcherEvent>,
+    configured_prefix: String,
+) -> Result<()> {
     let connection = Connection::session()
         .await
         .context("connecting to session D-Bus")?;
+    let prefix = configured_prefix.trim();
+    let prefix = if prefix.is_empty() {
+        SPOTIFY_MPRIS_PREFIX
+    } else {
+        prefix
+    };
 
     loop {
-        let names = spotify_mpris_names(&connection)
+        let names = mpris_names_with_prefix(&connection, prefix)
             .await
             .context("listing MPRIS names")?;
 
@@ -64,6 +99,7 @@ async fn watch_spotify(sender: Sender<SpotifyWatcherEvent>) -> Result<()> {
                 let _ = sender.send(SpotifyWatcherEvent::Error(format!(
                     "Spotify listener reset: {error}"
                 )));
+                tokio::time::sleep(PLAYER_RECONNECT_DELAY).await;
             }
         } else {
             let _ = sender.send(SpotifyWatcherEvent::Disconnected);
@@ -243,4 +279,28 @@ async fn read_player_position(player: &Proxy<'_>) -> Option<u64> {
         .await
         .ok()
         .and_then(position_us_to_ms)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configured_prefix_matches_only_its_instances() {
+        let prefix = "org.mpris.MediaPlayer2.spotifyd";
+
+        assert!(is_mpris_name_with_prefix(prefix, prefix));
+        assert!(is_mpris_name_with_prefix(
+            "org.mpris.MediaPlayer2.spotifyd.instance42",
+            prefix
+        ));
+        assert!(!is_mpris_name_with_prefix(
+            "org.mpris.MediaPlayer2.spotify",
+            prefix
+        ));
+        assert!(!is_mpris_name_with_prefix(
+            "org.mpris.MediaPlayer2.spotifydoppelganger",
+            prefix
+        ));
+    }
 }

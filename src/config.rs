@@ -1,17 +1,32 @@
+// SPDX-FileCopyrightText: 2026 ChouChiu
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+};
 
-use crate::lyrics::LyricsProvider;
+use crate::{i18n::Language, lyrics::LyricsProvider};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
+    #[serde(default)]
+    pub general: GeneralConfig,
     #[serde(default)]
     pub window: WindowConfig,
     #[serde(default)]
     pub lyrics: LyricsConfig,
     #[serde(default)]
     pub spotify: SpotifyConfig,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GeneralConfig {
+    #[serde(default)]
+    pub language: Language,
 }
 
 impl AppConfig {
@@ -34,8 +49,31 @@ impl AppConfig {
         }
 
         let content = toml::to_string_pretty(self).context("serializing config")?;
-        fs::write(path, content).with_context(|| format!("writing config file {}", path.display()))
+        let temporary = temporary_config_path(path)?;
+        if let Err(error) = fs::write(&temporary, content)
+            .with_context(|| format!("writing temporary config file {}", temporary.display()))
+            .and_then(|()| {
+                fs::rename(&temporary, path)
+                    .with_context(|| format!("replacing config file {}", path.display()))
+            })
+        {
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
+        }
+
+        Ok(())
     }
+}
+
+fn temporary_config_path(path: &Path) -> Result<PathBuf> {
+    static NEXT_TEMPORARY_ID: AtomicU64 = AtomicU64::new(0);
+
+    let file_name = path
+        .file_name()
+        .context("config path must point to a file")?
+        .to_string_lossy();
+    let id = NEXT_TEMPORARY_ID.fetch_add(1, Ordering::Relaxed);
+    Ok(path.with_file_name(format!(".{file_name}.{}.{}.tmp", std::process::id(), id)))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -118,7 +156,7 @@ fn default_margin() -> i32 {
 }
 
 fn default_width() -> i32 {
-    600
+    350
 }
 
 fn default_opacity() -> f64 {
@@ -151,6 +189,37 @@ mod tests {
 
     #[test]
     fn default_window_uses_compact_width() {
-        assert_eq!(AppConfig::default().window.width, 600);
+        assert_eq!(AppConfig::default().window.width, 350);
+    }
+
+    #[test]
+    fn loads_legacy_config_without_general_section() {
+        let config: AppConfig = toml::from_str(
+            r#"
+            [window]
+            width = 500
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.window.width, 500);
+        assert!(Language::ALL.contains(&config.general.language));
+    }
+
+    #[test]
+    fn save_replaces_config_without_leaving_a_temporary_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let mut config = AppConfig::default();
+        config.window.width = 720;
+
+        config.save(&path).unwrap();
+
+        assert_eq!(AppConfig::load_or_default(&path).unwrap(), config);
+        let entries = fs::read_dir(directory.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(entries, vec!["config.toml"]);
     }
 }

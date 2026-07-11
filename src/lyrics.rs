@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 ChouChiu
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Lyrics domain facade.
 //!
 //! Public exports remain stable while models, parsing, provider search, and

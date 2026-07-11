@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 ChouChiu
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Layer-shell positioning, snapping, and resize anchoring.
 
 use gtk::prelude::*;
@@ -102,6 +105,21 @@ pub(super) fn initial_x(window_width: i32) -> Option<i32> {
         monitor.geometry().width(),
         window_width,
     ))
+}
+
+pub(super) fn bottom_margin_from_placement(
+    window: &gtk::ApplicationWindow,
+    placement: &WindowPlacement,
+    fallback_width: i32,
+    fallback_height: i32,
+) -> Option<i32> {
+    let geometry = floating_geometry(window, fallback_width, fallback_height)?;
+    let y = position_for_anchor(
+        placement.vertical,
+        geometry.viewport_height,
+        geometry.surface_height,
+    );
+    Some(bottom_margin_from_y(y, geometry))
 }
 
 pub(super) fn left_margin_for_width(
@@ -377,3 +395,5 @@ mod tests {
         assert_eq!(bottom_margin_from_y(500, geometry()), 0);
     }
 }
+// SPDX-FileCopyrightText: 2026 ChouChiu
+// SPDX-License-Identifier: GPL-3.0-or-later
