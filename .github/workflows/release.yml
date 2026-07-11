@@ -57,14 +57,14 @@ jobs:
           persist-credentials: false
           ref: ${{ env.RELEASE_TAG }}
 
-      - name: Validate tag and package version
+      - name: Validate version tag
         run: |
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
           version=$(cargo pkgid --locked | sed 's/.*@//')
           test "$RELEASE_TAG" = "v$version"
           test "$(git describe --tags --exact-match)" = "$RELEASE_TAG"
 
-      - name: Cache Cargo dependencies and build output
+      - name: Cache Cargo registry and target
         uses: actions/cache@v6
         with:
           path: |
@@ -93,7 +93,7 @@ jobs:
           desktop-file-validate data/io.github.chouchiu.floatlyrics.desktop
           appstreamcli validate --no-net data/io.github.chouchiu.floatlyrics.metainfo.xml
 
-      - name: Create generic Linux bundle
+      - name: Package tarball artifact
         run: |
           version=${RELEASE_TAG#v}
           stage="$RUNNER_TEMP/floatlyrics-root"
@@ -105,7 +105,7 @@ jobs:
           tar --zstd --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner \
             -cf "dist/$asset" -C "$stage" .
 
-      - name: Finalize and build AUR package
+      - name: Build and validate AUR package
         run: |
           ./packaging/update-aur-checksum.sh --checksum-only
           useradd --create-home builder
@@ -187,7 +187,7 @@ jobs:
           name: floatlyrics-${{ env.RELEASE_TAG }}-release
           path: dist
 
-      - name: Configure dedicated AUR SSH key
+      - name: Configure AUR SSH key
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
@@ -207,7 +207,7 @@ jobs:
           EOF
           chmod 600 "$HOME/.ssh/config" "$HOME/.ssh/known_hosts"
 
-      - name: Push package recipe to AUR
+      - name: Publish to AUR
         run: |
           git -c init.defaultBranch=master clone \
             ssh://aur@aur.archlinux.org/floatlyrics.git aur-floatlyrics

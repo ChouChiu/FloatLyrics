@@ -49,7 +49,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Cache Cargo dependencies and build output
+      - name: Cache Cargo registry and target
         uses: actions/cache@v6
         with:
           path: |
@@ -72,16 +72,16 @@ jobs:
       - name: Build release binary
         run: cargo build --locked --release
 
-      - name: Validate packaging metadata
+      - name: Validate PKGBUILD, .SRCINFO, and desktop integration
         run: |
           useradd --create-home builder
           su builder -s /bin/bash -c \
-            "cd '$GITHUB_WORKSPACE' && makepkg --printsrcinfo" | diff -u .SRCINFO -
+            "cd '$GITHUB_WORKSPACE' && BUILDDIR=/tmp makepkg --printsrcinfo" | diff -u .SRCINFO -
           namcap PKGBUILD
           desktop-file-validate data/io.github.chouchiu.floatlyrics.desktop
           appstreamcli validate --no-net data/io.github.chouchiu.floatlyrics.metainfo.xml
 
-      - name: Stage installable filesystem
+      - name: Stage filesystem tree
         run: |
           stage="$RUNNER_TEMP/floatlyrics-root"
           rm -rf "$stage"
@@ -93,7 +93,7 @@ jobs:
             exit 1
           fi
 
-      - name: Create Linux artifact and checksums
+      - name: Package tarball artifact
         run: |
           version=$(cargo pkgid --locked | sed 's/.*@//')
           stage="$RUNNER_TEMP/floatlyrics-root"
