@@ -76,7 +76,7 @@ jobs:
         run: |
           useradd --create-home builder
           su builder -s /bin/bash -c \
-            "cd '$GITHUB_WORKSPACE' && BUILDDIR=/tmp makepkg --printsrcinfo" | diff -u .SRCINFO -
+            "cd '$GITHUB_WORKSPACE' && BUILDDIR=/tmp PKGDEST=/tmp SRCDEST=/tmp SRCPKGDEST=/tmp makepkg --printsrcinfo" | diff -u .SRCINFO -
           namcap PKGBUILD
           desktop-file-validate data/io.github.chouchiu.floatlyrics.desktop
           appstreamcli validate --no-net data/io.github.chouchiu.floatlyrics.metainfo.xml
