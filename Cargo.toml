@@ -41,3 +41,32 @@ tempfile = "3"
 
 [build-dependencies]
 serde_json = "1"
+
+[package.metadata.deb]
+name = "floatlyrics"
+maintainer = "ChouChiu"
+copyright = "2026 ChouChiu"
+"license-file" = "LICENSE"
+"extended-description" = """\
+FloatLyrics follows Spotify playback through MPRIS and displays synchronized \
+lyrics in a lightweight GTK4 layer-shell overlay. Lyrics can be searched \
+manually and cached locally."""
+section = "sound"
+priority = "optional"
+depends = "libgtk-4-1 (>= 4.12), libgtk4-layer-shell0, libpango-1.0-0, libcairo2, libglib2.0-0, libssl3"
+assets = [
+    ["target/release/floatlyrics", "usr/bin/floatlyrics", "755"],
+    ["data/io.github.chouchiu.floatlyrics.desktop", "usr/share/applications/io.github.chouchiu.floatlyrics.desktop", "644"],
+    ["data/io.github.chouchiu.floatlyrics.metainfo.xml", "usr/share/metainfo/io.github.chouchiu.floatlyrics.metainfo.xml", "644"],
+    ["data/icons/hicolor/16x16/apps/io.github.chouchiu.floatlyrics.png", "usr/share/icons/hicolor/16x16/apps/io.github.chouchiu.floatlyrics.png", "644"],
+    ["data/icons/hicolor/24x24/apps/io.github.chouchiu.floatlyrics.png", "usr/share/icons/hicolor/24x24/apps/io.github.chouchiu.floatlyrics.png", "644"],
+    ["data/icons/hicolor/32x32/apps/io.github.chouchiu.floatlyrics.png", "usr/share/icons/hicolor/32x32/apps/io.github.chouchiu.floatlyrics.png", "644"],
+    ["data/icons/hicolor/48x48/apps/io.github.chouchiu.floatlyrics.png", "usr/share/icons/hicolor/48x48/apps/io.github.chouchiu.floatlyrics.png", "644"],
+    ["data/icons/hicolor/64x64/apps/io.github.chouchiu.floatlyrics.png", "usr/share/icons/hicolor/64x64/apps/io.github.chouchiu.floatlyrics.png", "644"],
+    ["data/icons/hicolor/128x128/apps/io.github.chouchiu.floatlyrics.png", "usr/share/icons/hicolor/128x128/apps/io.github.chouchiu.floatlyrics.png", "644"],
+    ["data/icons/hicolor/256x256/apps/io.github.chouchiu.floatlyrics.png", "usr/share/icons/hicolor/256x256/apps/io.github.chouchiu.floatlyrics.png", "644"],
+    ["data/icons/hicolor/512x512/apps/io.github.chouchiu.floatlyrics.png", "usr/share/icons/hicolor/512x512/apps/io.github.chouchiu.floatlyrics.png", "644"],
+    ["data/icons/hicolor/scalable/apps/io.github.chouchiu.floatlyrics.svg", "usr/share/icons/hicolor/scalable/apps/io.github.chouchiu.floatlyrics.svg", "644"],
+    ["data/icons/hicolor/symbolic/apps/io.github.chouchiu.floatlyrics-symbolic.svg", "usr/share/icons/hicolor/symbolic/apps/io.github.chouchiu.floatlyrics-symbolic.svg", "644"],
+    ["LICENSE", "usr/share/doc/floatlyrics/LICENSE", "644"],
+]
