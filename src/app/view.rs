@@ -14,6 +14,7 @@ use crate::{
     config::AppConfig,
     i18n::{I18n, Text},
 };
+mod css;
 mod positioning;
 mod rendering;
 
@@ -38,6 +39,17 @@ const CURRENT_TRANSLATION_HEIGHT: i32 = 18;
 const LYRICS_VIEWPORT_HEIGHT: i32 = CURRENT_KARAOKE_HEIGHT + CURRENT_TRANSLATION_HEIGHT;
 const LYRICS_TRANSITION_DURATION_MS: u32 = 180;
 const FALLBACK_PANEL_HEIGHT: i32 = 84;
+
+/// Narrow interface the controller uses to update the display.
+/// Decouples controller logic from the concrete [`OverlayView`].
+pub(super) trait LyricsView {
+    fn tick_widget(&self) -> gtk::Stack;
+    fn set_song_info(&self, value: &str);
+    fn show_lyrics(&self, value: LyricSlotText, key: &str);
+    fn show_status(&self, key: Text);
+    fn set_progress(&self, position_ms: Option<u64>, duration_ms: Option<u64>);
+    fn reset_progress(&self);
+}
 
 #[derive(Clone)]
 pub(super) struct OverlayView {
@@ -214,129 +226,7 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig, i18n: I18n) -> O
 
     let provider = gtk::CssProvider::new();
     let panel_alpha = config.window.opacity.clamp(0.18, 0.72);
-    let css = r#"
-        window.floating-window,
-        window.floating-window > contents,
-        .floating-window {
-            background: transparent;
-            box-shadow: none;
-        }
-
-        .floating-panel {
-            padding: 7px 14px 8px 14px;
-            border: 1px solid rgba(255,255,255,0.10);
-            border-radius: 11px;
-            background: rgba(10, 12, 16, __PANEL_ALPHA__);
-            box-shadow: 0 8px 28px rgba(0,0,0,0.34);
-        }
-
-        .floating-song-info {
-            color: rgba(255,255,255,0.60);
-            font-size: 16px;
-            font-weight: 650;
-            text-shadow: 0 2px 8px rgba(0,0,0,0.85);
-        }
-
-        .floating-action-button {
-            min-width: 20px;
-            min-height: 20px;
-            padding: 2px;
-            color: rgba(255,255,255,0.72);
-            transition: 140ms ease;
-        }
-
-        .floating-action-button:hover {
-            color: white;
-            background: rgba(255,255,255,0.12);
-        }
-
-        .floating-action-button:active {
-            background: rgba(255,255,255,0.20);
-        }
-
-        .floating-lyric-current {
-            color: white;
-            font-size: 24px;
-            font-weight: 750;
-            text-shadow: 0 2px 8px rgba(0,0,0,0.85);
-        }
-
-        .floating-lyric-adjacent {
-            color: rgba(255,255,255,0.66);
-            font-size: 13px;
-            text-shadow: 0 2px 8px rgba(0,0,0,0.85);
-        }
-
-        .floating-translation-current {
-            color: rgba(255,255,255,0.78);
-            font-size: 13px;
-            font-weight: 500;
-            text-shadow: none;
-        }
-
-        .floating-translation-adjacent {
-            color: rgba(255,255,255,0.50);
-            font-size: 11px;
-            text-shadow: none;
-        }
-
-        .floating-slot-current {
-            margin: 1px 0;
-        }
-
-        .floating-slot-adjacent {
-            margin: 0;
-        }
-
-        .floating-progress {
-            min-height: 4px;
-            margin-top: 3px;
-        }
-
-        .floating-progress trough {
-            min-height: 4px;
-            border-radius: 2px;
-            background: rgba(255,255,255,0.22);
-        }
-
-        .floating-progress progress {
-            min-height: 4px;
-            border-radius: 2px;
-            background: @accent_color;
-        }
-
-        .floating-progress-label {
-            color: rgba(255,255,255,0.74);
-            font-size: 12px;
-            text-shadow: 0 2px 8px rgba(0,0,0,0.85);
-        }
-
-        .floating-separator {
-            margin: 3px 0 1px 0;
-            background: rgba(255,255,255,0.24);
-        }
-
-        .floating-panel.snapped-left {
-            border-top-left-radius: 0;
-            border-bottom-left-radius: 0;
-        }
-
-        .floating-panel.snapped-right {
-            border-top-right-radius: 0;
-            border-bottom-right-radius: 0;
-        }
-
-        .floating-panel.snapped-top {
-            border-top-left-radius: 0;
-            border-top-right-radius: 0;
-        }
-
-        .floating-panel.snapped-bottom {
-            border-bottom-left-radius: 0;
-            border-bottom-right-radius: 0;
-        }
-        "#
-    .replace("__PANEL_ALPHA__", &format!("{panel_alpha:.3}"));
+    let css = css::panel_css(panel_alpha);
     provider.load_from_string(&css);
 
     if let Some(display) = gtk::gdk::Display::default() {
@@ -571,6 +461,34 @@ fn reset_progress(floating: &OverlayView) {
     floating.progress_label.set_label("");
 }
 
+impl LyricsView for OverlayView {
+    fn tick_widget(&self) -> gtk::Stack {
+        self.lyrics_stack.clone()
+    }
+
+    fn set_song_info(&self, value: &str) {
+        self.song_info.set_label(value);
+    }
+
+    fn show_lyrics(&self, value: LyricSlotText, key: &str) {
+        *self.static_status.borrow_mut() = None;
+        set_lyrics_slots(self, value, key);
+    }
+
+    fn show_status(&self, key: Text) {
+        *self.static_status.borrow_mut() = Some(key);
+        set_status_lyrics(self, self.i18n.text(key), key);
+    }
+
+    fn set_progress(&self, position_ms: Option<u64>, duration_ms: Option<u64>) {
+        update_progress(self, position_ms, duration_ms);
+    }
+
+    fn reset_progress(&self) {
+        reset_progress(self);
+    }
+}
+
 impl OverlayView {
     pub(super) fn connect_manual_search(&self, callback: impl Fn() + 'static) {
         self.manual_search_button
@@ -646,32 +564,6 @@ impl OverlayView {
 
     fn sync_snap_classes(&self) {
         apply_snap_css_classes(&self.content, &self.placement.borrow());
-    }
-
-    pub(super) fn tick_widget(&self) -> gtk::Stack {
-        self.lyrics_stack.clone()
-    }
-
-    pub(super) fn set_song_info(&self, value: &str) {
-        self.song_info.set_label(value);
-    }
-
-    pub(super) fn show_lyrics(&self, value: LyricSlotText, key: &str) {
-        *self.static_status.borrow_mut() = None;
-        set_lyrics_slots(self, value, key);
-    }
-
-    pub(super) fn show_status(&self, key: Text) {
-        *self.static_status.borrow_mut() = Some(key);
-        set_status_lyrics(self, self.i18n.text(key), key);
-    }
-
-    pub(super) fn set_progress(&self, position_ms: Option<u64>, duration_ms: Option<u64>) {
-        update_progress(self, position_ms, duration_ms);
-    }
-
-    pub(super) fn reset_progress(&self) {
-        reset_progress(self);
     }
 }
 

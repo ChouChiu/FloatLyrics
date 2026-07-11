@@ -5,10 +5,8 @@
 
 use std::{cell::RefCell, rc::Rc, sync::mpsc, time::Instant};
 
-use gtk::prelude::*;
-
 use crate::{
-    cache::{Cache, CachedLyrics, ProviderResultInsert},
+    cache::{CachedLyrics, LyricsCache, ProviderResultInsert},
     config::AppConfig,
     i18n::{Message, Text},
     lyrics::{FetchedLyrics, SearchPlan, search_best_lyrics, timed_lines_from_raw},
@@ -21,7 +19,7 @@ use super::{
         LyricsDisplayState, PlaybackSnapshot, apply_position_sample, effective_position_ms,
         lyrics_frame,
     },
-    view::OverlayView,
+    view::{LyricsView, OverlayView},
 };
 
 #[derive(Debug)]
@@ -37,8 +35,8 @@ enum LyricsFetchFailure {
 }
 
 struct SpotifyUiContext<'a> {
-    floating: &'a OverlayView,
-    cache: &'a Cache,
+    floating: &'a dyn LyricsView,
+    cache: &'a dyn LyricsCache,
     config: &'a AppConfig,
     runtime: &'a tokio::runtime::Handle,
     lyrics_sender: &'a mpsc::Sender<LyricsFetchEvent>,
@@ -65,41 +63,78 @@ impl ControllerHandle {
     }
 }
 
-pub(super) fn attach(
-    receiver: mpsc::Receiver<SpotifyWatcherEvent>,
-    runtime: tokio::runtime::Handle,
+/// Decoupled controller: owns playback state and exposes a [`tick`] method
+/// that the caller drives from the GTK main loop (or from tests).
+pub(super) struct Controller {
+    handle: ControllerHandle,
+    receiver: Rc<RefCell<mpsc::Receiver<SpotifyWatcherEvent>>>,
+    lyrics_receiver: Rc<RefCell<mpsc::Receiver<LyricsFetchEvent>>>,
+    lyrics_state: Rc<RefCell<LyricsDisplayState>>,
+    latest: Rc<RefCell<Option<PlaybackSnapshot>>>,
     floating: OverlayView,
-    cache: Rc<Cache>,
+    cache: Rc<dyn LyricsCache>,
     config: Rc<RefCell<AppConfig>>,
-) -> ControllerHandle {
-    let receiver = Rc::new(RefCell::new(receiver));
-    let (lyrics_sender, lyrics_receiver) = mpsc::channel();
-    let lyrics_receiver = Rc::new(RefCell::new(lyrics_receiver));
-    let latest = Rc::new(RefCell::new(None::<PlaybackSnapshot>));
-    let lyrics_state = Rc::new(RefCell::new(LyricsDisplayState::default()));
-    let handle = ControllerHandle {
-        lyrics_state: Rc::clone(&lyrics_state),
-        latest: Rc::clone(&latest),
-    };
+    runtime: tokio::runtime::Handle,
+    lyrics_sender: mpsc::Sender<LyricsFetchEvent>,
+}
 
-    let tick_widget = floating.tick_widget();
-    tick_widget.add_tick_callback(move |_, _| {
-        let config = config.borrow().clone();
-        let ctx = SpotifyUiContext {
-            floating: &floating,
-            cache: &cache,
-            config: &config,
-            runtime: &runtime,
-            lyrics_sender: &lyrics_sender,
-            latest: &latest,
-            lyrics_state: &lyrics_state,
+impl Controller {
+    pub(super) fn new(
+        receiver: mpsc::Receiver<SpotifyWatcherEvent>,
+        runtime: tokio::runtime::Handle,
+        floating: OverlayView,
+        cache: Rc<dyn LyricsCache>,
+        config: Rc<RefCell<AppConfig>>,
+    ) -> Self {
+        let receiver = Rc::new(RefCell::new(receiver));
+        let (lyrics_sender, lyrics_receiver) = mpsc::channel();
+        let lyrics_receiver = Rc::new(RefCell::new(lyrics_receiver));
+        let latest = Rc::new(RefCell::new(None::<PlaybackSnapshot>));
+        let lyrics_state = Rc::new(RefCell::new(LyricsDisplayState::default()));
+        let handle = ControllerHandle {
+            lyrics_state: Rc::clone(&lyrics_state),
+            latest: Rc::clone(&latest),
         };
 
-        for event in receiver.borrow().try_iter() {
+        Self {
+            handle,
+            receiver,
+            lyrics_receiver,
+            lyrics_state,
+            latest,
+            floating,
+            cache,
+            config,
+            runtime,
+            lyrics_sender,
+        }
+    }
+
+    /// Returns a lightweight handle used by settings and manual-search to
+    /// query current track and trigger a lyrics reload.
+    pub(super) fn handle(&self) -> ControllerHandle {
+        self.handle.clone()
+    }
+
+    /// Process one frame: drain incoming events, check for new lyrics,
+    /// and refresh the display. Call from the GTK tick callback.
+    pub(super) fn tick(&self) {
+        let config = self.config.borrow().clone();
+        let ctx = SpotifyUiContext {
+            floating: &self.floating,
+            cache: &*self.cache,
+            config: &config,
+            runtime: &self.runtime,
+            lyrics_sender: &self.lyrics_sender,
+            latest: &self.latest,
+            lyrics_state: &self.lyrics_state,
+        };
+
+        for event in self.receiver.borrow().try_iter() {
             handle_spotify_event(&event, &ctx);
         }
 
-        for event in lyrics_receiver.borrow().try_iter() {
+        for event in self.lyrics_receiver.borrow().try_iter() {
             handle_lyrics_fetch_event(
                 event,
                 ctx.floating,
@@ -123,11 +158,7 @@ pub(super) fn attach(
             }
             refresh_progress_from_clock(snapshot, ctx.floating, ctx.config, ctx.lyrics_state);
         }
-
-        gtk::glib::ControlFlow::Continue
-    });
-
-    handle
+    }
 }
 
 fn handle_spotify_event(event: &SpotifyWatcherEvent, ctx: &SpotifyUiContext<'_>) {
@@ -200,7 +231,7 @@ fn update_spotify_state(state: &SpotifyPlayerState, ctx: &SpotifyUiContext<'_>) 
 
 fn refresh_progress_from_clock(
     snapshot: &PlaybackSnapshot,
-    floating: &OverlayView,
+    floating: &dyn LyricsView,
     config: &AppConfig,
     lyrics_state: &Rc<RefCell<LyricsDisplayState>>,
 ) {
@@ -217,7 +248,7 @@ fn refresh_progress_from_clock(
 
 fn update_track_display(
     state: &SpotifyPlayerState,
-    floating: &OverlayView,
+    floating: &dyn LyricsView,
     config: &AppConfig,
     lyrics_state: &Rc<RefCell<LyricsDisplayState>>,
     position_ms: Option<u64>,
@@ -239,7 +270,7 @@ fn update_track_display(
 
 fn ensure_lyrics_loaded(
     track: &TrackMetadata,
-    cache: &Cache,
+    cache: &dyn LyricsCache,
     config: &AppConfig,
     runtime: &tokio::runtime::Handle,
     lyrics_sender: &mpsc::Sender<LyricsFetchEvent>,
@@ -256,7 +287,7 @@ fn ensure_lyrics_loaded(
 
 fn load_lyrics_for_track(
     track: &TrackMetadata,
-    cache: &Cache,
+    cache: &dyn LyricsCache,
     config: &AppConfig,
     runtime: &tokio::runtime::Handle,
     lyrics_sender: &mpsc::Sender<LyricsFetchEvent>,
@@ -329,8 +360,8 @@ fn lyrics_state_from_cached(fingerprint: String, cached: CachedLyrics) -> Lyrics
 
 fn handle_lyrics_fetch_event(
     event: LyricsFetchEvent,
-    floating: &OverlayView,
-    cache: &Cache,
+    floating: &dyn LyricsView,
+    cache: &dyn LyricsCache,
     config: &AppConfig,
     latest: &Rc<RefCell<Option<PlaybackSnapshot>>>,
     lyrics_state: &Rc<RefCell<LyricsDisplayState>>,
@@ -394,7 +425,7 @@ fn handle_lyrics_fetch_event(
 }
 
 fn load_cached_lyrics_after_fetch(
-    cache: &Cache,
+    cache: &dyn LyricsCache,
     config: &AppConfig,
     fingerprint: String,
 ) -> LyricsDisplayState {

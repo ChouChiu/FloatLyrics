@@ -7,6 +7,31 @@ use std::{path::Path, str::FromStr};
 
 use crate::{lyrics::LyricsProvider, track::TrackMetadata};
 
+/// Trait abstracting lyrics cache operations.
+/// Enables decoupling controller and manual-search from the concrete [`Cache`] type.
+pub trait LyricsCache {
+    fn upsert_track(&self, track: &TrackMetadata) -> anyhow::Result<String>;
+
+    fn insert_lyrics(
+        &self,
+        provider: LyricsProvider,
+        provider_track_id: Option<&str>,
+        title: &str,
+        artists: &[String],
+        raw_lyrics: &str,
+    ) -> anyhow::Result<i64>;
+
+    fn bind_manual_match(&self, track_fingerprint: &str, lyrics_id: i64) -> anyhow::Result<()>;
+
+    fn lyrics_for_track(
+        &self,
+        track_fingerprint: &str,
+        provider_order: &[LyricsProvider],
+    ) -> anyhow::Result<Option<CachedLyrics>>;
+
+    fn insert_provider_result(&self, result: ProviderResultInsert<'_>) -> anyhow::Result<i64>;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CachedLyrics {
     pub id: i64,
@@ -254,6 +279,46 @@ impl Cache {
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
+    }
+}
+
+impl LyricsCache for Cache {
+    fn upsert_track(&self, track: &TrackMetadata) -> anyhow::Result<String> {
+        Cache::upsert_track(self, track)
+    }
+
+    fn insert_lyrics(
+        &self,
+        provider: LyricsProvider,
+        provider_track_id: Option<&str>,
+        title: &str,
+        artists: &[String],
+        raw_lyrics: &str,
+    ) -> anyhow::Result<i64> {
+        Cache::insert_lyrics(
+            self,
+            provider,
+            provider_track_id,
+            title,
+            artists,
+            raw_lyrics,
+        )
+    }
+
+    fn bind_manual_match(&self, track_fingerprint: &str, lyrics_id: i64) -> anyhow::Result<()> {
+        Cache::bind_manual_match(self, track_fingerprint, lyrics_id)
+    }
+
+    fn lyrics_for_track(
+        &self,
+        track_fingerprint: &str,
+        provider_order: &[LyricsProvider],
+    ) -> anyhow::Result<Option<CachedLyrics>> {
+        Cache::lyrics_for_track(self, track_fingerprint, provider_order)
+    }
+
+    fn insert_provider_result(&self, result: ProviderResultInsert<'_>) -> anyhow::Result<i64> {
+        Cache::insert_provider_result(self, result)
     }
 }
 

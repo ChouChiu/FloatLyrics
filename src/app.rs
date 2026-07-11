@@ -19,9 +19,14 @@ use gtk::prelude::*;
 use std::{cell::RefCell, ffi::OsStr, rc::Rc, sync::mpsc};
 
 use crate::{
-    cache::Cache, config::AppConfig, i18n::I18n, mpris::spawn_spotify_watcher_with_prefix,
+    cache::{Cache, LyricsCache},
+    config::AppConfig,
+    i18n::I18n,
+    mpris::spawn_spotify_watcher_with_prefix,
     paths::AppPaths,
 };
+
+use view::LyricsView;
 
 struct ApplicationUi {
     _overlay: view::OverlayView,
@@ -39,7 +44,7 @@ pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
         .context("creating Tokio runtime")?;
     let _runtime_guard = runtime.enter();
     let runtime_handle = runtime.handle().clone();
-    let cache = Rc::new(Cache::open(&paths.database_file)?);
+    let cache: Rc<dyn LyricsCache> = Rc::new(Cache::open(&paths.database_file)?);
     let config = Rc::new(RefCell::new(config));
     let i18n = I18n::new(config.borrow().general.language);
 
@@ -68,19 +73,19 @@ pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
                 spotify_sender,
                 config.borrow().spotify.mpris_prefix.clone(),
             );
-            let controller = controller::attach(
+            let controller = controller::Controller::new(
                 spotify_receiver,
                 runtime_handle.clone(),
                 overlay.clone(),
                 Rc::clone(&cache),
                 Rc::clone(&config),
             );
-            let controller_for_settings = controller.clone();
+            let controller_for_settings = controller.handle();
             let manual_search = manual_search::ManualSearchWindow::new(
                 app,
                 runtime_handle.clone(),
                 Rc::clone(&cache),
-                controller.clone(),
+                controller.handle(),
                 i18n.clone(),
             );
             {
@@ -122,12 +127,21 @@ pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
                 overlay.connect_close(move || app.quit());
             }
 
+            // Drive the controller from the GTK tick loop.
+            let tick_widget = overlay.tick_widget();
+            let controller_rc = Rc::new(RefCell::new(controller));
+            let handle = controller_rc.borrow().handle();
+            tick_widget.add_tick_callback(move |_, _| {
+                controller_rc.borrow().tick();
+                gtk::glib::ControlFlow::Continue
+            });
+
             *ui.borrow_mut() = Some(ApplicationUi {
                 _overlay: overlay,
                 settings,
                 manual_search,
                 _about: about,
-                _controller: controller,
+                _controller: handle,
             });
         });
     }

@@ -7,7 +7,7 @@ use gtk::prelude::*;
 use std::{cell::Cell, cell::RefCell, rc::Rc, sync::mpsc, time::Duration};
 
 use crate::{
-    cache::Cache,
+    cache::LyricsCache,
     i18n::{I18n, Language, Text},
     lyrics::{
         FetchedLyrics, LyricsCandidate, LyricsProvider, fetch_candidate_lyrics,
@@ -91,7 +91,7 @@ impl ManualSearchWindow {
     pub(super) fn new(
         app: &gtk::Application,
         runtime: tokio::runtime::Handle,
-        cache: Rc<Cache>,
+        cache: Rc<dyn LyricsCache>,
         controller: ControllerHandle,
         i18n: I18n,
     ) -> Self {
