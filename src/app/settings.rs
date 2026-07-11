@@ -1,12 +1,40 @@
-//! Preferences window opened from the command line or a desktop panel.
+// SPDX-FileCopyrightText: 2026 ChouChiu
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+//! Preferences window opened from the command line or the floating panel.
 
 use gtk::prelude::*;
-use std::{cell::RefCell, path::PathBuf, rc::Rc};
+use std::{cell::Cell, cell::RefCell, path::PathBuf, rc::Rc};
 
-use crate::{config::AppConfig, lyrics::LyricsProvider};
+use crate::{
+    config::AppConfig,
+    i18n::{I18n, Language, Text},
+    lyrics::LyricsProvider,
+};
 
-const SETTINGS_WIDTH: i32 = 680;
-const SETTINGS_HEIGHT: i32 = 500;
+use super::localization::{
+    bind_button_tooltip, bind_label, bind_stack_page_title, bind_window_title,
+};
+
+const SETTINGS_WIDTH: i32 = 720;
+const SETTINGS_HEIGHT: i32 = 560;
+
+#[derive(Debug, Clone)]
+enum SaveState {
+    Automatic,
+    Saved,
+    Failed(String),
+}
+
+impl SaveState {
+    fn render(&self, language: Language) -> String {
+        match self {
+            Self::Automatic => language.text(Text::ChangesSavedAutomatically).to_string(),
+            Self::Saved => language.text(Text::Saved).to_string(),
+            Self::Failed(error) => language.detail(Text::SaveFailed, error),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub(super) struct SettingsWindow {
@@ -18,28 +46,48 @@ impl SettingsWindow {
         app: &gtk::Application,
         initial: AppConfig,
         config_file: PathBuf,
+        i18n: I18n,
+        on_about: impl Fn() + 'static,
         on_saved: impl Fn(AppConfig) + 'static,
     ) -> Self {
         let draft = Rc::new(RefCell::new(initial.clone()));
+        let status_state = Rc::new(RefCell::new(SaveState::Automatic));
         let status = gtk::Label::builder()
-            .label("所有更改都会自动保存")
             .halign(gtk::Align::Start)
+            .hexpand(true)
             .css_classes(["settings-status", "dim-label"])
             .build();
+        {
+            let status = status.clone();
+            let status_state = Rc::clone(&status_state);
+            i18n.subscribe(move |language| {
+                status.set_label(&status_state.borrow().render(language));
+                if matches!(*status_state.borrow(), SaveState::Failed(_)) {
+                    status.add_css_class("error");
+                } else {
+                    status.remove_css_class("error");
+                }
+            });
+        }
+
         let on_saved: Rc<dyn Fn(AppConfig)> = Rc::new(on_saved);
         let persist: Rc<dyn Fn()> = {
             let draft = Rc::clone(&draft);
+            let i18n = i18n.clone();
             let status = status.clone();
+            let status_state = Rc::clone(&status_state);
             Rc::new(move || {
                 let next = draft.borrow().clone();
                 match next.save(&config_file) {
                     Ok(()) => {
-                        status.set_label("已保存");
+                        *status_state.borrow_mut() = SaveState::Saved;
+                        status.set_label(&status_state.borrow().render(i18n.language()));
                         status.remove_css_class("error");
                         on_saved(next);
                     }
                     Err(error) => {
-                        status.set_label(&format!("保存失败：{error}"));
+                        *status_state.borrow_mut() = SaveState::Failed(error.to_string());
+                        status.set_label(&status_state.borrow().render(i18n.language()));
                         status.add_css_class("error");
                     }
                 }
@@ -48,41 +96,55 @@ impl SettingsWindow {
 
         let stack = gtk::Stack::builder()
             .transition_type(gtk::StackTransitionType::Crossfade)
-            .transition_duration(160)
+            .transition_duration(180)
             .hexpand(true)
             .vexpand(true)
             .build();
 
         add_page(
             &stack,
-            "lyrics",
-            "通用",
+            "general",
+            Text::General,
             "preferences-system-symbolic",
-            &lyrics_page(&initial, &draft, &persist),
+            &general_page(&initial, &draft, &persist, &i18n),
+            &i18n,
         );
         add_page(
             &stack,
             "display",
-            "显示",
+            Text::Display,
             "video-display-symbolic",
-            &display_page(&initial, &draft, &persist),
+            &display_page(&initial, &draft, &persist, &i18n),
+            &i18n,
         );
         add_page(
             &stack,
             "sources",
-            "歌词源",
+            Text::LyricsSources,
             "view-list-symbolic",
-            &sources_page(&initial, &draft, &persist),
+            &sources_page(&initial, &draft, &persist, &i18n),
+            &i18n,
         );
 
         let switcher = gtk::StackSwitcher::builder()
             .stack(&stack)
             .halign(gtk::Align::Center)
             .build();
+        let about_button = gtk::Button::builder()
+            .icon_name("help-about-symbolic")
+            .css_classes(["flat", "circular"])
+            .build();
+        bind_button_tooltip(&about_button, &i18n, Text::OpenAbout);
+        about_button.connect_clicked(move |_| on_about());
+
         let header = gtk::HeaderBar::builder()
             .title_widget(&switcher)
             .show_title_buttons(true)
             .build();
+        header.pack_end(&about_button);
+
+        let handle = gtk::WindowHandle::new();
+        handle.set_child(Some(&header));
 
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.append(&stack);
@@ -93,15 +155,15 @@ impl SettingsWindow {
 
         let window = gtk::ApplicationWindow::builder()
             .application(app)
-            .title("FloatLyrics 设置")
             .default_width(SETTINGS_WIDTH)
             .default_height(SETTINGS_HEIGHT)
-            .resizable(true)
-            .titlebar(&header)
+            .resizable(false)
+            .titlebar(&handle)
             .child(&root)
             .hide_on_close(true)
             .build();
         window.add_css_class("settings-window");
+        bind_window_title(&window, &i18n, Text::SettingsWindowTitle);
         install_css();
 
         Self { window }
@@ -112,15 +174,52 @@ impl SettingsWindow {
     }
 }
 
-fn lyrics_page(
+fn general_page(
     config: &AppConfig,
     draft: &Rc<RefCell<AppConfig>>,
     persist: &Rc<dyn Fn()>,
+    i18n: &I18n,
 ) -> gtk::ScrolledWindow {
+    let language_names = Language::ALL.map(Language::display_name);
+    let language = gtk::DropDown::from_strings(&language_names);
+    language.set_selected(language_index(config.general.language));
+    language.set_width_request(190);
+    let changing_language = Rc::new(Cell::new(false));
+    {
+        let draft = Rc::clone(draft);
+        let persist = Rc::clone(persist);
+        let changing_language = Rc::clone(&changing_language);
+        language.connect_selected_notify(move |input| {
+            if changing_language.get() {
+                return;
+            }
+            let Some(next_language) = Language::ALL.get(input.selected() as usize).copied() else {
+                return;
+            };
+            draft.borrow_mut().general.language = next_language;
+            persist();
+        });
+    }
+    {
+        let language = language.clone();
+        let changing_language = Rc::clone(&changing_language);
+        i18n.subscribe(move |next_language| {
+            changing_language.set(true);
+            language.set_selected(language_index(next_language));
+            changing_language.set(false);
+        });
+    }
+
     let offset = gtk::SpinButton::with_range(-10_000.0, 10_000.0, 50.0);
     offset.set_value(config.lyrics.offset_ms as f64);
     offset.set_numeric(true);
-    offset.set_tooltip_text(Some("正数会让歌词更早显示，负数会让歌词更晚显示"));
+    offset.set_width_chars(8);
+    {
+        let offset = offset.clone();
+        i18n.subscribe(move |language| {
+            offset.set_tooltip_text(Some(language.text(Text::GlobalOffsetDescription)));
+        });
+    }
     {
         let draft = Rc::clone(draft);
         let persist = Rc::clone(persist);
@@ -157,13 +256,37 @@ fn lyrics_page(
     }
 
     page(
-        "歌词",
-        "调整时间与辅助文本。偏移和显示选项会立即应用到当前歌词。",
-        &[setting_card(&[
-            setting_row("全局偏移", "毫秒", &offset),
-            setting_row("显示翻译", "歌词源提供翻译时显示", &translation),
-            setting_row("显示罗马音", "歌词源提供罗马音时显示", &romanization),
-        ])],
+        i18n,
+        Text::GeneralTitle,
+        Text::GeneralDescription,
+        &[
+            setting_card(&[setting_row(
+                i18n,
+                Text::Language,
+                Text::LanguageDescription,
+                &language,
+            )]),
+            setting_card(&[
+                setting_row(
+                    i18n,
+                    Text::GlobalOffset,
+                    Text::GlobalOffsetDescription,
+                    &offset,
+                ),
+                setting_row(
+                    i18n,
+                    Text::ShowTranslation,
+                    Text::ShowTranslationDescription,
+                    &translation,
+                ),
+                setting_row(
+                    i18n,
+                    Text::ShowRomanization,
+                    Text::ShowRomanizationDescription,
+                    &romanization,
+                ),
+            ]),
+        ],
     )
 }
 
@@ -171,10 +294,12 @@ fn display_page(
     config: &AppConfig,
     draft: &Rc<RefCell<AppConfig>>,
     persist: &Rc<dyn Fn()>,
+    i18n: &I18n,
 ) -> gtk::ScrolledWindow {
     let width = gtk::SpinButton::with_range(320.0, 640.0, 10.0);
     width.set_value(config.window.width as f64);
     width.set_numeric(true);
+    width.set_width_chars(8);
     connect_window_i32(&width, draft, persist, |config, value| {
         config.window.width = value;
     });
@@ -182,6 +307,7 @@ fn display_page(
     let margin = gtk::SpinButton::with_range(0.0, 500.0, 4.0);
     margin.set_value(config.window.margin as f64);
     margin.set_numeric(true);
+    margin.set_width_chars(8);
     connect_window_i32(&margin, draft, persist, |config, value| {
         config.window.margin = value;
     });
@@ -189,6 +315,7 @@ fn display_page(
     let panel_height = gtk::SpinButton::with_range(0.0, 200.0, 2.0);
     panel_height.set_value(config.window.bottom_panel_height as f64);
     panel_height.set_numeric(true);
+    panel_height.set_width_chars(8);
     connect_window_i32(&panel_height, draft, persist, |config, value| {
         config.window.bottom_panel_height = value;
     });
@@ -197,7 +324,7 @@ fn display_page(
     opacity.set_value(config.window.opacity.clamp(0.15, 1.0));
     opacity.set_draw_value(true);
     opacity.set_digits(2);
-    opacity.set_width_request(190);
+    opacity.set_width_request(200);
     {
         let draft = Rc::clone(draft);
         let persist = Rc::clone(persist);
@@ -208,17 +335,29 @@ fn display_page(
     }
 
     page(
-        "显示",
-        "控制桌面歌词面板的尺寸、位置与背景。",
+        i18n,
+        Text::DisplayTitle,
+        Text::DisplayDescription,
         &[setting_card(&[
-            setting_row("面板宽度", "像素；长歌词仍会自动扩展", &width),
-            setting_row("底部间距", "歌词面板与屏幕底边的距离", &margin),
+            setting_row(i18n, Text::PanelWidth, Text::PanelWidthDescription, &width),
             setting_row(
-                "底栏保留高度",
-                "避免遮挡底部桌面栏；Noctalia 顶栏布局可设为 0",
+                i18n,
+                Text::BottomMargin,
+                Text::BottomMarginDescription,
+                &margin,
+            ),
+            setting_row(
+                i18n,
+                Text::BottomPanelHeight,
+                Text::BottomPanelHeightDescription,
                 &panel_height,
             ),
-            setting_row("背景不透明度", "仅影响歌词面板背景", &opacity),
+            setting_row(
+                i18n,
+                Text::BackgroundOpacity,
+                Text::BackgroundOpacityDescription,
+                &opacity,
+            ),
         ])],
     )
 }
@@ -227,15 +366,27 @@ fn sources_page(
     config: &AppConfig,
     draft: &Rc<RefCell<AppConfig>>,
     persist: &Rc<dyn Fn()>,
+    i18n: &I18n,
 ) -> gtk::ScrolledWindow {
-    let source_order =
-        gtk::DropDown::from_strings(&["QQ 音乐 → 网易云音乐", "网易云音乐 → QQ 音乐"]);
+    let source_model = gtk::StringList::new(&[
+        i18n.text(Text::QqThenNetEase),
+        i18n.text(Text::NetEaseThenQq),
+    ]);
+    let source_order = gtk::DropDown::builder()
+        .model(&source_model)
+        .width_request(250)
+        .build();
     let netease_first = config.lyrics.provider_order.first() == Some(&LyricsProvider::NetEase);
     source_order.set_selected(u32::from(netease_first));
+    let updating_model = Rc::new(Cell::new(false));
     {
         let draft = Rc::clone(draft);
         let persist = Rc::clone(persist);
+        let updating_model = Rc::clone(&updating_model);
         source_order.connect_selected_notify(move |input| {
+            if updating_model.get() {
+                return;
+            }
             draft.borrow_mut().lyrics.provider_order = if input.selected() == 1 {
                 vec![LyricsProvider::NetEase, LyricsProvider::QqMusic]
             } else {
@@ -244,16 +395,44 @@ fn sources_page(
             persist();
         });
     }
+    {
+        let source_model = source_model.clone();
+        let source_order = source_order.clone();
+        let updating_model = Rc::clone(&updating_model);
+        i18n.subscribe(move |language| {
+            updating_model.set(true);
+            let selected = source_order.selected();
+            source_model.splice(
+                0,
+                source_model.n_items(),
+                &[
+                    language.text(Text::QqThenNetEase),
+                    language.text(Text::NetEaseThenQq),
+                ],
+            );
+            source_order.set_selected(selected);
+            updating_model.set(false);
+        });
+    }
 
     page(
-        "歌词源",
-        "按顺序搜索在线歌词。更改顺序后会重新加载当前曲目的歌词。",
+        i18n,
+        Text::SourcesTitle,
+        Text::SourcesDescription,
         &[setting_card(&[setting_row(
-            "搜索优先级",
-            "第一个歌词源无结果时自动尝试第二个",
+            i18n,
+            Text::SearchPriority,
+            Text::SearchPriorityDescription,
             &source_order,
         )])],
     )
+}
+
+fn language_index(language: Language) -> u32 {
+    Language::ALL
+        .iter()
+        .position(|candidate| *candidate == language)
+        .unwrap_or_default() as u32
 }
 
 fn connect_window_i32(
@@ -273,29 +452,36 @@ fn connect_window_i32(
 fn add_page(
     stack: &gtk::Stack,
     name: &str,
-    title: &str,
+    title: Text,
     icon_name: &str,
     child: &impl IsA<gtk::Widget>,
+    i18n: &I18n,
 ) {
-    let page = stack.add_titled(child, Some(name), title);
+    let page = stack.add_titled(child, Some(name), "");
     page.set_icon_name(icon_name);
+    bind_stack_page_title(&page, i18n, title);
 }
 
-fn page(title: &str, description: &str, cards: &[gtk::Box]) -> gtk::ScrolledWindow {
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
+fn page(
+    i18n: &I18n,
+    title_key: Text,
+    description_key: Text,
+    cards: &[gtk::Box],
+) -> gtk::ScrolledWindow {
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 14);
     content.add_css_class("settings-page");
 
     let title = gtk::Label::builder()
-        .label(title)
         .halign(gtk::Align::Start)
         .css_classes(["title-1"])
         .build();
+    bind_label(&title, i18n, title_key);
     let description = gtk::Label::builder()
-        .label(description)
         .halign(gtk::Align::Start)
         .wrap(true)
         .css_classes(["dim-label"])
         .build();
+    bind_label(&description, i18n, description_key);
     content.append(&title);
     content.append(&description);
     for card in cards {
@@ -321,26 +507,30 @@ fn setting_card(rows: &[gtk::Box]) -> gtk::Box {
     card
 }
 
-fn setting_row(title: &str, description: &str, control: &impl IsA<gtk::Widget>) -> gtk::Box {
-    let labels = gtk::Box::new(gtk::Orientation::Vertical, 2);
+fn setting_row(
+    i18n: &I18n,
+    title_key: Text,
+    description_key: Text,
+    control: &impl IsA<gtk::Widget>,
+) -> gtk::Box {
+    let labels = gtk::Box::new(gtk::Orientation::Vertical, 3);
     labels.set_hexpand(true);
-    labels.append(
-        &gtk::Label::builder()
-            .label(title)
-            .halign(gtk::Align::Start)
-            .css_classes(["settings-row-title"])
-            .build(),
-    );
-    labels.append(
-        &gtk::Label::builder()
-            .label(description)
-            .halign(gtk::Align::Start)
-            .wrap(true)
-            .css_classes(["dim-label"])
-            .build(),
-    );
+    let title = gtk::Label::builder()
+        .halign(gtk::Align::Start)
+        .css_classes(["settings-row-title"])
+        .build();
+    bind_label(&title, i18n, title_key);
+    labels.append(&title);
+    let description = gtk::Label::builder()
+        .halign(gtk::Align::Start)
+        .wrap(true)
+        .max_width_chars(42)
+        .css_classes(["dim-label"])
+        .build();
+    bind_label(&description, i18n, description_key);
+    labels.append(&description);
 
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 18);
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 20);
     row.add_css_class("settings-row");
     row.append(&labels);
     row.append(control);
@@ -352,34 +542,42 @@ fn install_css() {
     provider.load_from_string(
         r#"
         .settings-page {
-            padding: 28px 36px 36px;
+            padding: 28px 36px 40px;
         }
 
         .settings-card {
-            border: 1px solid alpha(@borders, 0.7);
-            border-radius: 12px;
-            background: alpha(@theme_base_color, 0.72);
+            border: 1px solid alpha(@borders, 0.72);
+            border-radius: 14px;
+            background: alpha(@theme_base_color, 0.78);
+            box-shadow: 0 1px 3px alpha(black, 0.08);
         }
 
         .settings-row {
+            min-height: 48px;
             padding: 14px 16px;
         }
 
         .settings-row-title {
-            font-weight: 600;
+            font-weight: 650;
         }
 
         .settings-card separator {
             margin-left: 16px;
+            background: alpha(@borders, 0.56);
         }
 
         .settings-status-bar {
-            padding: 8px 16px;
+            padding: 9px 16px;
             border-top: 1px solid alpha(@borders, 0.6);
+            background: alpha(@theme_base_color, 0.45);
         }
 
         .settings-status.error {
             color: @error_color;
+        }
+
+        .settings-window button.suggested-action:active {
+            filter: brightness(0.92);
         }
         "#,
     );
@@ -389,5 +587,17 @@ fn install_css() {
             &provider,
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn language_indices_follow_the_public_language_order() {
+        for (index, language) in Language::ALL.into_iter().enumerate() {
+            assert_eq!(language_index(language), index as u32);
+        }
     }
 }

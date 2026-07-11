@@ -1,10 +1,14 @@
+// SPDX-FileCopyrightText: 2026 ChouChiu
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Track-specific manual lyrics search and selection window.
 
 use gtk::prelude::*;
-use std::{cell::RefCell, rc::Rc, sync::mpsc, time::Duration};
+use std::{cell::Cell, cell::RefCell, rc::Rc, sync::mpsc, time::Duration};
 
 use crate::{
     cache::Cache,
+    i18n::{I18n, Language, Text},
     lyrics::{
         FetchedLyrics, LyricsCandidate, LyricsProvider, fetch_candidate_lyrics,
         search_lyrics_candidates,
@@ -12,7 +16,10 @@ use crate::{
     track::TrackMetadata,
 };
 
-use super::controller::ControllerHandle;
+use super::{
+    controller::ControllerHandle,
+    localization::{bind_button_label, bind_entry_placeholder, bind_label, bind_window_title},
+};
 
 const WINDOW_WIDTH: i32 = 820;
 const WINDOW_HEIGHT: i32 = 560;
@@ -39,6 +46,38 @@ struct SearchState {
     selected: Option<(usize, FetchedLyrics)>,
 }
 
+#[derive(Debug, Clone)]
+enum ManualStatus {
+    Text(Text),
+    Detail(Text, String),
+    CandidatesFound(usize),
+}
+
+impl ManualStatus {
+    fn render(&self, language: Language) -> String {
+        match self {
+            Self::Text(key) => language.text(*key).to_string(),
+            Self::Detail(key, detail) => language.detail(*key, detail),
+            Self::CandidatesFound(count) => language.candidates_found(*count),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum PreviewState {
+    Text(Text),
+    Lyrics(String),
+}
+
+impl PreviewState {
+    fn render(&self, language: Language) -> String {
+        match self {
+            Self::Text(key) => language.text(*key).to_string(),
+            Self::Lyrics(lyrics) => lyrics.clone(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct ManualSearchWindow {
     window: gtk::ApplicationWindow,
@@ -54,26 +93,27 @@ impl ManualSearchWindow {
         runtime: tokio::runtime::Handle,
         cache: Rc<Cache>,
         controller: ControllerHandle,
+        i18n: I18n,
     ) -> Self {
-        let title = gtk::Entry::builder()
-            .hexpand(true)
-            .placeholder_text("歌曲名")
-            .build();
-        let artist = gtk::Entry::builder()
-            .hexpand(true)
-            .placeholder_text("艺术家")
-            .build();
+        let title = gtk::Entry::builder().hexpand(true).build();
+        bind_entry_placeholder(&title, &i18n, Text::SongTitle);
+        let artist = gtk::Entry::builder().hexpand(true).build();
+        bind_entry_placeholder(&artist, &i18n, Text::Artist);
         let search_button = gtk::Button::builder()
-            .label("搜索")
             .css_classes(["suggested-action"])
             .build();
+        bind_button_label(&search_button, &i18n, Text::Search);
         let spinner = gtk::Spinner::new();
 
         let search_bar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         search_bar.add_css_class("manual-search-bar");
-        search_bar.append(&gtk::Label::new(Some("标题")));
+        let title_label = gtk::Label::new(None);
+        bind_label(&title_label, &i18n, Text::Title);
+        search_bar.append(&title_label);
         search_bar.append(&title);
-        search_bar.append(&gtk::Label::new(Some("艺术家")));
+        let artist_label = gtk::Label::new(None);
+        bind_label(&artist_label, &i18n, Text::Artist);
+        search_bar.append(&artist_label);
         search_bar.append(&artist);
         search_bar.append(&spinner);
         search_bar.append(&search_button);
@@ -98,7 +138,7 @@ impl ManualSearchWindow {
             .top_margin(12)
             .bottom_margin(12)
             .build();
-        preview.buffer().set_text("选择候选歌词后将在这里预览");
+        preview.add_css_class("manual-preview");
         let preview_scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vscrollbar_policy(gtk::PolicyType::Automatic)
@@ -116,16 +156,16 @@ impl ManualSearchWindow {
             .build();
 
         let status = gtk::Label::builder()
-            .label("播放歌曲后可搜索并手动绑定歌词")
             .halign(gtk::Align::Start)
             .hexpand(true)
+            .wrap(true)
             .css_classes(["dim-label"])
             .build();
         let apply = gtk::Button::builder()
-            .label("应用所选歌词")
             .sensitive(false)
             .css_classes(["suggested-action"])
             .build();
+        bind_button_label(&apply, &i18n, Text::ApplySelectedLyrics);
         let footer = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         footer.add_css_class("manual-search-footer");
         footer.append(&status);
@@ -138,31 +178,77 @@ impl ManualSearchWindow {
         root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         root.append(&footer);
 
+        let header_title = gtk::Label::new(None);
+        bind_label(&header_title, &i18n, Text::ManualSearchTitle);
         let header = gtk::HeaderBar::builder()
-            .title_widget(&gtk::Label::new(Some("手动选择歌词")))
+            .title_widget(&header_title)
             .show_title_buttons(true)
             .build();
+        let handle = gtk::WindowHandle::new();
+        handle.set_child(Some(&header));
         let window = gtk::ApplicationWindow::builder()
             .application(app)
-            .title("FloatLyrics 手动选择歌词")
             .default_width(WINDOW_WIDTH)
             .default_height(WINDOW_HEIGHT)
-            .titlebar(&header)
+            .resizable(false)
+            .titlebar(&handle)
             .child(&root)
             .hide_on_close(true)
             .build();
+        bind_window_title(&window, &i18n, Text::ManualSearchTitle);
 
         let state = Rc::new(RefCell::new(SearchState::default()));
+        let status_state = Rc::new(RefCell::new(ManualStatus::Text(Text::SearchAfterPlayback)));
+        let preview_state = Rc::new(RefCell::new(PreviewState::Text(
+            Text::SelectCandidatePreview,
+        )));
+        let set_status: Rc<dyn Fn(ManualStatus)> = {
+            let status = status.clone();
+            let status_state = Rc::clone(&status_state);
+            let i18n = i18n.clone();
+            Rc::new(move |next| {
+                *status_state.borrow_mut() = next;
+                status.set_label(&status_state.borrow().render(i18n.language()));
+            })
+        };
+        let set_preview: Rc<dyn Fn(PreviewState)> = {
+            let preview = preview.clone();
+            let preview_state = Rc::clone(&preview_state);
+            let i18n = i18n.clone();
+            Rc::new(move |next| {
+                *preview_state.borrow_mut() = next;
+                preview
+                    .buffer()
+                    .set_text(&preview_state.borrow().render(i18n.language()));
+            })
+        };
+        {
+            let status = status.clone();
+            let preview = preview.clone();
+            let status_state = Rc::clone(&status_state);
+            let preview_state = Rc::clone(&preview_state);
+            i18n.subscribe(move |language| {
+                status.set_label(&status_state.borrow().render(language));
+                preview
+                    .buffer()
+                    .set_text(&preview_state.borrow().render(language));
+            });
+        }
         let (sender, receiver) = mpsc::channel::<SearchEvent>();
+        let rebuilding_results = Rc::new(Cell::new(false));
 
         {
             let state = Rc::clone(&state);
             let runtime = runtime.clone();
             let sender = sender.clone();
-            let preview = preview.clone();
-            let status = status.clone();
             let apply = apply.clone();
+            let set_status = Rc::clone(&set_status);
+            let set_preview = Rc::clone(&set_preview);
+            let rebuilding_results = Rc::clone(&rebuilding_results);
             results.connect_row_selected(move |_, row| {
+                if rebuilding_results.get() {
+                    return;
+                }
                 let Some(index) = row.and_then(|row| usize::try_from(row.index()).ok()) else {
                     return;
                 };
@@ -176,8 +262,8 @@ impl ManualSearchWindow {
                     (state.generation, candidate)
                 };
                 apply.set_sensitive(false);
-                status.set_label("正在加载歌词预览…");
-                preview.buffer().set_text("正在加载歌词预览…");
+                set_status(ManualStatus::Text(Text::LoadingPreview));
+                set_preview(PreviewState::Text(Text::LoadingPreview));
                 let sender = sender.clone();
                 runtime.spawn(async move {
                     let result = fetch_candidate_lyrics(&candidate)
@@ -199,19 +285,20 @@ impl ManualSearchWindow {
             let title = title.clone();
             let artist = artist.clone();
             let controller = controller.clone();
-            let status = status.clone();
-            let preview = preview.clone();
             let results = results.clone();
             let apply = apply.clone();
             let spinner = spinner.clone();
+            let search_button = search_button.clone();
+            let set_status = Rc::clone(&set_status);
+            let set_preview = Rc::clone(&set_preview);
             Rc::new(move || {
                 let Some(target_track) = controller.current_track() else {
-                    status.set_label("当前没有正在播放的歌曲");
+                    set_status(ManualStatus::Text(Text::NoTrackPlaying));
                     return;
                 };
                 let search_title = title.text().trim().to_string();
                 if search_title.is_empty() {
-                    status.set_label("请输入歌曲标题");
+                    set_status(ManualStatus::Text(Text::EnterSongTitle));
                     return;
                 }
                 let artists = artist
@@ -241,8 +328,9 @@ impl ManualSearchWindow {
                     results.remove(&child);
                 }
                 apply.set_sensitive(false);
-                preview.buffer().set_text("正在搜索候选歌词…");
-                status.set_label("正在搜索 QQ 音乐和网易云音乐…");
+                set_preview(PreviewState::Text(Text::SearchingCandidates));
+                set_status(ManualStatus::Text(Text::SearchingProviders));
+                search_button.set_sensitive(false);
                 spinner.start();
                 let sender = sender.clone();
                 runtime.spawn(async move {
@@ -272,7 +360,7 @@ impl ManualSearchWindow {
             let state = Rc::clone(&state);
             let cache = Rc::clone(&cache);
             let controller = controller.clone();
-            let status = status.clone();
+            let set_status = Rc::clone(&set_status);
             apply.connect_clicked(move |_| {
                 let state = state.borrow();
                 let Some(target) = state.target_track.as_ref() else {
@@ -287,7 +375,7 @@ impl ManualSearchWindow {
                     .map(TrackMetadata::fingerprint)
                     != Some(target.fingerprint())
                 {
-                    status.set_label("歌曲已经切换，请重新搜索");
+                    set_status(ManualStatus::Text(Text::TrackChanged));
                     return;
                 }
                 let result = cache
@@ -304,9 +392,11 @@ impl ManualSearchWindow {
                 match result {
                     Ok(()) => {
                         controller.reload_lyrics();
-                        status.set_label("已应用并记住这条歌词");
+                        set_status(ManualStatus::Text(Text::LyricsApplied));
                     }
-                    Err(error) => status.set_label(&format!("应用失败：{error}")),
+                    Err(error) => {
+                        set_status(ManualStatus::Detail(Text::ApplyFailed, error.to_string()))
+                    }
                 }
             });
         }
@@ -314,10 +404,12 @@ impl ManualSearchWindow {
         {
             let state = Rc::clone(&state);
             let results = results.clone();
-            let preview = preview.clone();
-            let status = status.clone();
             let spinner = spinner.clone();
             let apply = apply.clone();
+            let search_button = search_button.clone();
+            let i18n = i18n.clone();
+            let set_status = Rc::clone(&set_status);
+            let set_preview = Rc::clone(&set_preview);
             gtk::glib::timeout_add_local(Duration::from_millis(50), move || {
                 for event in receiver.try_iter() {
                     match event {
@@ -326,26 +418,29 @@ impl ManualSearchWindow {
                                 continue;
                             }
                             spinner.stop();
+                            search_button.set_sensitive(true);
                             match result {
                                 Ok(candidates) => {
                                     let count = candidates.len();
                                     state.borrow_mut().candidates = candidates.clone();
                                     for candidate in &candidates {
-                                        results.append(&candidate_row(candidate));
+                                        results.append(&candidate_row(candidate, i18n.language()));
                                     }
                                     if count == 0 {
-                                        status.set_label("没有找到候选歌词");
-                                        preview.buffer().set_text("没有找到候选歌词");
+                                        set_status(ManualStatus::Text(Text::NoCandidates));
+                                        set_preview(PreviewState::Text(Text::NoCandidates));
                                     } else {
-                                        status.set_label(&format!("找到 {count} 条候选歌词"));
+                                        set_status(ManualStatus::CandidatesFound(count));
                                         if let Some(row) = results.row_at_index(0) {
                                             results.select_row(Some(&row));
                                         }
                                     }
                                 }
                                 Err(error) => {
-                                    status.set_label(&format!("搜索失败：{error}"));
-                                    preview.buffer().set_text("搜索歌词失败");
+                                    set_status(ManualStatus::Detail(Text::SearchFailed, error));
+                                    set_preview(PreviewState::Text(
+                                        Text::LyricsSearchPreviewFailed,
+                                    ));
                                 }
                             }
                         }
@@ -363,24 +458,49 @@ impl ManualSearchWindow {
                             }
                             match result {
                                 Ok(Some(fetched)) => {
-                                    preview.buffer().set_text(&fetched.raw_lyrics);
+                                    set_preview(PreviewState::Lyrics(fetched.raw_lyrics.clone()));
                                     state.borrow_mut().selected = Some((index, fetched));
                                     apply.set_sensitive(true);
-                                    status.set_label("预览已加载，可应用所选歌词");
+                                    set_status(ManualStatus::Text(Text::PreviewReady));
                                 }
                                 Ok(None) => {
-                                    preview.buffer().set_text("该候选没有可用歌词");
-                                    status.set_label("该候选没有可用歌词");
+                                    set_preview(PreviewState::Text(Text::CandidateUnavailable));
+                                    set_status(ManualStatus::Text(Text::CandidateUnavailable));
                                 }
                                 Err(error) => {
-                                    preview.buffer().set_text("加载歌词预览失败");
-                                    status.set_label(&format!("加载失败：{error}"));
+                                    set_preview(PreviewState::Text(Text::PreviewLoadFailed));
+                                    set_status(ManualStatus::Detail(Text::LoadingFailed, error));
                                 }
                             }
                         }
                     }
                 }
                 gtk::glib::ControlFlow::Continue
+            });
+        }
+
+        {
+            let state = Rc::clone(&state);
+            let results = results.clone();
+            let rebuilding_results = Rc::clone(&rebuilding_results);
+            i18n.subscribe(move |language| {
+                let (candidates, selected) = {
+                    let state = state.borrow();
+                    (state.candidates.clone(), state.preview_index)
+                };
+                rebuilding_results.set(true);
+                while let Some(child) = results.first_child() {
+                    results.remove(&child);
+                }
+                for candidate in &candidates {
+                    results.append(&candidate_row(candidate, language));
+                }
+                if let Some(index) = selected.and_then(|index| i32::try_from(index).ok())
+                    && let Some(row) = results.row_at_index(index)
+                {
+                    results.select_row(Some(&row));
+                }
+                rebuilding_results.set(false);
             });
         }
 
@@ -404,7 +524,7 @@ impl ManualSearchWindow {
     }
 }
 
-fn candidate_row(candidate: &LyricsCandidate) -> gtk::ListBoxRow {
+fn candidate_row(candidate: &LyricsCandidate, language: Language) -> gtk::ListBoxRow {
     let title = gtk::Label::builder()
         .label(&candidate.title)
         .halign(gtk::Align::Start)
@@ -415,7 +535,7 @@ fn candidate_row(candidate: &LyricsCandidate) -> gtk::ListBoxRow {
         .label(format!(
             "{}  ·  {}  ·  {}",
             candidate.artists.join(", "),
-            provider_name(candidate.provider),
+            provider_name(candidate.provider, language),
             duration_text(candidate.duration_ms)
         ))
         .halign(gtk::Align::Start)
@@ -431,6 +551,7 @@ fn candidate_row(candidate: &LyricsCandidate) -> gtk::ListBoxRow {
         .valign(gtk::Align::Center)
         .css_classes(["dim-label"])
         .build();
+    score.set_tooltip_text(Some(language.text(Text::MatchScore)));
     let row_content = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     row_content.add_css_class("manual-result-row");
     row_content.append(&labels);
@@ -438,11 +559,14 @@ fn candidate_row(candidate: &LyricsCandidate) -> gtk::ListBoxRow {
     gtk::ListBoxRow::builder().child(&row_content).build()
 }
 
-fn provider_name(provider: LyricsProvider) -> &'static str {
-    match provider {
-        LyricsProvider::QqMusic => "QQ 音乐",
-        LyricsProvider::NetEase => "网易云音乐",
-        LyricsProvider::LrcLib => "LRCLIB",
+fn provider_name(provider: LyricsProvider, language: Language) -> &'static str {
+    match (provider, language) {
+        (LyricsProvider::QqMusic, Language::English) => "QQ Music",
+        (LyricsProvider::NetEase, Language::English) => "NetEase Cloud Music",
+        (LyricsProvider::QqMusic, _) => "QQ 音乐",
+        (LyricsProvider::NetEase, Language::SimplifiedChinese) => "网易云音乐",
+        (LyricsProvider::NetEase, Language::TraditionalChinese) => "網易雲音樂",
+        (LyricsProvider::LrcLib, _) => "LRCLIB",
     }
 }
 
