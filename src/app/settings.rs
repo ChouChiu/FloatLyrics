@@ -6,11 +6,10 @@
 use gtk::prelude::*;
 use std::{cell::Cell, cell::RefCell, path::PathBuf, rc::Rc};
 
-use crate::{
-    config::AppConfig,
-    i18n::{I18n, Language, Text},
-    lyrics::LyricsProvider,
-};
+use floatlyrics_core::i18n::{I18n, Language, Text};
+use floatlyrics_lyrics::lyrics::LyricsProvider;
+
+use crate::config::AppConfig;
 
 use super::localization::{
     bind_button_tooltip, bind_label, bind_stack_page_title, bind_window_title,

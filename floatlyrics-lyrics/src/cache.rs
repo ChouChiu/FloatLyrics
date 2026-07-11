@@ -5,7 +5,8 @@ use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 use std::{path::Path, str::FromStr};
 
-use crate::{lyrics::LyricsProvider, track::TrackMetadata};
+use crate::lyrics::LyricsProvider;
+use floatlyrics_core::track::TrackMetadata;
 
 /// Trait abstracting lyrics cache operations.
 /// Enables decoupling controller and manual-search from the concrete [`Cache`] type.
@@ -162,7 +163,7 @@ impl Cache {
         raw_lyrics: &str,
     ) -> Result<i64> {
         let artists_json = serde_json::to_string(artists)?;
-        let content_hash = crate::track::track_fingerprint(title, artists, None, None)
+        let content_hash = floatlyrics_core::track::track_fingerprint(title, artists, None, None)
             + ":"
             + &hash_content(raw_lyrics);
 

@@ -4,7 +4,7 @@
 use anyhow::Result;
 use std::{cmp::Reverse, collections::HashSet};
 
-use crate::track::TrackMetadata;
+use floatlyrics_core::track::TrackMetadata;
 
 use super::{
     model::{FetchedLyrics, LyricsCandidate, LyricsProvider},

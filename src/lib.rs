@@ -2,19 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 pub mod app;
-pub mod cache;
 pub mod config;
-pub mod i18n;
-pub mod lyrics;
 pub mod mpris;
-pub mod paths;
-pub mod telemetry;
-pub mod track;
 
 use anyhow::Result;
 use clap::Parser;
 use config::AppConfig;
-use paths::AppPaths;
+use floatlyrics_core::paths::AppPaths;
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -43,7 +37,7 @@ pub fn run() -> Result<()> {
     configure_default_gtk_renderer();
 
     let cli = Cli::parse();
-    telemetry::init(cli.debug)?;
+    floatlyrics_core::telemetry::init(cli.debug)?;
 
     let paths = AppPaths::resolve(cli.config.as_deref())?;
     let mut config = AppConfig::load_or_default(&paths.config_file)?;

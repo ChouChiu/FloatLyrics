@@ -5,7 +5,7 @@
 
 use gtk::prelude::*;
 
-use crate::i18n::{I18n, Text};
+use floatlyrics_core::i18n::{I18n, Text};
 
 pub(super) fn bind_label(label: &gtk::Label, i18n: &I18n, key: Text) {
     let label = label.clone();

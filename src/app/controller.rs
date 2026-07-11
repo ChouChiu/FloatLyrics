@@ -5,13 +5,18 @@
 
 use std::{cell::RefCell, rc::Rc, sync::mpsc, time::Instant};
 
-use crate::{
-    cache::{CachedLyrics, LyricsCache, ProviderResultInsert},
-    config::AppConfig,
+use floatlyrics_core::{
     i18n::{Message, Text},
-    lyrics::{FetchedLyrics, SearchPlan, search_best_lyrics, timed_lines_from_raw},
-    mpris::{SpotifyPlayerState, SpotifyWatcherEvent},
     track::TrackMetadata,
+};
+use floatlyrics_lyrics::{
+    cache::{CachedLyrics, LyricsCache, ProviderResultInsert},
+    lyrics::{FetchedLyrics, SearchPlan, search_best_lyrics, timed_lines_from_raw},
+};
+
+use crate::{
+    config::AppConfig,
+    mpris::{SpotifyPlayerState, SpotifyWatcherEvent},
 };
 
 use super::{
@@ -449,7 +454,7 @@ fn spawn_lyrics_fetch(
     runtime: &tokio::runtime::Handle,
     sender: mpsc::Sender<LyricsFetchEvent>,
     track: TrackMetadata,
-    provider_order: Vec<crate::lyrics::LyricsProvider>,
+    provider_order: Vec<floatlyrics_lyrics::lyrics::LyricsProvider>,
     track_fingerprint: String,
 ) {
     runtime.spawn(async move {
@@ -474,7 +479,7 @@ fn has_cached_translation(state: &LyricsDisplayState) -> bool {
     })
 }
 
-fn active_provider_order(config: &AppConfig) -> Vec<crate::lyrics::LyricsProvider> {
+fn active_provider_order(config: &AppConfig) -> Vec<floatlyrics_lyrics::lyrics::LyricsProvider> {
     SearchPlan::new(config.lyrics.provider_order.clone())
         .providers()
         .to_vec()

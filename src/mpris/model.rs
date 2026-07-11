@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, time::Instant};
 use zvariant::{OwnedObjectPath, OwnedValue};
 
-use crate::track::TrackMetadata;
+use floatlyrics_core::track::TrackMetadata;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpotifyWatcherEvent {

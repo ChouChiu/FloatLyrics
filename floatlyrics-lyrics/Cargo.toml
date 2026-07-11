@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 ChouChiu
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "floatlyrics-lyrics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Lyrics domain logic for FloatLyrics"
+repository.workspace = true
+
+[dependencies]
+floatlyrics-core = { path = "../floatlyrics-core" }
+anyhow.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+serde_json = "1"
+sha2 = "0.10"
+lyrics-helper = "0.1.5"
+rusqlite = { version = "0.37", features = ["bundled"] }
+
+[dev-dependencies]
+tempfile = "3"

@@ -18,13 +18,10 @@ use anyhow::{Context, Result};
 use gtk::prelude::*;
 use std::{cell::RefCell, ffi::OsStr, rc::Rc, sync::mpsc};
 
-use crate::{
-    cache::{Cache, LyricsCache},
-    config::AppConfig,
-    i18n::I18n,
-    mpris::spawn_spotify_watcher_with_prefix,
-    paths::AppPaths,
-};
+use floatlyrics_core::{i18n::I18n, paths::AppPaths};
+use floatlyrics_lyrics::cache::{Cache, LyricsCache};
+
+use crate::{config::AppConfig, mpris::spawn_spotify_watcher_with_prefix};
 
 use view::LyricsView;
 

@@ -5,12 +5,17 @@
 
 use std::time::Instant;
 
+use floatlyrics_core::{
+    i18n::{Language, Message, Text},
+    track::TrackMetadata,
+};
+use floatlyrics_lyrics::lyrics::{
+    TimedLine, TimedSyllable, active_line_index, line_index_at_or_before,
+};
+
 use crate::{
     config::AppConfig,
-    i18n::{Language, Message, Text},
-    lyrics::{TimedLine, TimedSyllable, active_line_index, line_index_at_or_before},
     mpris::{PlaybackStatus, SpotifyPlayerState},
-    track::TrackMetadata,
 };
 
 #[derive(Debug, Clone, Default)]

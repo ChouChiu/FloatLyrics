@@ -10,10 +10,9 @@ use std::{
     rc::Rc,
 };
 
-use crate::{
-    config::AppConfig,
-    i18n::{I18n, Text},
-};
+use floatlyrics_core::i18n::{I18n, Text};
+
+use crate::config::AppConfig;
 mod css;
 mod positioning;
 mod rendering;

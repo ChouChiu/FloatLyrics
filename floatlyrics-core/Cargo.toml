@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 ChouChiu
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "floatlyrics-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Core types and utilities for FloatLyrics"
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+tracing-subscriber.workspace = true
+directories = "6"
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
+toml = "0.9"

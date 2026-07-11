@@ -6,7 +6,7 @@
 use gtk::prelude::*;
 use std::{cell::RefCell, rc::Rc};
 
-use crate::lyrics::TimedSyllable;
+use floatlyrics_lyrics::lyrics::TimedSyllable;
 
 use super::super::model::{KaraokeRenderState, LyricSlotText, syllable_progress};
 

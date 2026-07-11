@@ -58,7 +58,7 @@ fn parse_and_export_lrc_through_lyrics_helper() {
 
 #[test]
 fn maps_track_metadata_for_lyrics_helper_search() {
-    let track = crate::track::TrackMetadata {
+    let track = floatlyrics_core::track::TrackMetadata {
         title: "Song".to_string(),
         artists: vec!["Alice".to_string(), "Bob".to_string()],
         album: Some("Album".to_string()),

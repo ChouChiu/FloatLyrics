@@ -5,7 +5,7 @@
 
 use gtk::prelude::*;
 
-use crate::i18n::{I18n, Text};
+use floatlyrics_core::i18n::{I18n, Text};
 
 use super::localization::{bind_label, bind_stack_page_title, bind_window_title};
 

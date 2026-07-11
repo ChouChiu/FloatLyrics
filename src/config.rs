@@ -9,7 +9,8 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::{i18n::Language, lyrics::LyricsProvider};
+use floatlyrics_core::i18n::Language;
+use floatlyrics_lyrics::lyrics::LyricsProvider;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {

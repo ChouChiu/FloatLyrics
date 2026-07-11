@@ -6,14 +6,16 @@
 use gtk::prelude::*;
 use std::{cell::Cell, cell::RefCell, rc::Rc, sync::mpsc, time::Duration};
 
-use crate::{
-    cache::LyricsCache,
+use floatlyrics_core::{
     i18n::{I18n, Language, Text},
+    track::TrackMetadata,
+};
+use floatlyrics_lyrics::{
+    cache::LyricsCache,
     lyrics::{
         FetchedLyrics, LyricsCandidate, LyricsProvider, fetch_candidate_lyrics,
         search_lyrics_candidates,
     },
-    track::TrackMetadata,
 };
 
 use super::{
