@@ -206,32 +206,6 @@ pub(super) fn apply_position_sample(
     true
 }
 
-pub(super) fn progress_fraction(position_ms: Option<u64>, duration_ms: Option<u64>) -> Option<f64> {
-    let position_ms = position_ms?;
-    let duration_ms = duration_ms?;
-    if duration_ms == 0 {
-        return None;
-    }
-    Some((position_ms as f64 / duration_ms as f64).clamp(0.0, 1.0))
-}
-
-pub(super) fn progress_text(position_ms: Option<u64>, duration_ms: Option<u64>) -> Option<String> {
-    let position = position_ms?;
-    Some(match duration_ms {
-        Some(duration) if duration > 0 => format!(
-            "{} / {}",
-            format_duration(position),
-            format_duration(duration)
-        ),
-        _ => format_duration(position),
-    })
-}
-
-fn format_duration(ms: u64) -> String {
-    let total_seconds = ms / 1_000;
-    format!("{}:{:02}", total_seconds / 60, total_seconds % 60)
-}
-
 #[cfg(test)]
 #[path = "../test/model_test.rs"]
 mod tests;

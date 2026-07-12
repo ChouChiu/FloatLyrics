@@ -80,29 +80,6 @@ pub(super) fn panel_css(panel_alpha: f64) -> String {
             margin: 0;
         }
 
-        .floating-progress {
-            min-height: 4px;
-            margin-top: 3px;
-        }
-
-        .floating-progress trough {
-            min-height: 4px;
-            border-radius: 2px;
-            background: rgba(255,255,255,0.22);
-        }
-
-        .floating-progress progress {
-            min-height: 4px;
-            border-radius: 2px;
-            background: @accent_color;
-        }
-
-        .floating-progress-label {
-            color: rgba(255,255,255,0.74);
-            font-size: 12px;
-            text-shadow: 0 2px 8px rgba(0,0,0,0.85);
-        }
-
         .floating-separator {
             margin: 3px 0 1px 0;
             background: rgba(255,255,255,0.24);

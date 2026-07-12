@@ -49,7 +49,6 @@ struct AppModel {
     controller: controller::Controller,
     song_info: String,
     lyrics: LyricsPresentation,
-    progress: (Option<u64>, Option<u64>),
 }
 
 #[derive(Debug, Clone)]
@@ -64,8 +63,6 @@ enum AppMsg {
     SetSongInfo(String),
     ShowLyrics(model::LyricSlotText, String),
     ShowStatus(floatlyrics_core::i18n::Text),
-    SetProgress(Option<u64>, Option<u64>),
-    ResetProgress,
     OpenSettings,
     OpenManualSearch,
     OpenAbout,
@@ -179,7 +176,6 @@ impl SimpleComponent for AppModel {
             controller,
             song_info: "FloatLyrics".to_string(),
             lyrics: LyricsPresentation::Status(floatlyrics_core::i18n::Text::OpenSpotify),
-            progress: (None, None),
         };
         let widgets = view_output!();
         ComponentParts { model, widgets }
@@ -193,10 +189,6 @@ impl SimpleComponent for AppModel {
                 self.lyrics = LyricsPresentation::Content(value, key);
             }
             AppMsg::ShowStatus(key) => self.lyrics = LyricsPresentation::Status(key),
-            AppMsg::SetProgress(position_ms, duration_ms) => {
-                self.progress = (position_ms, duration_ms);
-            }
-            AppMsg::ResetProgress => self.progress = (None, None),
             AppMsg::OpenSettings => {
                 let _ = self.settings.sender().send(settings::SettingsMsg::Show);
             }
@@ -233,12 +225,6 @@ impl SimpleComponent for AppModel {
                 self.overlay.show_lyrics(value.clone(), key);
             }
             LyricsPresentation::Status(key) => self.overlay.show_status(*key),
-        }
-        let (position_ms, duration_ms) = self.progress;
-        if position_ms.is_none() && duration_ms.is_none() {
-            self.overlay.reset_progress();
-        } else {
-            self.overlay.set_progress(position_ms, duration_ms);
         }
     }
 }

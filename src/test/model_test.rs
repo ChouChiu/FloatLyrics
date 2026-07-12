@@ -2,23 +2,6 @@ use super::*;
 use std::time::Duration;
 
 #[test]
-fn formats_progress_text() {
-    assert_eq!(
-        progress_text(Some(65_000), Some(185_000)).as_deref(),
-        Some("1:05 / 3:05")
-    );
-    assert_eq!(progress_text(Some(5_000), None).as_deref(), Some("0:05"));
-    assert_eq!(progress_text(None, Some(10_000)), None);
-}
-
-#[test]
-fn clamps_progress_fraction() {
-    assert_eq!(progress_fraction(Some(50), Some(100)), Some(0.5));
-    assert_eq!(progress_fraction(Some(150), Some(100)), Some(1.0));
-    assert_eq!(progress_fraction(Some(50), Some(0)), None);
-}
-
-#[test]
 fn advances_local_clock_only_while_playing() {
     let playing = snapshot(PlaybackStatus::Playing, Duration::from_millis(1_500));
     let paused = snapshot(PlaybackStatus::Paused, Duration::from_millis(1_500));

@@ -20,7 +20,7 @@ mod rendering;
 
 use super::AppMsg;
 use super::localization::bind_button_tooltip;
-use super::model::{KaraokeRenderState, LyricSlotText, progress_fraction, progress_text};
+use super::model::{KaraokeRenderState, LyricSlotText};
 use positioning::{
     SharedPlacement, apply_snap_css_classes, attach_floating_drag, available_panel_width,
     bottom_margin_from_placement, initial_x, left_margin_for_width,
@@ -110,27 +110,6 @@ impl WidgetTemplate for OverlayPanel {
                 },
             },
 
-            gtk::Box {
-                set_orientation: gtk::Orientation::Horizontal,
-                set_spacing: 8,
-                set_halign: gtk::Align::Fill,
-
-                #[name = "progress"]
-                gtk::ProgressBar {
-                    set_hexpand: true,
-                    set_valign: gtk::Align::Center,
-                    add_css_class: "floating-progress",
-                },
-                #[name = "progress_label"]
-                gtk::Label {
-                    set_halign: gtk::Align::End,
-                    set_valign: gtk::Align::Center,
-                    set_width_chars: 12,
-                    set_single_line_mode: true,
-                    add_css_class: "floating-progress-label",
-                },
-            },
-
             gtk::Separator {
                 set_orientation: gtk::Orientation::Horizontal,
                 add_css_class: "floating-separator",
@@ -158,8 +137,6 @@ pub(super) trait LyricsView {
     fn set_song_info(&self, value: &str);
     fn show_lyrics(&self, value: LyricSlotText, key: &str);
     fn show_status(&self, key: Text);
-    fn set_progress(&self, position_ms: Option<u64>, duration_ms: Option<u64>);
-    fn reset_progress(&self);
 }
 
 /// Message-only handle to the overlay component state.
@@ -189,16 +166,6 @@ impl LyricsView for OverlaySender {
     fn show_status(&self, key: Text) {
         let _ = self.sender.send(AppMsg::ShowStatus(key));
     }
-
-    fn set_progress(&self, position_ms: Option<u64>, duration_ms: Option<u64>) {
-        let _ = self
-            .sender
-            .send(AppMsg::SetProgress(position_ms, duration_ms));
-    }
-
-    fn reset_progress(&self) {
-        let _ = self.sender.send(AppMsg::ResetProgress);
-    }
 }
 
 #[derive(Clone)]
@@ -211,8 +178,6 @@ pub(super) struct OverlayView {
     font_provider: gtk::CssProvider,
     placement: SharedPlacement,
     song_info: gtk::Label,
-    progress: gtk::ProgressBar,
-    progress_label: gtk::Label,
     lyrics_stack: gtk::Stack,
     lyric_slots: [LyricSlotWidgets; 2],
     lyrics_transition: Rc<RefCell<LyricsTransitionState>>,
@@ -273,8 +238,6 @@ pub(super) fn build(
     let manual_search_button = panel.manual_search_button.clone();
     let settings_button = panel.settings_button.clone();
     let close_button = panel.close_button.clone();
-    let progress = panel.progress.clone();
-    let progress_label = panel.progress_label.clone();
     let lyrics_stack = panel.lyrics_stack.clone();
     let content = panel.content.clone();
 
@@ -355,8 +318,6 @@ pub(super) fn build(
         font_provider,
         placement,
         song_info,
-        progress,
-        progress_label,
         lyrics_stack,
         lyric_slots: [primary, secondary],
         lyrics_transition,
@@ -567,22 +528,6 @@ fn set_lyric_slot(slot: &LyricSlotWidgets, value: &LyricSlotText) {
     slot.translation_row.set_visible(true);
 }
 
-fn update_progress(floating: &OverlayView, position_ms: Option<u64>, duration_ms: Option<u64>) {
-    floating
-        .progress
-        .set_fraction(progress_fraction(position_ms, duration_ms).unwrap_or(0.0));
-    floating.progress_label.set_label(
-        progress_text(position_ms, duration_ms)
-            .as_deref()
-            .unwrap_or(""),
-    );
-}
-
-fn reset_progress(floating: &OverlayView) {
-    floating.progress.set_fraction(0.0);
-    floating.progress_label.set_label("");
-}
-
 impl OverlayView {
     pub(super) fn set_song_info(&self, value: &str) {
         self.song_info.set_label(value);
@@ -596,14 +541,6 @@ impl OverlayView {
     pub(super) fn show_status(&self, key: Text) {
         *self.static_status.borrow_mut() = Some(key);
         set_status_lyrics(self, self.i18n.text(key), key);
-    }
-
-    pub(super) fn set_progress(&self, position_ms: Option<u64>, duration_ms: Option<u64>) {
-        update_progress(self, position_ms, duration_ms);
-    }
-
-    pub(super) fn reset_progress(&self) {
-        reset_progress(self);
     }
 
     pub(super) fn tick_widget(&self) -> gtk::Stack {

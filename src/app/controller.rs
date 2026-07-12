@@ -161,7 +161,7 @@ impl Controller {
                     ctx.lyrics_state,
                 );
             }
-            refresh_progress_from_clock(snapshot, ctx.floating, ctx.config, ctx.lyrics_state);
+            refresh_lyrics_display(snapshot, ctx.floating, ctx.config, ctx.lyrics_state);
         }
     }
 }
@@ -194,7 +194,6 @@ fn handle_spotify_event(event: &SpotifyWatcherEvent, ctx: &SpotifyUiContext<'_>)
             *ctx.lyrics_state.borrow_mut() = LyricsDisplayState::default();
             ctx.floating.set_song_info("FloatLyrics");
             ctx.floating.show_status(Text::OpenSpotify);
-            ctx.floating.reset_progress();
         }
         SpotifyWatcherEvent::Error(message) => {
             *ctx.latest.borrow_mut() = None;
@@ -202,7 +201,6 @@ fn handle_spotify_event(event: &SpotifyWatcherEvent, ctx: &SpotifyUiContext<'_>)
             tracing::warn!(%message, "Spotify listener error");
             ctx.floating.set_song_info("FloatLyrics");
             ctx.floating.show_status(Text::SpotifyAttention);
-            ctx.floating.reset_progress();
         }
     }
 }
@@ -230,11 +228,10 @@ fn update_spotify_state(state: &SpotifyPlayerState, ctx: &SpotifyUiContext<'_>) 
     } else {
         ctx.floating.set_song_info("FloatLyrics");
         ctx.floating.show_status(Text::WaitingForMetadata);
-        ctx.floating.reset_progress();
     }
 }
 
-fn refresh_progress_from_clock(
+fn refresh_lyrics_display(
     snapshot: &PlaybackSnapshot,
     floating: &dyn LyricsView,
     config: &AppConfig,
@@ -263,7 +260,6 @@ fn update_track_display(
     };
 
     floating.set_song_info(&format!("{} - {}", track.title, track.display_artist()));
-    floating.set_progress(position_ms, track.duration_ms);
     let frame = lyrics_frame(
         &lyrics_state.borrow(),
         config,
