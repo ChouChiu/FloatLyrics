@@ -631,7 +631,6 @@ fn provider_name(provider: LyricsProvider, language: Language) -> &'static str {
         (LyricsProvider::QqMusic, _) => "QQ 音乐",
         (LyricsProvider::NetEase, Language::SimplifiedChinese) => "网易云音乐",
         (LyricsProvider::NetEase, Language::TraditionalChinese) => "網易雲音樂",
-        (LyricsProvider::LrcLib, _) => "LRCLIB",
     }
 }
 

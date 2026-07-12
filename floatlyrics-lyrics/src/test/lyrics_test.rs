@@ -213,17 +213,3 @@ fn filters_english_composer_and_arranged_by_lines() {
     );
     assert_eq!(lines[0].text, "Hello World");
 }
-
-#[test]
-fn search_plan_filters_removed_lrclib_provider() {
-    let plan = SearchPlan::new([
-        LyricsProvider::LrcLib,
-        LyricsProvider::QqMusic,
-        LyricsProvider::NetEase,
-    ]);
-
-    assert_eq!(
-        plan.providers(),
-        &[LyricsProvider::QqMusic, LyricsProvider::NetEase]
-    );
-}

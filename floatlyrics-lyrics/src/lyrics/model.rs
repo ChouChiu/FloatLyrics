@@ -13,8 +13,6 @@ pub enum LyricsProvider {
     QqMusic,
     /// NetEase Cloud Music.
     NetEase,
-    /// LRCLIB, retained for configuration compatibility but not searched.
-    LrcLib,
 }
 
 impl LyricsProvider {
@@ -28,7 +26,6 @@ impl LyricsProvider {
         match self {
             Self::QqMusic => "qq-music",
             Self::NetEase => "netease",
-            Self::LrcLib => "lrclib",
         }
     }
 }
@@ -46,7 +43,6 @@ impl std::str::FromStr for LyricsProvider {
         match value {
             "qq-music" | "qq" => Ok(Self::QqMusic),
             "netease" | "netease-cloud-music" => Ok(Self::NetEase),
-            "lrclib" => Ok(Self::LrcLib),
             _ => Err(LyricsProviderParseError(value.to_string())),
         }
     }

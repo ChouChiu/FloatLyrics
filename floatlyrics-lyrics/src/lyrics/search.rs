@@ -39,7 +39,6 @@ pub async fn search_lyrics_candidates(
             LyricsProvider::NetEase => {
                 search_with_refinement(&NeteaseSearcher, &metadata, false).await
             }
-            LyricsProvider::LrcLib => Vec::new(),
         };
         candidates.extend(results.into_iter().map(|result| LyricsCandidate {
             provider: *provider,
@@ -143,7 +142,6 @@ async fn search_provider(
         LyricsProvider::NetEase => {
             search_for_best_result_with_match(&NeteaseSearcher, metadata, MatchType::Medium).await
         }
-        LyricsProvider::LrcLib => return Ok(None),
     };
 
     let Some(result) = result else {
@@ -215,7 +213,6 @@ async fn fetch_raw_lyrics(track: ProviderTrackRef<'_>) -> Option<String> {
             let song_id = track.id.parse().ok()?;
             netease::api::get_lyrics(song_id).await
         }
-        LyricsProvider::LrcLib => return None,
     };
 
     response.and_then(|(lyrics, translation)| {
@@ -242,12 +239,11 @@ pub struct SearchPlan {
 }
 
 impl SearchPlan {
-    /// Builds a plan, removing unsupported and repeated providers.
+    /// Builds a plan, removing repeated providers.
     pub fn new(providers: impl IntoIterator<Item = LyricsProvider>) -> Self {
         let mut providers = providers.into_iter().collect::<Vec<_>>();
-        let supported = LyricsProvider::default_order();
         let mut seen = HashSet::new();
-        providers.retain(|provider| supported.contains(provider) && seen.insert(*provider));
+        providers.retain(|provider| seen.insert(*provider));
         Self { providers }
     }
 

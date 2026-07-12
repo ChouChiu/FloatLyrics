@@ -30,7 +30,7 @@ fn manual_match_wins_over_provider_cache() {
 
     let manual_id = cache
         .insert_lyrics(LyricsInsert {
-            provider: LyricsProvider::LrcLib,
+            provider: LyricsProvider::NetEase,
             provider_track_id: Some("manual-1"),
             title: "A Song",
             artists: &track.artists,
@@ -44,7 +44,7 @@ fn manual_match_wins_over_provider_cache() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(lyrics.provider, LyricsProvider::LrcLib);
+    assert_eq!(lyrics.provider, LyricsProvider::NetEase);
     assert!(lyrics.raw_lyrics.contains("manual"));
 }
 
