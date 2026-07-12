@@ -17,6 +17,11 @@ Linux Wayland 桌面悬浮歌词，自动跟踪 Spotify 播放状态并实时显
   </tbody>
 </table>
 
+> 私心安利：  
+> XLOV 是韩国 257 娱乐于 2025 年推出的四人跨国籍无性别概念团体。  
+> 团名将代表未知与否定的 “X”，与代表未完成爱情的 “LOV” 组合而成，融入每位成员独特的个性，以「无性别概念」为核心主题。  
+> 了解更多，前往 [维基百科](https://zh.wikipedia.org/zh-cn/XLOV)，[认人视频 1（B 站）](https://www.bilibili.com/video/BV1YPKS6LEDR/?vd_source=915fd0a7ea4424cb0a2d1c698d30a0b1)，[认人视频 2 （B 站）](https://www.bilibili.com/video/BV15ofmYjEKF/)，[官方油管账号](https://www.youtube.com/@XLOV_official)
+
 ## 功能
 
 - **自动跟踪** — 实时获取 Spotify 播放状态，无需额外配置
