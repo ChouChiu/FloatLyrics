@@ -123,6 +123,8 @@ pub(super) fn lyric_text_widget(
     karaoke_size: Option<(i32, i32)>,
     font_family: Rc<RefCell<String>>,
     lyric_font_size: Rc<Cell<i32>>,
+    played_color: Rc<Cell<(f64, f64, f64, f64)>>,
+    unplayed_color: Rc<Cell<(f64, f64, f64, f64)>>,
 ) -> (
     gtk::Widget,
     Option<gtk::DrawingArea>,
@@ -152,6 +154,8 @@ pub(super) fn lyric_text_widget(
                 &state.borrow(),
                 &font_family.borrow(),
                 font_size.get(),
+                played_color.get(),
+                unplayed_color.get(),
             );
         });
     }
@@ -189,6 +193,7 @@ fn draw_text_line(
     draw_pango_layout(cr, &layout, 0.0, 0.0, state.style.color);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_karaoke_line(
     area: &gtk::DrawingArea,
     cr: &gtk::cairo::Context,
@@ -197,6 +202,8 @@ fn draw_karaoke_line(
     state: &KaraokeRenderState,
     font_family: &str,
     font_px: i32,
+    played_color: (f64, f64, f64, f64),
+    unplayed_color: (f64, f64, f64, f64),
 ) {
     if state.text.trim().is_empty() {
         return;
@@ -215,12 +222,12 @@ fn draw_karaoke_line(
     let y = ((height - text_height).max(0) as f64) / 2.0;
     let fill_width = karaoke_fill_width(&layout, state);
 
-    draw_pango_layout(cr, &layout, x, y, (0.62, 0.65, 0.70, 1.0));
+    draw_pango_layout(cr, &layout, x, y, unplayed_color);
     if fill_width > 0.0 {
         let _ = cr.save();
         cr.rectangle(x, 0.0, fill_width, height as f64);
         cr.clip();
-        draw_pango_layout(cr, &layout, x, y, (1.0, 1.0, 1.0, 1.0));
+        draw_pango_layout(cr, &layout, x, y, played_color);
         let _ = cr.restore();
     }
 }

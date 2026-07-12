@@ -13,7 +13,7 @@ use std::{
 
 use floatlyrics_core::i18n::{I18n, Text};
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, parse_hex_color};
 mod css;
 mod positioning;
 mod rendering;
@@ -186,6 +186,8 @@ pub(super) struct OverlayView {
     static_status: Rc<RefCell<Option<Text>>>,
     lyric_font_size: Rc<Cell<i32>>,
     translation_font_size: Rc<Cell<i32>>,
+    karaoke_played_color: Rc<Cell<(f64, f64, f64, f64)>>,
+    karaoke_unplayed_color: Rc<Cell<(f64, f64, f64, f64)>>,
 }
 
 #[derive(Clone)]
@@ -250,26 +252,33 @@ pub(super) fn build(
 
     let lyric_font_size = Rc::new(Cell::new(config.lyrics.lyric_font_size));
     let translation_font_size = Rc::new(Cell::new(config.lyrics.translation_font_size));
+    let karaoke_played_color = Rc::new(Cell::new(parse_hex_color(&config.lyrics.played_color)));
+    let karaoke_unplayed_color = Rc::new(Cell::new(parse_hex_color(&config.lyrics.unplayed_color)));
+    let translation_color = parse_hex_color(&config.lyrics.translation_color);
 
     let primary = lyric_slot(
         ["floating-slot-current"],
         ["floating-lyric-current"],
         i18n.text(Text::OpenSpotify),
         Some((panel_width, CURRENT_KARAOKE_HEIGHT)),
-        translation_style(true, config.lyrics.translation_font_size),
+        translation_style(true, config.lyrics.translation_font_size, translation_color),
         panel_width,
         Rc::clone(&font_family),
         Rc::clone(&lyric_font_size),
+        Rc::clone(&karaoke_played_color),
+        Rc::clone(&karaoke_unplayed_color),
     );
     let secondary = lyric_slot(
         ["floating-slot-current"],
         ["floating-lyric-current"],
         "",
         Some((panel_width, CURRENT_KARAOKE_HEIGHT)),
-        translation_style(true, config.lyrics.translation_font_size),
+        translation_style(true, config.lyrics.translation_font_size, translation_color),
         panel_width,
         Rc::clone(&font_family),
         Rc::clone(&lyric_font_size),
+        Rc::clone(&karaoke_played_color),
+        Rc::clone(&karaoke_unplayed_color),
     );
 
     lyrics_stack.add_named(&primary.container, Some("primary"));
@@ -348,6 +357,8 @@ pub(super) fn build(
         static_status: Rc::new(RefCell::new(Some(Text::OpenSpotify))),
         lyric_font_size,
         translation_font_size,
+        karaoke_played_color,
+        karaoke_unplayed_color,
     };
     {
         let overlay = overlay.clone();
@@ -370,6 +381,8 @@ fn lyric_slot(
     panel_width: i32,
     font_family: Rc<RefCell<String>>,
     lyric_font_size: Rc<Cell<i32>>,
+    karaoke_played_color: Rc<Cell<(f64, f64, f64, f64)>>,
+    karaoke_unplayed_color: Rc<Cell<(f64, f64, f64, f64)>>,
 ) -> LyricSlotWidgets {
     let text = gtk::Label::builder()
         .label(initial_text)
@@ -381,8 +394,14 @@ fn lyric_slot(
         .css_classes(text_classes)
         .build();
 
-    let (text_widget, karaoke_area, karaoke_state) =
-        lyric_text_widget(&text, karaoke_size, Rc::clone(&font_family), lyric_font_size);
+    let (text_widget, karaoke_area, karaoke_state) = lyric_text_widget(
+        &text,
+        karaoke_size,
+        Rc::clone(&font_family),
+        lyric_font_size,
+        karaoke_played_color,
+        karaoke_unplayed_color,
+    );
     let (translation_area, translation_state) = text_line_area(
         panel_width,
         translation_line_height(translation_style),
@@ -411,11 +430,11 @@ fn lyric_slot(
     }
 }
 
-fn translation_style(is_current: bool, translation_font_px: i32) -> TextLineStyle {
-    let (font_px, color) = if is_current {
-        (translation_font_px, (1.0, 1.0, 1.0, 0.78))
+fn translation_style(is_current: bool, translation_font_px: i32, color: (f64, f64, f64, f64)) -> TextLineStyle {
+    let font_px = if is_current {
+        translation_font_px
     } else {
-        ((translation_font_px * 5 / 6).max(8), (1.0, 1.0, 1.0, 0.50))
+        (translation_font_px * 5 / 6).max(8)
     };
     TextLineStyle { font_px, color }
 }
@@ -609,13 +628,16 @@ impl OverlayView {
         );
         self.lyric_font_size.set(config.lyrics.lyric_font_size);
         self.translation_font_size.set(config.lyrics.translation_font_size);
+        self.karaoke_played_color.set(parse_hex_color(&config.lyrics.played_color));
+        self.karaoke_unplayed_color.set(parse_hex_color(&config.lyrics.unplayed_color));
+        let translation_color = parse_hex_color(&config.lyrics.translation_color);
         let family = font_family(&config.lyrics.font_order);
         *self.font_family.borrow_mut() = family.clone();
         load_font_css(&self.font_provider, &family);
         for slot in &self.lyric_slots {
             slot.translation_state.borrow_mut().font_family = family.clone();
             let new_translation_style =
-                translation_style(true, config.lyrics.translation_font_size);
+                translation_style(true, config.lyrics.translation_font_size, translation_color);
             slot.translation_state.borrow_mut().style = new_translation_style;
             slot.translation_area.queue_draw();
             if let Some(area) = &slot.karaoke_area {

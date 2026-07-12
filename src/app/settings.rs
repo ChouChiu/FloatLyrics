@@ -68,6 +68,9 @@ pub(super) enum SettingsMsg {
     SetProviderOrder(Vec<LyricsProvider>),
     SetLyricFontSize(i32),
     SetTranslationFontSize(i32),
+    SetPlayedColor(String),
+    SetUnplayedColor(String),
+    SetTranslationColor(String),
 }
 
 #[derive(Debug)]
@@ -246,6 +249,15 @@ impl SimpleComponent for SettingsModel {
             }
             SettingsMsg::SetTranslationFontSize(value) => {
                 self.draft.borrow_mut().lyrics.translation_font_size = value;
+            }
+            SettingsMsg::SetPlayedColor(value) => {
+                self.draft.borrow_mut().lyrics.played_color = value;
+            }
+            SettingsMsg::SetUnplayedColor(value) => {
+                self.draft.borrow_mut().lyrics.unplayed_color = value;
+            }
+            SettingsMsg::SetTranslationColor(value) => {
+                self.draft.borrow_mut().lyrics.translation_color = value;
             }
         }
         if should_persist {
@@ -485,6 +497,32 @@ fn display_page(
                 Text::TranslationFontSize,
                 Text::TranslationFontSizeDescription,
                 &translation_font_size,
+            ),
+        ]),
+        setting_card(&[
+            color_row(
+                i18n,
+                Text::PlayedColor,
+                Text::PlayedColorDescription,
+                &config.lyrics.played_color,
+                sender.clone(),
+                SettingsMsg::SetPlayedColor,
+            ),
+            color_row(
+                i18n,
+                Text::UnplayedColor,
+                Text::UnplayedColorDescription,
+                &config.lyrics.unplayed_color,
+                sender.clone(),
+                SettingsMsg::SetUnplayedColor,
+            ),
+            color_row(
+                i18n,
+                Text::TranslationColor,
+                Text::TranslationColorDescription,
+                &config.lyrics.translation_color,
+                sender.clone(),
+                SettingsMsg::SetTranslationColor,
             ),
         ])],
     )
@@ -847,6 +885,94 @@ fn setting_row(
     row.append(&labels);
     row.append(control);
     row
+}
+
+fn color_row(
+    i18n: &I18n,
+    title_key: Text,
+    description_key: Text,
+    initial_hex: &str,
+    sender: relm4::Sender<SettingsMsg>,
+    message: fn(String) -> SettingsMsg,
+) -> gtk::Box {
+    let current = Rc::new(RefCell::new(initial_hex.to_string()));
+
+    let swatch = gtk::DrawingArea::builder()
+        .width_request(26)
+        .height_request(26)
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
+        .build();
+    {
+        let current = Rc::clone(&current);
+        swatch.set_draw_func(move |_, cr, width, height| {
+            let (r, g, b, a) = crate::config::parse_hex_color(&current.borrow());
+            cr.set_source_rgba(r, g, b, a);
+            cr.rectangle(1.0, 1.0, (width as f64) - 2.0, (height as f64) - 2.0);
+            let _ = cr.fill();
+        });
+    }
+
+    let hex_label = gtk::Label::new(Some(initial_hex));
+    hex_label.set_css_classes(&["dim-label", "caption"]);
+
+    let button_content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    button_content.set_halign(gtk::Align::Center);
+    button_content.append(&swatch);
+    button_content.append(&hex_label);
+
+    let button = gtk::Button::builder()
+        .child(&button_content)
+        .width_request(190)
+        .build();
+
+    {
+        let current = Rc::clone(&current);
+        let swatch = swatch.clone();
+        let hex_label = hex_label.clone();
+        button.connect_clicked(move |btn| {
+            let dialog = gtk::ColorDialog::new();
+            dialog.set_with_alpha(true);
+            let parent = btn.root().and_downcast::<gtk::Window>();
+            let initial = hex_to_gdk_rgba(&current.borrow());
+            dialog.choose_rgba(
+                parent.as_ref(),
+                Some(&initial),
+                gtk::gio::Cancellable::NONE,
+                {
+                    let current = Rc::clone(&current);
+                    let swatch = swatch.clone();
+                    let hex_label = hex_label.clone();
+                    let sender = sender.clone();
+                    move |result| {
+                        if let Ok(color) = result {
+                            let hex = gdk_rgba_to_hex(&color);
+                            current.replace(hex.clone());
+                            hex_label.set_label(&hex);
+                            swatch.queue_draw();
+                            let _ = sender.send(message(hex));
+                        }
+                    }
+                },
+            );
+        });
+    }
+
+    setting_row(i18n, title_key, description_key, &button)
+}
+
+fn hex_to_gdk_rgba(hex: &str) -> gtk::gdk::RGBA {
+    let (r, g, b, a) = crate::config::parse_hex_color(hex);
+    gtk::gdk::RGBA::new(r as f32, g as f32, b as f32, a as f32)
+}
+
+fn gdk_rgba_to_hex(color: &gtk::gdk::RGBA) -> String {
+    crate::config::format_hex_color((
+        color.red() as f64,
+        color.green() as f64,
+        color.blue() as f64,
+        color.alpha() as f64,
+    ))
 }
 
 fn install_css() {
