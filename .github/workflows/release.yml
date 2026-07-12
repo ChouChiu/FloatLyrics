@@ -53,6 +53,9 @@ jobs:
           persist-credentials: false
           ref: ${{ env.RELEASE_TAG }}
 
+      - name: Mark workspace as safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Validate version tag
         run: |
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
