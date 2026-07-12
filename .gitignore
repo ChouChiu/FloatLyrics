@@ -29,6 +29,7 @@ rustc-ice-*.txt
 .reasonix/
 
 # makepkg / AUR packaging artifacts
+/.makepkg/
 pkg/
 *.pkg.tar.*
 *.tar.gz
