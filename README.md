@@ -45,6 +45,8 @@ Linux Wayland 桌面悬浮歌词，自动跟踪 Spotify 播放状态并实时显
 
 ```bash
 paru -S floatlyrics
+# OR
+yay -S floatlyrics
 ```
 
 ### Fedora / openSUSE
