@@ -29,8 +29,9 @@ if [[ $generate_srcinfo == true ]] && (( EUID == 0 )); then
 fi
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-source_pkgbuild="$repo_root/PKGBUILD"
-source_srcinfo="$repo_root/.SRCINFO"
+source_dir="$repo_root/packaging/aur/floatlyrics"
+source_pkgbuild="$source_dir/PKGBUILD"
+source_srcinfo="$source_dir/.SRCINFO"
 bin_dir="$repo_root/packaging/aur/floatlyrics-bin"
 bin_pkgbuild="$bin_dir/PKGBUILD"
 bin_srcinfo="$bin_dir/.SRCINFO"
@@ -59,7 +60,7 @@ if [[ $package_selection == all || $package_selection == floatlyrics ]]; then
     grep -Fxq "sha256sums=('$source_checksum')" "$source_pkgbuild"
     if [[ $generate_srcinfo == true ]]; then
         source_srcinfo_temp="$temp_dir/floatlyrics.SRCINFO"
-        makepkg --printsrcinfo > "$source_srcinfo_temp"
+        (cd "$source_dir" && makepkg --printsrcinfo) > "$source_srcinfo_temp"
         mv "$source_srcinfo_temp" "$source_srcinfo"
     fi
 fi

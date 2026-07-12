@@ -39,7 +39,7 @@ startup behavior belongs in `src/lib.rs` or a focused module.
 | `floatlyrics-core/src/i18n.rs` | locale selection, typed text keys, catalogue validation |
 | `data/locale/` | runtime catalogues for all supported locales |
 | `data/licenses/` | cargo-about template and generated dependency notices |
-| `packaging/` | packaging and AUR release automation |
+| `packaging/` | install scripts, AUR metadata, and packaging automation |
 
 ## Working rules
 
@@ -207,6 +207,8 @@ hand-edit `data/licenses/dependencies.json`; commit it together with `Cargo.lock
 ## Generated and release-sensitive files
 
 - Do not edit build output under `target/`.
+- Keep AUR metadata under `packaging/aur/<package>/`; do not add `PKGBUILD` or
+  `.SRCINFO` files at the repository root.
 - Do not change package metadata, AUR files, release workflows, or version numbers
   as a side effect of unrelated work.
 - When user-visible packaging assets change, check the corresponding entries in

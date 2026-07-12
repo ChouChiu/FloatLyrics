@@ -18,22 +18,24 @@ package_selection=$1
 version=$2
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+source_dir="$repo_root/packaging/aur/floatlyrics"
+bin_dir="$repo_root/packaging/aur/floatlyrics-bin"
 "$repo_root/packaging/update-aur-checksum.sh" "$package_selection" "$version"
 
 case $package_selection in
     all)
         packages=(floatlyrics floatlyrics-bin)
-        directories=("$repo_root" "$repo_root/packaging/aur/floatlyrics-bin")
-        diff_paths=(PKGBUILD .SRCINFO packaging/aur/floatlyrics-bin/PKGBUILD packaging/aur/floatlyrics-bin/.SRCINFO)
+        directories=("$source_dir" "$bin_dir")
+        diff_paths=(packaging/aur/floatlyrics/PKGBUILD packaging/aur/floatlyrics/.SRCINFO packaging/aur/floatlyrics-bin/PKGBUILD packaging/aur/floatlyrics-bin/.SRCINFO)
         ;;
     floatlyrics)
         packages=(floatlyrics)
-        directories=("$repo_root")
-        diff_paths=(PKGBUILD .SRCINFO)
+        directories=("$source_dir")
+        diff_paths=(packaging/aur/floatlyrics/PKGBUILD packaging/aur/floatlyrics/.SRCINFO)
         ;;
     floatlyrics-bin)
         packages=(floatlyrics-bin)
-        directories=("$repo_root/packaging/aur/floatlyrics-bin")
+        directories=("$bin_dir")
         diff_paths=(packaging/aur/floatlyrics-bin/PKGBUILD packaging/aur/floatlyrics-bin/.SRCINFO)
         ;;
 esac

@@ -70,7 +70,7 @@ floatlyrics (src/)              CLI、应用组装、Relm4/GTK4 UI、MPRIS
 | `floatlyrics-lyrics/src/` | 歌词解析、时间轴、搜索提供方与缓存 |
 | `floatlyrics-core/src/` | 跨 crate 的基础能力与稳定领域类型 |
 | `data/locale/` | 三种语言的 JSON 文案目录 |
-| `packaging/` | AUR 构建/发布脚本与发行资源 |
+| `packaging/` | 打包安装脚本、AUR 元数据与发布自动化 |
 
 ## 实现约定
 
@@ -181,7 +181,9 @@ UI、交互或窗口布局变化请附真实截图或录屏。新增配置键、
 packaging/build-aur.sh --cleanbuild
 ```
 
-产物会写入仓库根目录；脚本使用独立的 makepkg 工作目录，避免与 Rust 的 `src/` 冲突。
+源码版和预编译版 AUR 元数据分别位于 `packaging/aur/floatlyrics/` 与
+`packaging/aur/floatlyrics-bin/`。构建产物会写入仓库根目录；脚本使用独立的
+makepkg 工作目录，避免与 Rust 的 `src/` 冲突。
 
 只准备并校验两个 AUR 包的本地文件：
 
