@@ -14,6 +14,7 @@ pkgbase = floatlyrics
 	depends = libgcc
 	depends = openssl
 	depends = pango
+	depends = sqlite
 	source = floatlyrics-1.0.1.tar.gz::https://github.com/ChouChiu/FloatLyrics/archive/refs/tags/v1.0.1.tar.gz
 	sha256sums = d7aa22f3870f4b8a432f9b3ffe94cb1dac34b35333460e0e0bf96b664491406c
 
