@@ -47,9 +47,9 @@ Conventional Commits: `<type>(<scope>): <description>` — lowercase imperative 
 Common types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`.
 Common scopes: `app`, `lyrics`, `mpris`, `infra`, `ui`.
 
-## build.rs
+## Third-party licenses
 
-Generates `dep_list.rs` into `OUT_DIR` by running `cargo metadata --locked`. Consumed by About/Acknowledgements page. Touching `Cargo.toml`, `Cargo.lock`, or `build.rs` triggers re-run.
+`cargo-about` generates `data/licenses/dependencies.json` from the full dependency graph. The About/Open Source page embeds this file. After changing dependencies, regenerate it with the command documented in `CONTRIBUTING.md` and commit it together with `Cargo.lock`.
 
 ## Toolchain
 

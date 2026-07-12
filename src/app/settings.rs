@@ -171,7 +171,7 @@ impl SimpleComponent for SettingsModel {
             &stack,
             "general",
             Text::General,
-            "preferences-system-symbolic",
+            "emblem-system-symbolic",
             &general_page(&initial, sender.input_sender(), &i18n),
             &i18n,
         );

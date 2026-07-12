@@ -91,6 +91,16 @@ CI 执行命令：
 cargo test --locked --all-targets --all-features
 ```
 
+更新依赖后，还需要重新生成应用内的开源许可证清单：
+
+```bash
+cargo install --locked --features cli --version 0.9.1 cargo-about
+cargo about generate --locked --all-features data/licenses/about.hbs \
+  --output-file data/licenses/dependencies.json
+```
+
+生成结果必须和 `Cargo.lock` 一起提交。CI 会检查许可证清单是否为最新状态。
+
 筛选测试：
 
 ```bash

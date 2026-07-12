@@ -5,6 +5,7 @@
 
 use gtk::prelude::*;
 use relm4::{ComponentParts, ComponentSender, SimpleComponent};
+use serde::Deserialize;
 
 use floatlyrics_core::i18n::{I18n, Text};
 
@@ -14,6 +15,7 @@ const WINDOW_WIDTH: i32 = 560;
 const WINDOW_HEIGHT: i32 = 450;
 const PROJECT_URI: &str = "https://github.com/ChouChiu/FloatLyrics";
 const LYRICS_X_URI: &str = "https://github.com/MxIris-LyricsX-Project/LyricsX";
+const ACKNOWLEDGEMENTS_ICON: &str = "system-users-symbolic";
 
 pub(super) struct AboutModel {
     visible: bool,
@@ -81,7 +83,7 @@ impl SimpleComponent for AboutModel {
         let acknowledgements_page = acknowledgements_page(&i18n);
         let acknowledgements_stack_page =
             stack.add_titled(&acknowledgements_page, Some("acknowledgements"), "");
-        acknowledgements_stack_page.set_icon_name("emblem-favorite-symbolic");
+        acknowledgements_stack_page.set_icon_name(ACKNOWLEDGEMENTS_ICON);
         bind_stack_page_title(&acknowledgements_stack_page, &i18n, Text::Acknowledgements);
 
         let dependencies_page = dependencies_page(&i18n);
@@ -161,7 +163,7 @@ fn about_page(i18n: &I18n) -> gtk::Box {
 }
 
 fn acknowledgements_page(i18n: &I18n) -> gtk::Box {
-    let icon = gtk::Image::from_icon_name("emblem-favorite-symbolic");
+    let icon = gtk::Image::from_icon_name(ACKNOWLEDGEMENTS_ICON);
     icon.set_pixel_size(64);
     icon.add_css_class("acknowledgements-icon");
     let title = localized_label(i18n, Text::AcknowledgementsTitle, &["title-1"]);
@@ -193,9 +195,33 @@ fn localized_label(i18n: &I18n, key: Text, classes: &[&str]) -> gtk::Label {
     label
 }
 
-include!(concat!(env!("OUT_DIR"), "/dep_list.rs"));
+#[derive(Deserialize)]
+struct LicenseData {
+    dependencies: Vec<Dependency>,
+    licenses: Vec<DependencyLicense>,
+}
+
+#[derive(Deserialize)]
+struct Dependency {
+    name: String,
+    version: String,
+    license: String,
+}
+
+#[derive(Deserialize)]
+struct DependencyLicense {
+    name: String,
+    id: String,
+    text: String,
+}
 
 fn dependencies_page(i18n: &I18n) -> gtk::ScrolledWindow {
+    let license_data: LicenseData = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/data/licenses/dependencies.json"
+    )))
+    .expect("cargo-about generated valid dependency license data");
+
     let description = localized_label(i18n, Text::OpenSourceDescription, &["dim-label"]);
     description.set_wrap(true);
     description.set_max_width_chars(52);
@@ -206,15 +232,18 @@ fn dependencies_page(i18n: &I18n) -> gtk::ScrolledWindow {
         .selection_mode(gtk::SelectionMode::None)
         .build();
 
-    for (name, version, license) in DEPENDENCIES {
+    for dependency in license_data.dependencies {
         let name_label = gtk::Label::builder()
-            .label(*name)
+            .label(dependency.name)
             .halign(gtk::Align::Start)
             .hexpand(true)
             .css_classes(["heading"])
             .build();
         let meta = gtk::Label::builder()
-            .label(format!("v{version}  —  {license}"))
+            .label(format!(
+                "v{}  —  {}",
+                dependency.version, dependency.license
+            ))
             .halign(gtk::Align::Start)
             .css_classes(["dim-label", "caption"])
             .build();
@@ -233,6 +262,27 @@ fn dependencies_page(i18n: &I18n) -> gtk::ScrolledWindow {
     content.append(&description);
     content.append(&list);
 
+    let license_title = localized_label(i18n, Text::LicenseTexts, &["title-3"]);
+    license_title.set_halign(gtk::Align::Start);
+    license_title.set_margin_top(12);
+    content.append(&license_title);
+
+    for license in license_data.licenses {
+        let text = gtk::Label::builder()
+            .label(license.text)
+            .selectable(true)
+            .wrap(true)
+            .wrap_mode(gtk::pango::WrapMode::WordChar)
+            .xalign(0.0)
+            .css_classes(["license-text", "caption"])
+            .build();
+        let expander = gtk::Expander::builder()
+            .label(format!("{} ({})", license.name, license.id))
+            .child(&text)
+            .build();
+        content.append(&expander);
+    }
+
     gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .vscrollbar_policy(gtk::PolicyType::Automatic)
@@ -246,6 +296,7 @@ fn install_css() {
         .about-page { padding: 36px 48px; }
         .about-summary { font-size: 1.08em; }
         .acknowledgements-icon { color: @accent_color; }
+        .license-text { padding: 12px 18px; }
         "#,
     );
 }

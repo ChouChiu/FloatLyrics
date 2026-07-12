@@ -91,7 +91,7 @@ impl WidgetTemplate for OverlayPanel {
                     },
                     #[name = "settings_button"]
                     gtk::Button {
-                        set_icon_name: "preferences-system-symbolic",
+                        set_icon_name: "emblem-system-symbolic",
                         set_valign: gtk::Align::Center,
                         set_css_classes: &["flat", "circular", "floating-action-button"],
                         connect_clicked[sender = init.sender.clone()] => move |_| {

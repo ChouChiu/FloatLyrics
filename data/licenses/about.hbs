@@ -1,0 +1,22 @@
+{{!-- SPDX-FileCopyrightText: 2026 ChouChiu --}}
+{{!-- SPDX-License-Identifier: GPL-3.0-or-later --}}
+{
+  "dependencies": [
+    {{#each crates}}
+    {
+      "name": {{json package.name}},
+      "version": {{json package.version}},
+      "license": {{json license}}
+    }{{#unless @last}},{{/unless}}
+    {{/each}}
+  ],
+  "licenses": [
+    {{#each overview}}
+    {
+      "name": {{json name}},
+      "id": {{json id}},
+      "text": {{json text}}
+    }{{#unless @last}},{{/unless}}
+    {{/each}}
+  ]
+}

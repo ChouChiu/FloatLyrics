@@ -382,6 +382,7 @@ define_text_keys!(
     MatchScore,
     OpenSourceTitle,
     OpenSourceDescription,
+    LicenseTexts,
     CloseTooltip,
     LanguageName,
     DetailSeparator,

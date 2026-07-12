@@ -59,10 +59,6 @@ floatlyrics-lyrics = { path = "floatlyrics-lyrics" }
 [dev-dependencies]
 tempfile = "3"
 
-[build-dependencies]
-serde_json.workspace = true
-toml = "0.9"
-
 [package.metadata.deb]
 name = "floatlyrics"
 maintainer = "ChouChiu"

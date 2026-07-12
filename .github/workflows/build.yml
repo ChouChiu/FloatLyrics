@@ -57,6 +57,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-arch-cargo-
 
+      - name: Verify third-party license data
+        run: |
+          cargo install --locked --features cli --version 0.9.1 cargo-about
+          cargo about generate --locked --all-features data/licenses/about.hbs --output-file data/licenses/dependencies.json
+          git diff --exit-code -- data/licenses/dependencies.json
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -100,4 +106,3 @@ jobs:
           name: floatlyrics-rpm
           path: target/generate-rpm/*.rpm
           if-no-files-found: error
-
