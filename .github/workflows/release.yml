@@ -29,27 +29,22 @@ env:
 jobs:
   build-packages:
     name: Build .deb and .rpm packages
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 45
+    container:
+      image: archlinux:latest
 
     steps:
       - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libgtk-4-dev \
-            libgtk4-layer-shell-dev \
-            libpango1.0-dev \
-            libcairo2-dev \
-            libglib2.0-dev \
-            libssl-dev \
-            pkg-config
-
-      - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-          components: rustfmt, clippy
+        run: >-
+          pacman -Syu --noconfirm --needed
+          base-devel
+          git
+          gtk4
+          gtk4-layer-shell
+          openssl
+          rust
+          dpkg
 
       - name: Check out release tag
         uses: actions/checkout@v7
