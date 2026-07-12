@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+//! Serializable user preferences and atomic file persistence.
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -12,25 +14,36 @@ use std::{
 use floatlyrics_core::i18n::Language;
 use floatlyrics_lyrics::lyrics::LyricsProvider;
 
+/// Complete application configuration persisted as TOML.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
+    /// General application preferences.
     #[serde(default)]
     pub general: GeneralConfig,
+    /// Overlay window preferences.
     #[serde(default)]
     pub window: WindowConfig,
+    /// Lyrics display and provider preferences.
     #[serde(default)]
     pub lyrics: LyricsConfig,
+    /// Spotify-compatible MPRIS preferences.
     #[serde(default)]
     pub spotify: SpotifyConfig,
 }
 
+/// General application preferences.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GeneralConfig {
+    /// Active user-interface language.
     #[serde(default)]
     pub language: Language,
 }
 
 impl AppConfig {
+    /// Loads `path`, creating and saving defaults when it does not exist.
+    ///
+    /// # Errors
+    /// Returns an error when the file cannot be read, parsed, or initially saved.
     pub fn load_or_default(path: &Path) -> Result<Self> {
         if !path.exists() {
             let config = Self::default();
@@ -43,6 +56,11 @@ impl AppConfig {
         toml::from_str(&content).with_context(|| format!("parsing config file {}", path.display()))
     }
 
+    /// Atomically replaces the configuration at `path`.
+    ///
+    /// # Errors
+    /// Returns an error when serialization, directory creation, writing, or
+    /// replacement fails. A failed write cleans up its temporary file.
     pub fn save(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
@@ -77,18 +95,22 @@ fn temporary_config_path(path: &Path) -> Result<PathBuf> {
     Ok(path.with_file_name(format!(".{file_name}.{}.{}.tmp", std::process::id(), id)))
 }
 
+/// Overlay window geometry and appearance preferences.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WindowConfig {
+    /// Logical anchor used by the overlay.
     #[serde(default = "default_anchor")]
     pub anchor: WindowAnchor,
+    /// Distance from the selected screen edge, in pixels.
     #[serde(default = "default_margin")]
     pub margin: i32,
+    /// Preferred compact overlay width, in pixels.
     #[serde(default = "default_width")]
     pub width: i32,
+    /// Background alpha in the inclusive range `0.0..=1.0`.
     #[serde(default = "default_opacity")]
     pub opacity: f64,
-    /// Height of a bottom desktop panel in pixels. The window will not
-    /// overlap this reserved area.
+    /// Height of a reserved bottom desktop panel, in pixels.
     #[serde(default)]
     pub bottom_panel_height: i32,
 }
@@ -105,20 +127,27 @@ impl Default for WindowConfig {
     }
 }
 
+/// Logical overlay anchor persisted in configuration.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum WindowAnchor {
+    /// Center the overlay along the bottom screen edge.
     BottomCenter,
 }
 
+/// Lyrics timing, secondary-text, and provider preferences.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LyricsConfig {
+    /// Global playback offset in milliseconds.
     #[serde(default)]
     pub offset_ms: i64,
+    /// Automatic search priority.
     #[serde(default = "default_provider_order")]
     pub provider_order: Vec<LyricsProvider>,
+    /// Whether translated text is displayed and fetched.
     #[serde(default = "default_show_translation")]
     pub show_translation: bool,
+    /// Whether romanized text is displayed.
     #[serde(default)]
     pub show_romanization: bool,
 }
@@ -134,8 +163,10 @@ impl Default for LyricsConfig {
     }
 }
 
+/// Spotify-compatible MPRIS discovery preferences.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SpotifyConfig {
+    /// D-Bus well-known-name prefix accepted as a player instance.
     #[serde(default = "default_spotify_prefix")]
     pub mpris_prefix: String,
 }

@@ -1,9 +1,20 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+//! Process-wide tracing configuration.
+
 use anyhow::Result;
 use tracing_subscriber::{EnvFilter, fmt};
 
+/// Installs the compact tracing subscriber used by the application.
+///
+/// When `debug` is true, FloatLyrics logs default to `debug`; otherwise they
+/// default to `info`. A valid `RUST_LOG` value overrides that default.
+///
+/// # Errors
+///
+/// Returns an error for an invalid filter or when another global subscriber is
+/// already installed.
 pub fn init(debug: bool) -> Result<()> {
     let default_level = if debug { "debug" } else { "info" };
     let filter = EnvFilter::try_from_default_env()

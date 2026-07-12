@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+//! Conversion between provider payloads and display-ready timed lyrics.
+
 use anyhow::{Context, Result, anyhow};
 use lyrics_helper::{LineInfo, LyricsData, LyricsTypes, generate_string, parse_auto};
 
@@ -11,10 +13,21 @@ mod filter;
 const TRANSLATION_PREFIX: &str = "__FLOATLYRICS_TRANSLATION__:";
 const TRANSLATION_SECTION_MARKER: &str = "[floatlyrics:translation]";
 
+/// Parses a local lyrics document using the formats supported by `lyrics-helper`.
+///
+/// # Errors
+/// Returns an error when the format cannot be detected or parsed.
 pub fn parse_local_lyrics(content: &str) -> Result<LyricsData> {
     parse_auto(content).context("lyrics-helper could not detect or parse lyrics")
 }
 
+/// Parses raw provider lyrics into sorted, display-ready lines.
+///
+/// Translation sections are merged and known metadata or credit lines are
+/// removed.
+///
+/// # Errors
+/// Returns an error when no supported timed format can be parsed.
 pub fn timed_lines_from_raw(content: &str) -> Result<Vec<TimedLine>> {
     let (lyrics, translation) = split_translation_section(content);
     let mut lines = parse_timed_lines_block(lyrics)?;
@@ -48,10 +61,15 @@ fn parse_timed_lines_block(content: &str) -> Result<Vec<TimedLine>> {
     }
 }
 
+/// Serializes parsed lyrics as `ty`.
+///
+/// # Errors
+/// Returns an error when `lyrics-helper` cannot generate the requested format.
 pub fn export_lyrics(data: &LyricsData, ty: LyricsTypes) -> Result<String> {
     generate_string(data, ty).context("lyrics-helper could not generate lyrics in requested format")
 }
 
+/// Converts already parsed lyrics to sorted, display-ready lines.
 pub fn timed_lines_from_data(data: &LyricsData) -> Vec<TimedLine> {
     let Some(lines) = data.lines.as_deref() else {
         return Vec::new();
@@ -65,6 +83,7 @@ pub fn timed_lines_from_data(data: &LyricsData) -> Vec<TimedLine> {
     filter_display_lines(merge_translation_marker_lines(timed_lines))
 }
 
+/// Combines a primary document and optional translation into one parseable payload.
 pub fn combine_lyrics_with_translation(lyrics: &str, translation: Option<&str>) -> String {
     let Some(translation) = translation else {
         return lyrics.to_string();

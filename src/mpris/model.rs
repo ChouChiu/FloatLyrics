@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+//! Provider-neutral state converted from MPRIS properties and signals.
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, time::Instant};
@@ -8,36 +10,60 @@ use zvariant::{OwnedObjectPath, OwnedValue};
 
 use floatlyrics_core::track::TrackMetadata;
 
+/// State change emitted by the background MPRIS watcher.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpotifyWatcherEvent {
+    /// A matching player appeared with its initial state.
     Connected(SpotifyPlayerState),
+    /// Metadata or playback status changed.
     Updated(SpotifyPlayerState),
+    /// A new authoritative playback position sample arrived.
     PositionUpdated {
+        /// Identity of the sampled track, when known.
         track_identity: Option<String>,
+        /// Sampled position in milliseconds.
         position_ms: u64,
+        /// Local monotonic time at which the sample was taken.
         sampled_at: Instant,
     },
+    /// The active matching player disappeared.
     Disconnected,
+    /// The watcher stopped because of a fatal error.
     Error(String),
 }
 
+/// Latest known state for one Spotify-compatible MPRIS player.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpotifyPlayerState {
+    /// D-Bus well-known name of the player instance.
     pub bus_name: String,
+    /// Current playback status.
     pub playback_status: PlaybackStatus,
+    /// Playback position in milliseconds, when known.
     pub position_ms: Option<u64>,
+    /// Current track metadata, when known.
     pub track: Option<TrackMetadata>,
 }
 
+/// Typed subset of MPRIS metadata used by FloatLyrics.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpotifyMetadata {
+    /// Track title.
     pub title: String,
+    /// Track artists.
     pub artists: Vec<String>,
+    /// Album title, when supplied.
     pub album: Option<String>,
+    /// Track length in microseconds, when supplied.
     pub length_us: Option<u64>,
+    /// MPRIS track object path, when supplied.
     pub track_id: Option<String>,
 }
 
+/// Extracts the metadata fields used by FloatLyrics from MPRIS properties.
+///
+/// Returns `None` when required title metadata is absent or has an unexpected
+/// D-Bus type.
 pub fn spotify_metadata_from_mpris(
     metadata: &HashMap<String, OwnedValue>,
 ) -> Option<SpotifyMetadata> {
@@ -71,6 +97,10 @@ fn object_path_value(value: &OwnedValue) -> Option<String> {
 }
 
 impl SpotifyMetadata {
+    /// Validates and converts MPRIS metadata into shared track metadata.
+    ///
+    /// # Errors
+    /// Returns an error when the title or usable artist list is empty.
     pub fn into_track_metadata(self) -> Result<TrackMetadata> {
         if self.title.trim().is_empty() {
             anyhow::bail!("Spotify metadata did not include a title");
@@ -103,11 +133,16 @@ impl SpotifyMetadata {
     }
 }
 
+/// Normalized MPRIS playback status.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlaybackStatus {
+    /// Playback is advancing.
     Playing,
+    /// Playback is paused at the current position.
     Paused,
+    /// Playback is stopped.
     Stopped,
+    /// Status value not recognized by this version.
     Unknown(String),
 }
 

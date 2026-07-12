@@ -1,8 +1,14 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+//! Playback-time lookup over sorted lyrics lines.
+
 use super::model::TimedLine;
 
+/// Returns the line active at the offset-adjusted playback position.
+///
+/// `lines` must be sorted by ascending `start_ms`. A line with a known end is
+/// inactive at and after that end, even when the following line has not begun.
 pub fn active_line_index(lines: &[TimedLine], playback_ms: u64, offset_ms: i64) -> Option<usize> {
     if lines.is_empty() {
         return None;
@@ -18,6 +24,11 @@ pub fn active_line_index(lines: &[TimedLine], playback_ms: u64, offset_ms: i64) 
     }
 }
 
+/// Returns the last line beginning at or before the adjusted playback position.
+///
+/// `lines` must be sorted by ascending `start_ms`. Unlike
+/// [`active_line_index`], this function intentionally holds the previous line
+/// across timing gaps.
 pub fn line_index_at_or_before(
     lines: &[TimedLine],
     playback_ms: u64,

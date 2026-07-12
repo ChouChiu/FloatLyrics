@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+//! Asynchronous discovery and observation of MPRIS player instances.
+
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use std::{
@@ -20,6 +22,7 @@ use super::{
     position::{player_track_identity, position_us_to_ms},
 };
 
+/// Default D-Bus well-known-name prefix used by Spotify for Linux.
 pub const SPOTIFY_MPRIS_PREFIX: &str = "org.mpris.MediaPlayer2.spotify";
 const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
 const PLAYER_IFACE: &str = "org.mpris.MediaPlayer2.Player";
@@ -27,10 +30,15 @@ const PLAYBACK_POSITION_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const PLAYER_HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(30);
 const PLAYER_RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
+/// Returns whether `name` is the Spotify MPRIS name or one of its instances.
 pub fn is_spotify_mpris_name(name: &str) -> bool {
     is_mpris_name_with_prefix(name, SPOTIFY_MPRIS_PREFIX)
 }
 
+/// Lists Spotify MPRIS instances currently registered on `connection`.
+///
+/// # Errors
+/// Returns a D-Bus error when names cannot be queried.
 pub async fn spotify_mpris_names(connection: &Connection) -> zbus::Result<Vec<String>> {
     mpris_names_with_prefix(connection, SPOTIFY_MPRIS_PREFIX).await
 }
@@ -56,6 +64,10 @@ fn is_mpris_name_with_prefix(name: &str, prefix: &str) -> bool {
             .is_some_and(|suffix| suffix.starts_with('.'))
 }
 
+/// Spawns an MPRIS watcher using [`SPOTIFY_MPRIS_PREFIX`].
+///
+/// Events are delivered on `sender`; fatal background errors become
+/// [`SpotifyWatcherEvent::Error`].
 pub fn spawn_spotify_watcher(
     runtime: &tokio::runtime::Handle,
     sender: Sender<SpotifyWatcherEvent>,
@@ -63,6 +75,10 @@ pub fn spawn_spotify_watcher(
     spawn_spotify_watcher_with_prefix(runtime, sender, SPOTIFY_MPRIS_PREFIX.to_string());
 }
 
+/// Spawns an MPRIS watcher for player names matching `mpris_prefix`.
+///
+/// This extension point supports Spotify variants or compatible players without
+/// coupling the application controller to D-Bus.
 pub fn spawn_spotify_watcher_with_prefix(
     runtime: &tokio::runtime::Handle,
     sender: Sender<SpotifyWatcherEvent>,
