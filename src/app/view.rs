@@ -35,14 +35,27 @@ const MAX_EXPANDED_PANEL_WIDTH: i32 = 960;
 const PANEL_HORIZONTAL_GUTTER: i32 = 32;
 const PANEL_CHROME_WIDTH: i32 = 28;
 const TEXT_HORIZONTAL_PADDING: i32 = 24;
-const CURRENT_KARAOKE_HEIGHT: i32 = 36;
-const CURRENT_TRANSLATION_HEIGHT: i32 = 18;
-const LYRICS_VIEWPORT_HEIGHT: i32 = CURRENT_KARAOKE_HEIGHT + CURRENT_TRANSLATION_HEIGHT;
+const MIN_KARAOKE_HEIGHT: i32 = 36;
+const MIN_TRANSLATION_HEIGHT: i32 = 18;
 const LYRICS_TRANSITION_DURATION_MS: u32 = 180;
 const FALLBACK_PANEL_HEIGHT: i32 = 84;
 
+fn karaoke_line_height(lyric_font_px: i32) -> i32 {
+    (lyric_font_px as f64 * 1.5).ceil() as i32
+}
+
+fn translation_line_height(translation_font_px: i32) -> i32 {
+    (translation_font_px as f64 * 1.5).ceil() as i32
+}
+
+fn viewport_height(lyric_font_px: i32, translation_font_px: i32) -> i32 {
+    karaoke_line_height(lyric_font_px).max(MIN_KARAOKE_HEIGHT)
+        + translation_line_height(translation_font_px).max(MIN_TRANSLATION_HEIGHT)
+}
+
 struct OverlayPanelInit {
     width: i32,
+    viewport_height: i32,
     sender: relm4::Sender<AppMsg>,
 }
 
@@ -117,7 +130,7 @@ impl WidgetTemplate for OverlayPanel {
 
             #[name = "lyrics_stack"]
             gtk::Stack {
-                set_size_request: (init.width, LYRICS_VIEWPORT_HEIGHT),
+                set_size_request: (init.width, init.viewport_height),
                 set_halign: gtk::Align::Center,
                 set_valign: gtk::Align::Center,
                 set_hhomogeneous: true,
@@ -214,6 +227,8 @@ pub(super) fn build(
     sender: relm4::Sender<AppMsg>,
 ) -> OverlayView {
     let panel_width = compact_panel_width(config.window.width);
+    let karaoke_height = karaoke_line_height(config.lyrics.lyric_font_size).max(MIN_KARAOKE_HEIGHT);
+    let viewport_h = viewport_height(config.lyrics.lyric_font_size, config.lyrics.translation_font_size);
     let font_family = Rc::new(RefCell::new(font_family(&config.lyrics.font_order)));
     window.set_title(Some("FloatLyrics Overlay"));
     window.set_decorated(false);
@@ -237,6 +252,7 @@ pub(super) fn build(
 
     let panel = OverlayPanel::init(OverlayPanelInit {
         width: panel_width,
+        viewport_height: viewport_h,
         sender,
     });
     let song_info = panel.song_info.clone();
@@ -260,7 +276,7 @@ pub(super) fn build(
         ["floating-slot-current"],
         ["floating-lyric-current"],
         i18n.text(Text::OpenSpotify),
-        Some((panel_width, CURRENT_KARAOKE_HEIGHT)),
+        Some((panel_width, karaoke_height)),
         translation_style(true, config.lyrics.translation_font_size, translation_color),
         panel_width,
         Rc::clone(&font_family),
@@ -272,7 +288,7 @@ pub(super) fn build(
         ["floating-slot-current"],
         ["floating-lyric-current"],
         "",
-        Some((panel_width, CURRENT_KARAOKE_HEIGHT)),
+        Some((panel_width, karaoke_height)),
         translation_style(true, config.lyrics.translation_font_size, translation_color),
         panel_width,
         Rc::clone(&font_family),
@@ -404,7 +420,7 @@ fn lyric_slot(
     );
     let (translation_area, translation_state) = text_line_area(
         panel_width,
-        translation_line_height(translation_style),
+        translation_line_height(translation_style.font_px).max(MIN_TRANSLATION_HEIGHT),
         translation_style,
         &font_family.borrow(),
     );
@@ -437,14 +453,6 @@ fn translation_style(is_current: bool, translation_font_px: i32, color: (f64, f6
         (translation_font_px * 5 / 6).max(8)
     };
     TextLineStyle { font_px, color }
-}
-
-fn translation_line_height(style: TextLineStyle) -> i32 {
-    if style.font_px >= 13 {
-        CURRENT_TRANSLATION_HEIGHT
-    } else {
-        16
-    }
 }
 
 fn compact_panel_width(configured_width: i32) -> i32 {
@@ -628,6 +636,10 @@ impl OverlayView {
         );
         self.lyric_font_size.set(config.lyrics.lyric_font_size);
         self.translation_font_size.set(config.lyrics.translation_font_size);
+        let karaoke_h = karaoke_line_height(config.lyrics.lyric_font_size).max(MIN_KARAOKE_HEIGHT);
+        let translation_h =
+            translation_line_height(config.lyrics.translation_font_size).max(MIN_TRANSLATION_HEIGHT);
+        self.lyrics_stack.set_height_request(karaoke_h + translation_h);
         self.karaoke_played_color.set(parse_hex_color(&config.lyrics.played_color));
         self.karaoke_unplayed_color.set(parse_hex_color(&config.lyrics.unplayed_color));
         let translation_color = parse_hex_color(&config.lyrics.translation_color);
@@ -639,8 +651,10 @@ impl OverlayView {
             let new_translation_style =
                 translation_style(true, config.lyrics.translation_font_size, translation_color);
             slot.translation_state.borrow_mut().style = new_translation_style;
+            slot.translation_area.set_height_request(translation_h);
             slot.translation_area.queue_draw();
             if let Some(area) = &slot.karaoke_area {
+                area.set_height_request(karaoke_h);
                 area.queue_draw();
             }
         }
