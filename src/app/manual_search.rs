@@ -4,6 +4,7 @@
 //! Track-specific manual lyrics search and selection window.
 
 use gtk::prelude::*;
+use relm4::{ComponentParts, ComponentSender, SimpleComponent};
 use std::{cell::Cell, cell::RefCell, rc::Rc, sync::mpsc, time::Duration};
 
 use floatlyrics_core::{
@@ -80,23 +81,141 @@ impl PreviewState {
     }
 }
 
-#[derive(Clone)]
-pub(super) struct ManualSearchWindow {
-    window: gtk::ApplicationWindow,
+pub(super) struct ManualSearchInit {
+    pub(super) runtime: tokio::runtime::Handle,
+    pub(super) cache: Rc<dyn LyricsCache>,
+    pub(super) controller: ControllerHandle,
+    pub(super) i18n: I18n,
+}
+
+pub(super) struct ManualSearchModel {
+    visible: bool,
     title: gtk::Entry,
     artist: gtk::Entry,
     start_search: Rc<dyn Fn()>,
+    apply_selected: Rc<dyn Fn()>,
     controller: ControllerHandle,
 }
 
-impl ManualSearchWindow {
-    pub(super) fn new(
-        app: &gtk::Application,
-        runtime: tokio::runtime::Handle,
-        cache: Rc<dyn LyricsCache>,
-        controller: ControllerHandle,
-        i18n: I18n,
-    ) -> Self {
+#[derive(Debug)]
+pub(super) enum ManualSearchMsg {
+    Show,
+    Hide,
+    Search,
+    Apply,
+}
+
+#[relm4::component(pub(super))]
+impl SimpleComponent for ManualSearchModel {
+    type Init = ManualSearchInit;
+    type Input = ManualSearchMsg;
+    type Output = ();
+
+    view! {
+        window = gtk::ApplicationWindow {
+            set_application: Some(&relm4::main_application()),
+            set_default_size: (WINDOW_WIDTH, WINDOW_HEIGHT),
+            set_resizable: false,
+            set_hide_on_close: true,
+            #[watch]
+            set_visible: model.visible,
+
+            #[wrap(Some)]
+            set_titlebar = &gtk::WindowHandle {
+                #[wrap(Some)]
+                set_child = &gtk::HeaderBar {
+                    set_show_title_buttons: true,
+                    #[wrap(Some)]
+                    #[name = "header_title"]
+                    set_title_widget = &gtk::Label {
+                        set_label: "",
+                    },
+                },
+            },
+
+            gtk::Box {
+                set_orientation: gtk::Orientation::Vertical,
+
+                gtk::Box {
+                    set_orientation: gtk::Orientation::Horizontal,
+                    set_spacing: 8,
+                    add_css_class: "manual-search-bar",
+                    #[name = "title_label"]
+                    gtk::Label {},
+                    #[local_ref]
+                    title_widget -> gtk::Entry {
+                        connect_activate[sender] => move |_| sender.input(ManualSearchMsg::Search),
+                    },
+                    #[name = "artist_label"]
+                    gtk::Label {},
+                    #[local_ref]
+                    artist_widget -> gtk::Entry {
+                        connect_activate[sender] => move |_| sender.input(ManualSearchMsg::Search),
+                    },
+                    #[local_ref]
+                    spinner_widget -> gtk::Spinner {},
+                    #[local_ref]
+                    search_button_widget -> gtk::Button {
+                        connect_clicked[sender] => move |_| sender.input(ManualSearchMsg::Search),
+                    },
+                },
+
+                gtk::Separator { set_orientation: gtk::Orientation::Horizontal },
+                gtk::Paned {
+                    set_orientation: gtk::Orientation::Horizontal,
+                    set_position: 360,
+                    set_wide_handle: true,
+                    set_vexpand: true,
+                    #[wrap(Some)]
+                    set_start_child = &gtk::ScrolledWindow {
+                        set_hscrollbar_policy: gtk::PolicyType::Never,
+                        set_vscrollbar_policy: gtk::PolicyType::Automatic,
+                        set_min_content_width: 340,
+                        #[local_ref]
+                        results_widget -> gtk::ListBox {},
+                    },
+                    #[wrap(Some)]
+                    set_end_child = &gtk::ScrolledWindow {
+                        set_hscrollbar_policy: gtk::PolicyType::Never,
+                        set_vscrollbar_policy: gtk::PolicyType::Automatic,
+                        set_hexpand: true,
+                        #[local_ref]
+                        preview_widget -> gtk::TextView {},
+                    },
+                },
+                gtk::Separator { set_orientation: gtk::Orientation::Horizontal },
+
+                gtk::Box {
+                    set_orientation: gtk::Orientation::Horizontal,
+                    set_spacing: 12,
+                    add_css_class: "manual-search-footer",
+                    #[local_ref]
+                    status_widget -> gtk::Label {},
+                    #[local_ref]
+                    apply_widget -> gtk::Button {
+                        connect_clicked[sender] => move |_| sender.input(ManualSearchMsg::Apply),
+                    },
+                },
+            },
+
+            connect_close_request[sender] => move |_| {
+                sender.input(ManualSearchMsg::Hide);
+                gtk::glib::Propagation::Proceed
+            },
+        }
+    }
+
+    fn init(
+        init: Self::Init,
+        root: Self::Root,
+        sender: ComponentSender<Self>,
+    ) -> ComponentParts<Self> {
+        let ManualSearchInit {
+            runtime,
+            cache,
+            controller,
+            i18n,
+        } = init;
         let title = gtk::Entry::builder().hexpand(true).build();
         bind_entry_placeholder(&title, &i18n, Text::SongTitle);
         let artist = gtk::Entry::builder().hexpand(true).build();
@@ -107,28 +226,9 @@ impl ManualSearchWindow {
         bind_button_label(&search_button, &i18n, Text::Search);
         let spinner = gtk::Spinner::new();
 
-        let search_bar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        search_bar.add_css_class("manual-search-bar");
-        let title_label = gtk::Label::new(None);
-        bind_label(&title_label, &i18n, Text::Title);
-        search_bar.append(&title_label);
-        search_bar.append(&title);
-        let artist_label = gtk::Label::new(None);
-        bind_label(&artist_label, &i18n, Text::Artist);
-        search_bar.append(&artist_label);
-        search_bar.append(&artist);
-        search_bar.append(&spinner);
-        search_bar.append(&search_button);
-
         let results = gtk::ListBox::new();
         results.set_selection_mode(gtk::SelectionMode::Single);
         results.add_css_class("boxed-list");
-        let results_scroll = gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .vscrollbar_policy(gtk::PolicyType::Automatic)
-            .min_content_width(340)
-            .child(&results)
-            .build();
 
         let preview = gtk::TextView::builder()
             .editable(false)
@@ -141,22 +241,6 @@ impl ManualSearchWindow {
             .bottom_margin(12)
             .build();
         preview.add_css_class("manual-preview");
-        let preview_scroll = gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .vscrollbar_policy(gtk::PolicyType::Automatic)
-            .hexpand(true)
-            .child(&preview)
-            .build();
-
-        let paned = gtk::Paned::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .start_child(&results_scroll)
-            .end_child(&preview_scroll)
-            .position(360)
-            .wide_handle(true)
-            .vexpand(true)
-            .build();
-
         let status = gtk::Label::builder()
             .halign(gtk::Align::Start)
             .hexpand(true)
@@ -168,37 +252,6 @@ impl ManualSearchWindow {
             .css_classes(["suggested-action"])
             .build();
         bind_button_label(&apply, &i18n, Text::ApplySelectedLyrics);
-        let footer = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-        footer.add_css_class("manual-search-footer");
-        footer.append(&status);
-        footer.append(&apply);
-
-        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        root.append(&search_bar);
-        root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-        root.append(&paned);
-        root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-        root.append(&footer);
-
-        let header_title = gtk::Label::new(None);
-        bind_label(&header_title, &i18n, Text::ManualSearchTitle);
-        let header = gtk::HeaderBar::builder()
-            .title_widget(&header_title)
-            .show_title_buttons(true)
-            .build();
-        let handle = gtk::WindowHandle::new();
-        handle.set_child(Some(&header));
-        let window = gtk::ApplicationWindow::builder()
-            .application(app)
-            .default_width(WINDOW_WIDTH)
-            .default_height(WINDOW_HEIGHT)
-            .resizable(false)
-            .titlebar(&handle)
-            .child(&root)
-            .hide_on_close(true)
-            .build();
-        bind_window_title(&window, &i18n, Text::ManualSearchTitle);
-
         let state = Rc::new(RefCell::new(SearchState::default()));
         let status_state = Rc::new(RefCell::new(ManualStatus::Text(Text::SearchAfterPlayback)));
         let preview_state = Rc::new(RefCell::new(PreviewState::Text(
@@ -236,13 +289,13 @@ impl ManualSearchWindow {
                     .set_text(&preview_state.borrow().render(language));
             });
         }
-        let (sender, receiver) = mpsc::channel::<SearchEvent>();
+        let (event_sender, receiver) = mpsc::channel::<SearchEvent>();
         let rebuilding_results = Rc::new(Cell::new(false));
 
         {
             let state = Rc::clone(&state);
             let runtime = runtime.clone();
-            let sender = sender.clone();
+            let event_sender = event_sender.clone();
             let apply = apply.clone();
             let set_status = Rc::clone(&set_status);
             let set_preview = Rc::clone(&set_preview);
@@ -266,12 +319,12 @@ impl ManualSearchWindow {
                 apply.set_sensitive(false);
                 set_status(ManualStatus::Text(Text::LoadingPreview));
                 set_preview(PreviewState::Text(Text::LoadingPreview));
-                let sender = sender.clone();
+                let event_sender = event_sender.clone();
                 runtime.spawn(async move {
                     let result = fetch_candidate_lyrics(&candidate)
                         .await
                         .map_err(|error| error.to_string());
-                    let _ = sender.send(SearchEvent::Preview {
+                    let _ = event_sender.send(SearchEvent::Preview {
                         generation,
                         index,
                         result,
@@ -283,7 +336,7 @@ impl ManualSearchWindow {
         let start_search: Rc<dyn Fn()> = {
             let state = Rc::clone(&state);
             let runtime = runtime.clone();
-            let sender = sender.clone();
+            let event_sender = event_sender.clone();
             let title = title.clone();
             let artist = artist.clone();
             let controller = controller.clone();
@@ -334,36 +387,23 @@ impl ManualSearchWindow {
                 set_status(ManualStatus::Text(Text::SearchingProviders));
                 search_button.set_sensitive(false);
                 spinner.start();
-                let sender = sender.clone();
+                let event_sender = event_sender.clone();
                 runtime.spawn(async move {
                     let providers = [LyricsProvider::QqMusic, LyricsProvider::NetEase];
                     let result = search_lyrics_candidates(&search_track, &providers)
                         .await
                         .map_err(|error| error.to_string());
-                    let _ = sender.send(SearchEvent::Candidates { generation, result });
+                    let _ = event_sender.send(SearchEvent::Candidates { generation, result });
                 });
             })
         };
 
-        {
-            let start_search = Rc::clone(&start_search);
-            search_button.connect_clicked(move |_| start_search());
-        }
-        {
-            let start_search = Rc::clone(&start_search);
-            title.connect_activate(move |_| start_search());
-        }
-        {
-            let start_search = Rc::clone(&start_search);
-            artist.connect_activate(move |_| start_search());
-        }
-
-        {
+        let apply_selected: Rc<dyn Fn()> = {
             let state = Rc::clone(&state);
             let cache = Rc::clone(&cache);
             let controller = controller.clone();
             let set_status = Rc::clone(&set_status);
-            apply.connect_clicked(move |_| {
+            Rc::new(move || {
                 let state = state.borrow();
                 let Some(target) = state.target_track.as_ref() else {
                     return;
@@ -400,8 +440,8 @@ impl ManualSearchWindow {
                         set_status(ManualStatus::Detail(Text::ApplyFailed, error.to_string()))
                     }
                 }
-            });
-        }
+            })
+        };
 
         {
             let state = Rc::clone(&state);
@@ -507,22 +547,45 @@ impl ManualSearchWindow {
         }
 
         install_css();
-        Self {
-            window,
-            title,
-            artist,
+        let model = Self {
+            visible: false,
+            title: title.clone(),
+            artist: artist.clone(),
             start_search,
+            apply_selected,
             controller,
-        }
+        };
+        let title_widget = &title;
+        let artist_widget = &artist;
+        let spinner_widget = &spinner;
+        let search_button_widget = &search_button;
+        let results_widget = &results;
+        let preview_widget = &preview;
+        let status_widget = &status;
+        let apply_widget = &apply;
+        let widgets = view_output!();
+        bind_label(&widgets.header_title, &i18n, Text::ManualSearchTitle);
+        bind_label(&widgets.title_label, &i18n, Text::Title);
+        bind_label(&widgets.artist_label, &i18n, Text::Artist);
+        bind_window_title(&root, &i18n, Text::ManualSearchTitle);
+
+        ComponentParts { model, widgets }
     }
 
-    pub(super) fn present(&self) {
-        if let Some(track) = self.controller.current_track() {
-            self.title.set_text(&track.title);
-            self.artist.set_text(&track.display_artist());
+    fn update(&mut self, message: Self::Input, _sender: ComponentSender<Self>) {
+        match message {
+            ManualSearchMsg::Show => {
+                if let Some(track) = self.controller.current_track() {
+                    self.title.set_text(&track.title);
+                    self.artist.set_text(&track.display_artist());
+                }
+                self.visible = true;
+                (self.start_search)();
+            }
+            ManualSearchMsg::Hide => self.visible = false,
+            ManualSearchMsg::Search => (self.start_search)(),
+            ManualSearchMsg::Apply => (self.apply_selected)(),
         }
-        self.window.present();
-        (self.start_search)();
     }
 }
 

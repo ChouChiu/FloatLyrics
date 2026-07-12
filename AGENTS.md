@@ -9,7 +9,7 @@ Cargo workspace with three crates. Dependency direction:
 - `floatlyrics-lyrics` — lyrics models, parsing, search, timeline, SQLite cache (rusqlite `bundled`).
 - `floatlyrics` — CLI, GTK4 layer-shell UI, MPRIS/DBus watcher, app composition root.
 
-Rust edition 2024, MSRV 1.92 (stable, see `rust-toolchain.toml`).
+Rust edition 2024, MSRV 1.93 (stable, see `rust-toolchain.toml`).
 
 ## Commands
 

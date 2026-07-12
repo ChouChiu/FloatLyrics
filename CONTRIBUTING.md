@@ -34,7 +34,7 @@ cargo run -- --debug
 
 - `src/main.rs`：最小二进制入口。
 - `src/lib.rs`：命令行解析和启动流程。
-- `src/app.rs`、`src/app/`：应用装配、控制器、展示状态和 GTK 界面。
+- `src/app.rs`、`src/app/`：Relm4 应用装配与消息流、控制器、展示状态和 GTK 界面。
 - `src/lyrics.rs`、`src/lyrics/`：歌词模型、搜索、解析、匹配和时间轴。
 - `src/mpris.rs`、`src/mpris/`：MPRIS 监听和播放位置同步。
 - `src/cache.rs`、`src/config.rs`、`src/paths.rs`：SQLite、配置和本地路径。

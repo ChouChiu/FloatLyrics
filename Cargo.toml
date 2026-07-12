@@ -8,7 +8,7 @@ resolver = "2"
 [workspace.package]
 version = "1.0.0"
 edition = "2024"
-rust-version = "1.92"
+rust-version = "1.93"
 authors = ["ChouChiu"]
 license = "GPL-3.0-or-later"
 repository = "https://github.com/ChouChiu/FloatLyrics"
@@ -45,6 +45,7 @@ futures-util = "0.3"
 gtk = { package = "gtk4", version = "0.11", features = ["v4_12"] }
 gtk4-layer-shell = "0.8"
 pangocairo = "0.22"
+relm4 = { version = "0.11", default-features = false, features = ["macros"] }
 serde_json = "1"
 tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "sync", "time"] }
 toml = "0.9"
@@ -58,6 +59,7 @@ tempfile = "3"
 
 [build-dependencies]
 serde_json = "1"
+toml = "0.9"
 
 [package.metadata.deb]
 name = "floatlyrics"

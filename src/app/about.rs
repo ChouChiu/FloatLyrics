@@ -4,6 +4,7 @@
 //! About and acknowledgements window.
 
 use gtk::prelude::*;
+use relm4::{ComponentParts, ComponentSender, SimpleComponent};
 
 use floatlyrics_core::i18n::{I18n, Text};
 
@@ -14,13 +15,57 @@ const WINDOW_HEIGHT: i32 = 450;
 const PROJECT_URI: &str = "https://github.com/ChouChiu/FloatLyrics";
 const LYRICS_X_URI: &str = "https://github.com/MxIris-LyricsX-Project/LyricsX";
 
-#[derive(Clone)]
-pub(super) struct AboutWindow {
-    window: gtk::ApplicationWindow,
+pub(super) struct AboutModel {
+    visible: bool,
 }
 
-impl AboutWindow {
-    pub(super) fn new(app: &gtk::Application, i18n: I18n) -> Self {
+#[derive(Debug)]
+pub(super) enum AboutMsg {
+    Show,
+    Hide,
+}
+
+#[relm4::component(pub(super))]
+impl SimpleComponent for AboutModel {
+    type Init = I18n;
+    type Input = AboutMsg;
+    type Output = ();
+
+    view! {
+        window = gtk::ApplicationWindow {
+            set_application: Some(&relm4::main_application()),
+            set_default_size: (WINDOW_WIDTH, WINDOW_HEIGHT),
+            set_resizable: false,
+            set_hide_on_close: true,
+            add_css_class: "about-window",
+            #[watch]
+            set_visible: model.visible,
+
+            #[wrap(Some)]
+            set_titlebar = &gtk::HeaderBar {
+                set_show_title_buttons: true,
+                #[wrap(Some)]
+                set_title_widget = &gtk::StackSwitcher {
+                    set_stack: Some(stack),
+                    set_halign: gtk::Align::Center,
+                },
+            },
+
+            #[local_ref]
+            stack -> gtk::Stack {},
+
+            connect_close_request[sender] => move |_| {
+                sender.input(AboutMsg::Hide);
+                gtk::glib::Propagation::Proceed
+            },
+        }
+    }
+
+    fn init(
+        i18n: Self::Init,
+        root: Self::Root,
+        sender: ComponentSender<Self>,
+    ) -> ComponentParts<Self> {
         let stack = gtk::Stack::builder()
             .transition_type(gtk::StackTransitionType::Crossfade)
             .transition_duration(180)
@@ -45,32 +90,17 @@ impl AboutWindow {
         dependencies_stack_page.set_icon_name("application-x-sharedlib-symbolic");
         bind_stack_page_title(&dependencies_stack_page, &i18n, Text::OpenSourceTitle);
 
-        let switcher = gtk::StackSwitcher::builder()
-            .stack(&stack)
-            .halign(gtk::Align::Center)
-            .build();
-        let header = gtk::HeaderBar::builder()
-            .title_widget(&switcher)
-            .show_title_buttons(true)
-            .build();
-        let window = gtk::ApplicationWindow::builder()
-            .application(app)
-            .default_width(WINDOW_WIDTH)
-            .default_height(WINDOW_HEIGHT)
-            .resizable(false)
-            .titlebar(&header)
-            .child(&stack)
-            .hide_on_close(true)
-            .build();
-        window.add_css_class("about-window");
-        bind_window_title(&window, &i18n, Text::AboutWindowTitle);
+        let stack = &stack;
+        let model = Self { visible: false };
+        let widgets = view_output!();
+        bind_window_title(&root, &i18n, Text::AboutWindowTitle);
         install_css();
 
-        Self { window }
+        ComponentParts { model, widgets }
     }
 
-    pub(super) fn present(&self) {
-        self.window.present();
+    fn update(&mut self, message: Self::Input, _sender: ComponentSender<Self>) {
+        self.visible = matches!(message, AboutMsg::Show);
     }
 }
 

@@ -5,6 +5,7 @@
 
 use gtk::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+use relm4::WidgetTemplate;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -17,6 +18,7 @@ mod css;
 mod positioning;
 mod rendering;
 
+use super::AppMsg;
 use super::localization::bind_button_tooltip;
 use super::model::{KaraokeRenderState, LyricSlotText, progress_fraction, progress_text};
 use positioning::{
@@ -39,10 +41,118 @@ const LYRICS_VIEWPORT_HEIGHT: i32 = CURRENT_KARAOKE_HEIGHT + CURRENT_TRANSLATION
 const LYRICS_TRANSITION_DURATION_MS: u32 = 180;
 const FALLBACK_PANEL_HEIGHT: i32 = 84;
 
+struct OverlayPanelInit {
+    width: i32,
+    sender: relm4::Sender<AppMsg>,
+}
+
+#[relm4::widget_template]
+impl WidgetTemplate for OverlayPanel {
+    type Init = OverlayPanelInit;
+
+    view! {
+        #[name = "content"]
+        gtk::Box {
+            set_orientation: gtk::Orientation::Vertical,
+            set_spacing: 4,
+            set_halign: gtk::Align::Center,
+            set_valign: gtk::Align::Center,
+            set_size_request: (init.width, -1),
+            add_css_class: "floating-panel",
+
+            gtk::Box {
+                set_orientation: gtk::Orientation::Horizontal,
+                set_spacing: 6,
+
+                #[name = "song_info"]
+                gtk::Label {
+                    set_label: "FloatLyrics",
+                    set_halign: gtk::Align::Start,
+                    set_valign: gtk::Align::Center,
+                    set_hexpand: true,
+                    set_ellipsize: gtk::pango::EllipsizeMode::End,
+                    set_max_width_chars: 48,
+                    set_single_line_mode: true,
+                    add_css_class: "floating-song-info",
+                },
+
+                gtk::Box {
+                    set_orientation: gtk::Orientation::Horizontal,
+                    set_spacing: 4,
+
+                    #[name = "manual_search_button"]
+                    gtk::Button {
+                        set_icon_name: "system-search-symbolic",
+                        set_valign: gtk::Align::Center,
+                        set_css_classes: &["flat", "circular", "floating-action-button"],
+                        connect_clicked[sender = init.sender.clone()] => move |_| {
+                            let _ = sender.send(AppMsg::OpenManualSearch);
+                        },
+                    },
+                    #[name = "settings_button"]
+                    gtk::Button {
+                        set_icon_name: "preferences-system-symbolic",
+                        set_valign: gtk::Align::Center,
+                        set_css_classes: &["flat", "circular", "floating-action-button"],
+                        connect_clicked[sender = init.sender.clone()] => move |_| {
+                            let _ = sender.send(AppMsg::OpenSettings);
+                        },
+                    },
+                    #[name = "close_button"]
+                    gtk::Button {
+                        set_icon_name: "window-close-symbolic",
+                        set_valign: gtk::Align::Center,
+                        set_css_classes: &["flat", "circular", "floating-action-button"],
+                        connect_clicked[sender = init.sender.clone()] => move |_| {
+                            let _ = sender.send(AppMsg::Quit);
+                        },
+                    },
+                },
+            },
+
+            gtk::Box {
+                set_orientation: gtk::Orientation::Horizontal,
+                set_spacing: 8,
+                set_halign: gtk::Align::Fill,
+
+                #[name = "progress"]
+                gtk::ProgressBar {
+                    set_hexpand: true,
+                    set_valign: gtk::Align::Center,
+                    add_css_class: "floating-progress",
+                },
+                #[name = "progress_label"]
+                gtk::Label {
+                    set_halign: gtk::Align::End,
+                    set_valign: gtk::Align::Center,
+                    set_width_chars: 12,
+                    set_single_line_mode: true,
+                    add_css_class: "floating-progress-label",
+                },
+            },
+
+            gtk::Separator {
+                set_orientation: gtk::Orientation::Horizontal,
+                add_css_class: "floating-separator",
+            },
+
+            #[name = "lyrics_stack"]
+            gtk::Stack {
+                set_size_request: (init.width, LYRICS_VIEWPORT_HEIGHT),
+                set_halign: gtk::Align::Center,
+                set_valign: gtk::Align::Center,
+                set_hhomogeneous: true,
+                set_vhomogeneous: true,
+                set_transition_type: gtk::StackTransitionType::Crossfade,
+                set_transition_duration: LYRICS_TRANSITION_DURATION_MS,
+            },
+        }
+    }
+}
+
 /// Narrow interface the controller uses to update the display.
 /// Decouples controller logic from the concrete [`OverlayView`].
 pub(super) trait LyricsView {
-    fn tick_widget(&self) -> gtk::Stack;
     fn set_song_info(&self, value: &str);
     fn show_lyrics(&self, value: LyricSlotText, key: &str);
     fn show_status(&self, key: Text);
@@ -58,9 +168,6 @@ pub(super) struct OverlayView {
     opacity_provider: gtk::CssProvider,
     placement: SharedPlacement,
     song_info: gtk::Label,
-    manual_search_button: gtk::Button,
-    settings_button: gtk::Button,
-    close_button: gtk::Button,
     progress: gtk::ProgressBar,
     progress_label: gtk::Label,
     lyrics_stack: gtk::Stack,
@@ -87,14 +194,16 @@ struct LyricsTransitionState {
     active_slot: usize,
 }
 
-pub(super) fn build(app: &gtk::Application, config: &AppConfig, i18n: I18n) -> OverlayView {
+pub(super) fn build(
+    window: &gtk::ApplicationWindow,
+    config: &AppConfig,
+    i18n: I18n,
+    sender: relm4::Sender<AppMsg>,
+) -> OverlayView {
     let panel_width = compact_panel_width(config.window.width);
-    let window = gtk::ApplicationWindow::builder()
-        .application(app)
-        .title("FloatLyrics Overlay")
-        .decorated(false)
-        .resizable(false)
-        .build();
+    window.set_title(Some("FloatLyrics Overlay"));
+    window.set_decorated(false);
+    window.set_resizable(false);
 
     window.init_layer_shell();
     window.set_namespace(Some("floatlyrics"));
@@ -112,66 +221,22 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig, i18n: I18n) -> O
     window.set_exclusive_zone(-1);
     window.add_css_class("floating-window");
 
-    let song_info = gtk::Label::builder()
-        .label("FloatLyrics")
-        .halign(gtk::Align::Start)
-        .valign(gtk::Align::Center)
-        .hexpand(true)
-        .ellipsize(gtk::pango::EllipsizeMode::End)
-        .max_width_chars(48)
-        .single_line_mode(true)
-        .css_classes(["floating-song-info"])
-        .build();
+    let panel = OverlayPanel::init(OverlayPanelInit {
+        width: panel_width,
+        sender,
+    });
+    let song_info = panel.song_info.clone();
+    let manual_search_button = panel.manual_search_button.clone();
+    let settings_button = panel.settings_button.clone();
+    let close_button = panel.close_button.clone();
+    let progress = panel.progress.clone();
+    let progress_label = panel.progress_label.clone();
+    let lyrics_stack = panel.lyrics_stack.clone();
+    let content = panel.content.clone();
 
-    let manual_search_button = gtk::Button::builder()
-        .icon_name("system-search-symbolic")
-        .valign(gtk::Align::Center)
-        .css_classes(["flat", "circular", "floating-action-button"])
-        .build();
     bind_button_tooltip(&manual_search_button, &i18n, Text::ManualSearchTooltip);
-    let settings_button = gtk::Button::builder()
-        .icon_name("preferences-system-symbolic")
-        .valign(gtk::Align::Center)
-        .css_classes(["flat", "circular", "floating-action-button"])
-        .build();
     bind_button_tooltip(&settings_button, &i18n, Text::OpenSettingsTooltip);
-    let close_button = gtk::Button::builder()
-        .icon_name("window-close-symbolic")
-        .valign(gtk::Align::Center)
-        .css_classes(["flat", "circular", "floating-action-button"])
-        .build();
     bind_button_tooltip(&close_button, &i18n, Text::CloseTooltip);
-    let button_box = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    button_box.append(&manual_search_button);
-    button_box.append(&settings_button);
-    button_box.append(&close_button);
-    let title_row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    title_row.append(&song_info);
-    title_row.append(&button_box);
-
-    let progress = gtk::ProgressBar::builder()
-        .fraction(0.0)
-        .hexpand(true)
-        .valign(gtk::Align::Center)
-        .css_classes(["floating-progress"])
-        .build();
-
-    let progress_label = gtk::Label::builder()
-        .label("")
-        .halign(gtk::Align::End)
-        .valign(gtk::Align::Center)
-        .width_chars(12)
-        .single_line_mode(true)
-        .css_classes(["floating-progress-label"])
-        .build();
-
-    let progress_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    progress_row.set_halign(gtk::Align::Fill);
-    progress_row.append(&progress);
-    progress_row.append(&progress_label);
-
-    let separator = gtk::Separator::new(gtk::Orientation::Horizontal);
-    separator.add_css_class("floating-separator");
 
     let primary = lyric_slot(
         ["floating-slot-current"],
@@ -192,32 +257,12 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig, i18n: I18n) -> O
         panel_width,
     );
 
-    let lyrics_stack = gtk::Stack::builder()
-        .width_request(panel_width)
-        .height_request(LYRICS_VIEWPORT_HEIGHT)
-        .halign(gtk::Align::Center)
-        .valign(gtk::Align::Center)
-        .hhomogeneous(true)
-        .vhomogeneous(true)
-        .transition_type(gtk::StackTransitionType::Crossfade)
-        .transition_duration(LYRICS_TRANSITION_DURATION_MS)
-        .build();
     lyrics_stack.add_named(&primary.container, Some("primary"));
     lyrics_stack.add_named(&secondary.container, Some("secondary"));
     lyrics_stack.set_visible_child(&primary.container);
     let lyrics_transition = Rc::new(RefCell::new(LyricsTransitionState::default()));
-
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    content.set_halign(gtk::Align::Center);
-    content.set_valign(gtk::Align::Center);
-    content.set_size_request(panel_width, -1);
-    content.add_css_class("floating-panel");
-    content.append(&title_row);
-    content.append(&progress_row);
-    content.append(&separator);
-    content.append(&lyrics_stack);
     let placement = attach_floating_drag(
-        &window,
+        window,
         &content,
         panel_width.saturating_add(PANEL_CHROME_WIDTH),
         FALLBACK_PANEL_HEIGHT,
@@ -247,18 +292,13 @@ pub(super) fn build(app: &gtk::Application, config: &AppConfig, i18n: I18n) -> O
     }
 
     window.set_child(Some(&content));
-    window.present();
-
     let overlay = OverlayView {
-        window,
+        window: window.clone(),
         content,
         compact_width: Rc::new(Cell::new(panel_width)),
         opacity_provider,
         placement,
         song_info,
-        manual_search_button,
-        settings_button,
-        close_button,
         progress,
         progress_label,
         lyrics_stack,
@@ -461,10 +501,6 @@ fn reset_progress(floating: &OverlayView) {
 }
 
 impl LyricsView for OverlayView {
-    fn tick_widget(&self) -> gtk::Stack {
-        self.lyrics_stack.clone()
-    }
-
     fn set_song_info(&self, value: &str) {
         self.song_info.set_label(value);
     }
@@ -489,17 +525,8 @@ impl LyricsView for OverlayView {
 }
 
 impl OverlayView {
-    pub(super) fn connect_manual_search(&self, callback: impl Fn() + 'static) {
-        self.manual_search_button
-            .connect_clicked(move |_| callback());
-    }
-
-    pub(super) fn connect_settings(&self, callback: impl Fn() + 'static) {
-        self.settings_button.connect_clicked(move |_| callback());
-    }
-
-    pub(super) fn connect_close(&self, callback: impl Fn() + 'static) {
-        self.close_button.connect_clicked(move |_| callback());
+    pub(super) fn tick_widget(&self) -> gtk::Stack {
+        self.lyrics_stack.clone()
     }
 
     pub(super) fn apply_config(&self, config: &AppConfig) {

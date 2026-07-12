@@ -10,13 +10,14 @@ fn main() {
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
 
     let dep_names = parse_cargo_toml_deps(&manifest_dir.join("Cargo.toml"));
-    let versions = parse_cargo_lock_versions(&manifest_dir.join("Cargo.lock"), &dep_names);
-    let licenses = licenses_from_metadata(&manifest_dir, &dep_names);
+    let packages = packages_from_metadata(&manifest_dir, &dep_names);
 
     let mut entries: Vec<String> = Vec::new();
     for name in &dep_names {
-        let version = versions.get(name).map(String::as_str).unwrap_or("unknown");
-        let license = licenses.get(name).map(String::as_str).unwrap_or("unknown");
+        let (version, license) = packages
+            .get(name)
+            .map(|(version, license)| (version.as_str(), license.as_str()))
+            .unwrap_or(("unknown", "unknown"));
         entries.push(format!("    (\"{name}\", \"{version}\", \"{license}\"),\n"));
     }
 
@@ -33,83 +34,35 @@ fn main() {
     println!("cargo::rerun-if-changed=build.rs");
 }
 
-/// Extracts dependency names from the `[dependencies]` section of Cargo.toml.
+/// Extracts package names from the `[dependencies]` table of Cargo.toml.
 fn parse_cargo_toml_deps(path: &PathBuf) -> Vec<String> {
     let content = fs::read_to_string(path).expect("read Cargo.toml");
+    let manifest: toml::Value = toml::from_str(&content).expect("parse Cargo.toml");
+    let dependencies = manifest
+        .get("dependencies")
+        .and_then(toml::Value::as_table)
+        .expect("Cargo.toml [dependencies] table");
 
-    let mut names = Vec::new();
-    let mut in_deps = false;
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed == "[dependencies]" {
-            in_deps = true;
-            continue;
-        }
-        if in_deps {
-            if trimmed.starts_with('[') || trimmed.is_empty() {
-                break;
-            }
-            if let Some((key, value)) = trimmed.split_once('=') {
-                let key = key.trim();
-                // Handle renamed dependency: `gtk = { package = "gtk4", ... }`
-                let pkg_name = if value.trim().starts_with('{') {
-                    value
-                        .split("package = \"")
-                        .nth(1)
-                        .and_then(|rest| rest.split('"').next())
-                        .unwrap_or(key)
-                } else {
-                    key
-                };
-                if !pkg_name.is_empty() {
-                    names.push(pkg_name.to_string());
-                }
-            }
-        }
-    }
-
-    names
+    dependencies
+        .iter()
+        .map(|(alias, specification)| {
+            specification
+                .as_table()
+                .and_then(|table| table.get("package"))
+                .and_then(toml::Value::as_str)
+                .unwrap_or(alias)
+                .to_string()
+        })
+        .collect()
 }
 
-/// Reads Cargo.lock and returns resolved versions for the given dependency names.
-fn parse_cargo_lock_versions(path: &PathBuf, wanted: &[String]) -> BTreeMap<String, String> {
-    let content = fs::read_to_string(path).expect("read Cargo.lock");
-
-    let mut versions = BTreeMap::new();
-    let mut current_name = String::new();
-    let mut in_package = false;
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        match trimmed {
-            "[[package]]" => {
-                in_package = true;
-                current_name.clear();
-            }
-            _ if trimmed.is_empty() => {
-                in_package = false;
-            }
-            _ if in_package => {
-                if let Some(value) = trimmed.strip_prefix("name = ") {
-                    current_name = value.trim_matches('"').to_string();
-                } else if let Some(value) = trimmed.strip_prefix("version = ")
-                    && wanted.contains(&current_name)
-                {
-                    versions.insert(current_name.clone(), value.trim_matches('"').to_string());
-                }
-            }
-            _ => {}
-        }
-    }
-
-    versions
-}
-
-/// Runs `cargo metadata` and extracts license info for the given dependency names.
-fn licenses_from_metadata(manifest_dir: &PathBuf, wanted: &[String]) -> BTreeMap<String, String> {
+/// Runs `cargo metadata` and extracts exact versions and licenses for direct dependencies.
+fn packages_from_metadata(
+    manifest_dir: &PathBuf,
+    wanted: &[String],
+) -> BTreeMap<String, (String, String)> {
     let output = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
-        .args(["metadata", "--format-version", "1"])
+        .args(["metadata", "--format-version", "1", "--locked"])
         .current_dir(manifest_dir)
         .output();
 
@@ -124,7 +77,7 @@ fn licenses_from_metadata(manifest_dir: &PathBuf, wanted: &[String]) -> BTreeMap
         return BTreeMap::new();
     };
 
-    let mut licenses: BTreeMap<String, String> = BTreeMap::new();
+    let mut packages_by_name = BTreeMap::new();
     let resolve = json.get("resolve").and_then(|v| v.as_object());
     let root_id = resolve.and_then(|r| r.get("root")).and_then(|v| v.as_str());
 
@@ -162,13 +115,17 @@ fn licenses_from_metadata(manifest_dir: &PathBuf, wanted: &[String]) -> BTreeMap
             if !wanted.contains(&name.to_string()) {
                 continue;
             }
+            let version = pkg
+                .get("version")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
             let license = pkg
                 .get("license")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
-            licenses.insert(name.to_string(), license.to_string());
+            packages_by_name.insert(name.to_string(), (version.to_string(), license.to_string()));
         }
     }
 
-    licenses
+    packages_by_name
 }

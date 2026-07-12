@@ -4,6 +4,7 @@
 //! Preferences window opened from the command line or the floating panel.
 
 use gtk::prelude::*;
+use relm4::{ComponentParts, ComponentSender, SimpleComponent};
 use std::{cell::Cell, cell::RefCell, path::PathBuf, rc::Rc};
 
 use floatlyrics_core::i18n::{I18n, Language, Text};
@@ -35,20 +36,95 @@ impl SaveState {
     }
 }
 
-#[derive(Clone)]
-pub(super) struct SettingsWindow {
-    window: gtk::ApplicationWindow,
+pub(super) struct SettingsInit {
+    pub(super) initial: AppConfig,
+    pub(super) config_file: PathBuf,
+    pub(super) i18n: I18n,
 }
 
-impl SettingsWindow {
-    pub(super) fn new(
-        app: &gtk::Application,
-        initial: AppConfig,
-        config_file: PathBuf,
-        i18n: I18n,
-        on_about: impl Fn() + 'static,
-        on_saved: impl Fn(AppConfig) + 'static,
-    ) -> Self {
+pub(super) struct SettingsModel {
+    visible: bool,
+}
+
+#[derive(Debug)]
+pub(super) enum SettingsMsg {
+    Show,
+    Hide,
+    OpenAbout,
+}
+
+#[derive(Debug)]
+pub(super) enum SettingsOutput {
+    Saved(AppConfig),
+    OpenAbout,
+}
+
+#[relm4::component(pub(super))]
+impl SimpleComponent for SettingsModel {
+    type Init = SettingsInit;
+    type Input = SettingsMsg;
+    type Output = SettingsOutput;
+
+    view! {
+        window = gtk::ApplicationWindow {
+            set_application: Some(&relm4::main_application()),
+            set_default_size: (SETTINGS_WIDTH, SETTINGS_HEIGHT),
+            set_resizable: false,
+            set_hide_on_close: true,
+            add_css_class: "settings-window",
+            #[watch]
+            set_visible: model.visible,
+
+            #[wrap(Some)]
+            set_titlebar = &gtk::WindowHandle {
+                #[wrap(Some)]
+                set_child = &gtk::HeaderBar {
+                    set_show_title_buttons: true,
+                    #[wrap(Some)]
+                    set_title_widget = &gtk::StackSwitcher {
+                        set_stack: Some(stack),
+                        set_halign: gtk::Align::Center,
+                    },
+                    #[name = "about_button"]
+                    pack_end = &gtk::Button {
+                        set_icon_name: "help-about-symbolic",
+                        set_css_classes: &["flat", "circular"],
+                        connect_clicked[sender] => move |_| {
+                            sender.input(SettingsMsg::OpenAbout);
+                        },
+                    },
+                },
+            },
+
+            gtk::Box {
+                set_orientation: gtk::Orientation::Vertical,
+                #[local_ref]
+                stack -> gtk::Stack {},
+                gtk::Box {
+                    set_orientation: gtk::Orientation::Horizontal,
+                    add_css_class: "settings-status-bar",
+                    #[local_ref]
+                    status -> gtk::Label {},
+                },
+            },
+
+            connect_close_request[sender] => move |_| {
+                sender.input(SettingsMsg::Hide);
+                gtk::glib::Propagation::Proceed
+            },
+        }
+    }
+
+    fn init(
+        init: Self::Init,
+        root: Self::Root,
+        sender: ComponentSender<Self>,
+    ) -> ComponentParts<Self> {
+        let SettingsInit {
+            initial,
+            config_file,
+            i18n,
+        } = init;
         let draft = Rc::new(RefCell::new(initial.clone()));
         let status_state = Rc::new(RefCell::new(SaveState::Automatic));
         let status = gtk::Label::builder()
@@ -69,12 +145,12 @@ impl SettingsWindow {
             });
         }
 
-        let on_saved: Rc<dyn Fn(AppConfig)> = Rc::new(on_saved);
         let persist: Rc<dyn Fn()> = {
             let draft = Rc::clone(&draft);
             let i18n = i18n.clone();
             let status = status.clone();
             let status_state = Rc::clone(&status_state);
+            let output = sender.output_sender().clone();
             Rc::new(move || {
                 let next = draft.borrow().clone();
                 match next.save(&config_file) {
@@ -82,7 +158,7 @@ impl SettingsWindow {
                         *status_state.borrow_mut() = SaveState::Saved;
                         status.set_label(&status_state.borrow().render(i18n.language()));
                         status.remove_css_class("error");
-                        on_saved(next);
+                        let _ = output.send(SettingsOutput::Saved(next));
                     }
                     Err(error) => {
                         *status_state.borrow_mut() = SaveState::Failed(error.to_string());
@@ -125,51 +201,25 @@ impl SettingsWindow {
             &i18n,
         );
 
-        let switcher = gtk::StackSwitcher::builder()
-            .stack(&stack)
-            .halign(gtk::Align::Center)
-            .build();
-        let about_button = gtk::Button::builder()
-            .icon_name("help-about-symbolic")
-            .css_classes(["flat", "circular"])
-            .build();
-        bind_button_tooltip(&about_button, &i18n, Text::OpenAbout);
-        about_button.connect_clicked(move |_| on_about());
-
-        let header = gtk::HeaderBar::builder()
-            .title_widget(&switcher)
-            .show_title_buttons(true)
-            .build();
-        header.pack_end(&about_button);
-
-        let handle = gtk::WindowHandle::new();
-        handle.set_child(Some(&header));
-
-        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        root.append(&stack);
-        let status_bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        status_bar.add_css_class("settings-status-bar");
-        status_bar.append(&status);
-        root.append(&status_bar);
-
-        let window = gtk::ApplicationWindow::builder()
-            .application(app)
-            .default_width(SETTINGS_WIDTH)
-            .default_height(SETTINGS_HEIGHT)
-            .resizable(false)
-            .titlebar(&handle)
-            .child(&root)
-            .hide_on_close(true)
-            .build();
-        window.add_css_class("settings-window");
-        bind_window_title(&window, &i18n, Text::SettingsWindowTitle);
+        let stack = &stack;
+        let status = &status;
+        let model = Self { visible: false };
+        let widgets = view_output!();
+        bind_window_title(&root, &i18n, Text::SettingsWindowTitle);
+        bind_button_tooltip(&widgets.about_button, &i18n, Text::OpenAbout);
         install_css();
 
-        Self { window }
+        ComponentParts { model, widgets }
     }
 
-    pub(super) fn present(&self) {
-        self.window.present();
+    fn update(&mut self, message: Self::Input, sender: ComponentSender<Self>) {
+        match message {
+            SettingsMsg::Show => self.visible = true,
+            SettingsMsg::Hide => self.visible = false,
+            SettingsMsg::OpenAbout => {
+                let _ = sender.output(SettingsOutput::OpenAbout);
+            }
+        }
     }
 }
 

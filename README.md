@@ -1,6 +1,6 @@
 # FloatLyrics
 
-Linux Wayland 桌面悬浮歌词应用，基于 Rust 与 GTK4 layer-shell 构建，
+Linux Wayland 桌面悬浮歌词应用，基于 Rust、Relm4 与 GTK4 layer-shell 构建，
 通过 MPRIS 跟踪 Spotify 播放状态并显示同步歌词。
 
 ## 环境要求
@@ -9,7 +9,7 @@ Linux Wayland 桌面悬浮歌词应用，基于 Rust 与 GTK4 layer-shell 构建
 - GTK 4.12+
 - gtk4-layer-shell
 - Spotify 客户端（或使用匹配 MPRIS 总线名前缀的兼容客户端）
-- 从源码构建需 Rust 1.92+
+- 从源码构建需 Rust 1.93+
 
 ## 安装
 
@@ -58,7 +58,7 @@ Cargo 工作空间，包含三个 crate，自上而下分层：
 
 | Crate | 职责 |
 |---|---|
-| `floatlyrics` | CLI、GTK4 layer-shell 界面、MPRIS 监听、应用组合根 |
+| `floatlyrics` | CLI、Relm4/GTK4 layer-shell 界面、MPRIS 监听、应用组合根 |
 | `floatlyrics-lyrics` | 歌词模型、解析、搜索、时间轴、SQLite 缓存 |
 | `floatlyrics-core` | 应用路径、i18n、遥测、曲目指纹 |
 
@@ -67,6 +67,7 @@ Cargo 工作空间，包含三个 crate，自上而下分层：
 主要源模块：
 
 - `src/lib.rs` — 命令行解析、GTK 渲染器初始化、启动流程
+- `src/app.rs` — Relm4 应用组件、消息路由与窗口生命周期
 - `src/app/controller.rs` — 播放控制器与状态机
 - `src/app/model.rs` — 独立于 GTK 的展示模型
 - `src/app/view.rs`、`src/app/view/` — GTK 组件与 layer-shell 窗口
