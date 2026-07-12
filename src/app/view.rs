@@ -228,7 +228,10 @@ pub(super) fn build(
 ) -> OverlayView {
     let panel_width = compact_panel_width(config.window.width);
     let karaoke_height = karaoke_line_height(config.lyrics.lyric_font_size).max(MIN_KARAOKE_HEIGHT);
-    let viewport_h = viewport_height(config.lyrics.lyric_font_size, config.lyrics.translation_font_size);
+    let viewport_h = viewport_height(
+        config.lyrics.lyric_font_size,
+        config.lyrics.translation_font_size,
+    );
     let font_family = Rc::new(RefCell::new(font_family(&config.lyrics.font_order)));
     window.set_title(Some("FloatLyrics Overlay"));
     window.set_decorated(false);
@@ -446,7 +449,11 @@ fn lyric_slot(
     }
 }
 
-fn translation_style(is_current: bool, translation_font_px: i32, color: (f64, f64, f64, f64)) -> TextLineStyle {
+fn translation_style(
+    is_current: bool,
+    translation_font_px: i32,
+    color: (f64, f64, f64, f64),
+) -> TextLineStyle {
     let font_px = if is_current {
         translation_font_px
     } else {
@@ -635,13 +642,17 @@ impl OverlayView {
             config.lyrics.translation_font_size,
         );
         self.lyric_font_size.set(config.lyrics.lyric_font_size);
-        self.translation_font_size.set(config.lyrics.translation_font_size);
+        self.translation_font_size
+            .set(config.lyrics.translation_font_size);
         let karaoke_h = karaoke_line_height(config.lyrics.lyric_font_size).max(MIN_KARAOKE_HEIGHT);
-        let translation_h =
-            translation_line_height(config.lyrics.translation_font_size).max(MIN_TRANSLATION_HEIGHT);
-        self.lyrics_stack.set_height_request(karaoke_h + translation_h);
-        self.karaoke_played_color.set(parse_hex_color(&config.lyrics.played_color));
-        self.karaoke_unplayed_color.set(parse_hex_color(&config.lyrics.unplayed_color));
+        let translation_h = translation_line_height(config.lyrics.translation_font_size)
+            .max(MIN_TRANSLATION_HEIGHT);
+        self.lyrics_stack
+            .set_height_request(karaoke_h + translation_h);
+        self.karaoke_played_color
+            .set(parse_hex_color(&config.lyrics.played_color));
+        self.karaoke_unplayed_color
+            .set(parse_hex_color(&config.lyrics.unplayed_color));
         let translation_color = parse_hex_color(&config.lyrics.translation_color);
         let family = font_family(&config.lyrics.font_order);
         *self.font_family.borrow_mut() = family.clone();
@@ -663,15 +674,14 @@ impl OverlayView {
     }
 
     fn resize_for_lyrics(&self, value: &LyricSlotText) {
-        let measured_width =
-            lyric_content_width(
-                &self.song_info,
-                value,
-                &self.font_family.borrow(),
-                self.lyric_font_size.get(),
-                self.translation_font_size.get(),
-            )
-                .saturating_add(TEXT_HORIZONTAL_PADDING);
+        let measured_width = lyric_content_width(
+            &self.song_info,
+            value,
+            &self.font_family.borrow(),
+            self.lyric_font_size.get(),
+            self.translation_font_size.get(),
+        )
+        .saturating_add(TEXT_HORIZONTAL_PADDING);
         let available_width = available_panel_width(&self.window, PANEL_HORIZONTAL_GUTTER)
             .unwrap_or(MAX_EXPANDED_PANEL_WIDTH)
             .saturating_sub(PANEL_CHROME_WIDTH)

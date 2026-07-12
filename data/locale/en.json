@@ -83,6 +83,8 @@
   "PreviewLoadFailed": "Could not load the lyrics preview",
   "PreviewReady": "Preview loaded; the selected lyrics can be applied",
   "ProjectWebsite": "Project website",
+  "ProviderNameNetEase": "NetEase Cloud Music",
+  "ProviderNameQqMusic": "QQ Music",
   "QqThenNetEase": "QQ Music → NetEase Cloud Music",
   "SaveFailed": "Could not save settings",
   "Saved": "Saved",

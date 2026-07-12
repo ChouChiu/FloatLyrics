@@ -391,7 +391,7 @@ impl SimpleComponent for ManualSearchModel {
                 spinner.start();
                 let event_sender = event_sender.clone();
                 runtime.spawn(async move {
-                    let providers = [LyricsProvider::QqMusic, LyricsProvider::NetEase];
+                    let providers = LyricsProvider::default_order();
                     let result = search_lyrics_candidates(&search_track, &providers)
                         .await
                         .map_err(|error| error.to_string());
@@ -611,8 +611,12 @@ fn candidate_row(candidate: &LyricsCandidate, language: Language) -> gtk::ListBo
     labels.set_hexpand(true);
     labels.append(&title);
     labels.append(&detail);
+    let raw_score = candidate.match_score;
+    if raw_score < 0 {
+        tracing::warn!(raw_score, "negative match score clamped to 0");
+    }
     let score = gtk::Label::builder()
-        .label(format!("{}%", candidate.match_score.max(0)))
+        .label(format!("{}%", raw_score.max(0)))
         .valign(gtk::Align::Center)
         .css_classes(["dim-label"])
         .build();
@@ -625,12 +629,9 @@ fn candidate_row(candidate: &LyricsCandidate, language: Language) -> gtk::ListBo
 }
 
 fn provider_name(provider: LyricsProvider, language: Language) -> &'static str {
-    match (provider, language) {
-        (LyricsProvider::QqMusic, Language::English) => "QQ Music",
-        (LyricsProvider::NetEase, Language::English) => "NetEase Cloud Music",
-        (LyricsProvider::QqMusic, _) => "QQ 音乐",
-        (LyricsProvider::NetEase, Language::SimplifiedChinese) => "网易云音乐",
-        (LyricsProvider::NetEase, Language::TraditionalChinese) => "網易雲音樂",
+    match provider {
+        LyricsProvider::QqMusic => language.text(Text::ProviderNameQqMusic),
+        LyricsProvider::NetEase => language.text(Text::ProviderNameNetEase),
     }
 }
 

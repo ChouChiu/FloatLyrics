@@ -457,74 +457,80 @@ fn display_page(
     translation_font_size.set_value(config.lyrics.translation_font_size as f64);
     translation_font_size.set_numeric(true);
     translation_font_size.set_width_chars(8);
-    connect_window_i32(&translation_font_size, sender, SettingsMsg::SetTranslationFontSize);
+    connect_window_i32(
+        &translation_font_size,
+        sender,
+        SettingsMsg::SetTranslationFontSize,
+    );
 
     page(
         i18n,
         Text::DisplayTitle,
         Text::DisplayDescription,
-        &[setting_card(&[
-            setting_row(i18n, Text::PanelWidth, Text::PanelWidthDescription, &width),
-            setting_row(
-                i18n,
-                Text::BottomMargin,
-                Text::BottomMarginDescription,
-                &margin,
-            ),
-            setting_row(
-                i18n,
-                Text::BottomPanelHeight,
-                Text::BottomPanelHeightDescription,
-                &panel_height,
-            ),
-            setting_row(
-                i18n,
-                Text::BackgroundOpacity,
-                Text::BackgroundOpacityDescription,
-                &opacity,
-            ),
-            setting_row(i18n, Text::Fonts, Text::FontsDescription, &fonts),
-        ]),
-        setting_card(&[
-            setting_row(
-                i18n,
-                Text::LyricFontSize,
-                Text::LyricFontSizeDescription,
-                &lyric_font_size,
-            ),
-            setting_row(
-                i18n,
-                Text::TranslationFontSize,
-                Text::TranslationFontSizeDescription,
-                &translation_font_size,
-            ),
-        ]),
-        setting_card(&[
-            color_row(
-                i18n,
-                Text::PlayedColor,
-                Text::PlayedColorDescription,
-                &config.lyrics.played_color,
-                sender.clone(),
-                SettingsMsg::SetPlayedColor,
-            ),
-            color_row(
-                i18n,
-                Text::UnplayedColor,
-                Text::UnplayedColorDescription,
-                &config.lyrics.unplayed_color,
-                sender.clone(),
-                SettingsMsg::SetUnplayedColor,
-            ),
-            color_row(
-                i18n,
-                Text::TranslationColor,
-                Text::TranslationColorDescription,
-                &config.lyrics.translation_color,
-                sender.clone(),
-                SettingsMsg::SetTranslationColor,
-            ),
-        ])],
+        &[
+            setting_card(&[
+                setting_row(i18n, Text::PanelWidth, Text::PanelWidthDescription, &width),
+                setting_row(
+                    i18n,
+                    Text::BottomMargin,
+                    Text::BottomMarginDescription,
+                    &margin,
+                ),
+                setting_row(
+                    i18n,
+                    Text::BottomPanelHeight,
+                    Text::BottomPanelHeightDescription,
+                    &panel_height,
+                ),
+                setting_row(
+                    i18n,
+                    Text::BackgroundOpacity,
+                    Text::BackgroundOpacityDescription,
+                    &opacity,
+                ),
+                setting_row(i18n, Text::Fonts, Text::FontsDescription, &fonts),
+            ]),
+            setting_card(&[
+                setting_row(
+                    i18n,
+                    Text::LyricFontSize,
+                    Text::LyricFontSizeDescription,
+                    &lyric_font_size,
+                ),
+                setting_row(
+                    i18n,
+                    Text::TranslationFontSize,
+                    Text::TranslationFontSizeDescription,
+                    &translation_font_size,
+                ),
+            ]),
+            setting_card(&[
+                color_row(
+                    i18n,
+                    Text::PlayedColor,
+                    Text::PlayedColorDescription,
+                    &config.lyrics.played_color,
+                    sender.clone(),
+                    SettingsMsg::SetPlayedColor,
+                ),
+                color_row(
+                    i18n,
+                    Text::UnplayedColor,
+                    Text::UnplayedColorDescription,
+                    &config.lyrics.unplayed_color,
+                    sender.clone(),
+                    SettingsMsg::SetUnplayedColor,
+                ),
+                color_row(
+                    i18n,
+                    Text::TranslationColor,
+                    Text::TranslationColorDescription,
+                    &config.lyrics.translation_color,
+                    sender.clone(),
+                    SettingsMsg::SetTranslationColor,
+                ),
+            ]),
+        ],
     )
 }
 

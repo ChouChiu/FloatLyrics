@@ -4,7 +4,10 @@
 //! Pango/Cairo text rendering for translations and syllable-level karaoke.
 
 use gtk::prelude::*;
-use std::{cell::{Cell, RefCell}, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
 use floatlyrics_lyrics::lyrics::TimedSyllable;
 
@@ -47,13 +50,8 @@ pub(super) fn lyric_content_width(
         .karaoke
         .as_ref()
         .map_or(value.text.as_str(), |karaoke| karaoke.text.as_str());
-    let lyric_width = text_pixel_width(
-        measure_widget,
-        lyric_text,
-        lyric_font_px,
-        true,
-        font_family,
-    );
+    let lyric_width =
+        text_pixel_width(measure_widget, lyric_text, lyric_font_px, true, font_family);
     let translation_width = text_pixel_width(
         measure_widget,
         &value.translation,

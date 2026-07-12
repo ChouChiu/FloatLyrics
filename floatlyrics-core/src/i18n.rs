@@ -397,6 +397,8 @@ define_text_keys!(
     DetailSeparator,
     CandidatesFoundOne,
     CandidatesFoundMany,
+    ProviderNameQqMusic,
+    ProviderNameNetEase,
 );
 
 #[derive(Debug, Clone, PartialEq, Eq)]

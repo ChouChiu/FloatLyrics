@@ -83,6 +83,8 @@
   "PreviewLoadFailed": "加载歌词预览失败",
   "PreviewReady": "预览已加载，可应用所选歌词",
   "ProjectWebsite": "项目主页",
+  "ProviderNameNetEase": "网易云音乐",
+  "ProviderNameQqMusic": "QQ 音乐",
   "QqThenNetEase": "QQ 音乐 → 网易云音乐",
   "SaveFailed": "保存设置失败",
   "Saved": "已保存",

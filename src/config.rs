@@ -172,23 +172,28 @@ impl Default for LyricsConfig {
 }
 
 /// Parses an `#RRGGBBAA` hex color string into an `(r, g, b, a)` tuple with
-/// each channel in `0.0..=1.0`. Returns white when the input is invalid.
+/// each channel in `0.0..=1.0`. Returns white and logs a warning when the
+/// input is invalid.
 pub fn parse_hex_color(hex: &str) -> (f64, f64, f64, f64) {
     let hex = hex.trim().trim_start_matches('#');
     if hex.len() < 6 {
+        tracing::warn!(%hex, "color must be at least 6 hex digits, falling back to white");
         return (1.0, 1.0, 1.0, 1.0);
     }
     let parse_byte = |offset: usize| {
-        u8::from_str_radix(&hex[offset..offset + 2], 16).unwrap_or(0xff) as f64 / 255.0
+        u8::from_str_radix(&hex[offset..offset + 2], 16).unwrap_or_else(|_| {
+            tracing::warn!(
+                component = &hex[offset..offset + 2],
+                "invalid hex color byte, defaulting to ff"
+            );
+            0xff
+        }) as f64
+            / 255.0
     };
     let r = parse_byte(0);
     let g = parse_byte(2);
     let b = parse_byte(4);
-    let a = if hex.len() >= 8 {
-        parse_byte(6)
-    } else {
-        1.0
-    };
+    let a = if hex.len() >= 8 { parse_byte(6) } else { 1.0 };
     (r, g, b, a)
 }
 
