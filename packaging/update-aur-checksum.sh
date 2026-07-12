@@ -5,44 +5,78 @@
 set -euo pipefail
 
 generate_srcinfo=true
-if (( $# > 1 )); then
-    echo "usage: $0 [--checksum-only]" >&2
+if [[ ${1:-} == --checksum-only ]]; then
+    generate_srcinfo=false
+    shift
+fi
+if (( $# > 2 )); then
+    echo "usage: $0 [--checksum-only] [PACKAGE] [VERSION]" >&2
     exit 2
 fi
-if (( $# == 1 )); then
-    if [[ $1 != --checksum-only ]]; then
-        echo "usage: $0 [--checksum-only]" >&2
+
+package_selection=${1:-all}
+version=${2:-}
+case $package_selection in
+    all | floatlyrics | floatlyrics-bin) ;;
+    *)
+        echo "invalid package selection: $package_selection" >&2
         exit 2
-    fi
-    generate_srcinfo=false
-fi
+        ;;
+esac
 if [[ $generate_srcinfo == true ]] && (( EUID == 0 )); then
     echo "refusing to run makepkg as root; use --checksum-only and generate .SRCINFO as a build user" >&2
     exit 1
 fi
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+source_pkgbuild="$repo_root/PKGBUILD"
+source_srcinfo="$repo_root/.SRCINFO"
+bin_dir="$repo_root/packaging/aur/floatlyrics-bin"
+bin_pkgbuild="$bin_dir/PKGBUILD"
+bin_srcinfo="$bin_dir/.SRCINFO"
 cd "$repo_root"
 
-pkgver=$(sed -n 's/^pkgver=//p' PKGBUILD)
-if [[ ! "$pkgver" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
-    echo "invalid pkgver in PKGBUILD: $pkgver" >&2
+if [[ -z $version ]]; then
+    version=$(sed -n 's/^pkgver=//p' "$source_pkgbuild")
+fi
+if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+    echo "invalid package version: $version" >&2
     exit 1
 fi
 
-archive=$(mktemp)
-trap 'rm -f "$archive"' EXIT
+temp_dir=$(mktemp -d)
+trap 'rm -rf "$temp_dir"' EXIT
 
-curl --fail --location --retry 5 --retry-all-errors \
-    --output "$archive" \
-    "https://github.com/ChouChiu/FloatLyrics/archive/refs/tags/v$pkgver.tar.gz"
-checksum=$(sha256sum "$archive" | cut -d ' ' -f 1)
+if [[ $package_selection == all || $package_selection == floatlyrics ]]; then
+    sed -i -E "s/^pkgver=.*/pkgver=$version/" "$source_pkgbuild"
+    sed -i -E 's/^pkgrel=.*/pkgrel=1/' "$source_pkgbuild"
+    source_archive="$temp_dir/floatlyrics-$version.tar.gz"
+    curl --fail --location --retry 5 --retry-all-errors \
+        --output "$source_archive" \
+        "https://github.com/ChouChiu/FloatLyrics/archive/refs/tags/v$version.tar.gz"
+    source_checksum=$(sha256sum "$source_archive" | cut -d ' ' -f 1)
+    sed -i -E "s/^sha256sums=\('[^']*'\)$/sha256sums=('$source_checksum')/" "$source_pkgbuild"
+    grep -Fxq "sha256sums=('$source_checksum')" "$source_pkgbuild"
+    if [[ $generate_srcinfo == true ]]; then
+        source_srcinfo_temp="$temp_dir/floatlyrics.SRCINFO"
+        makepkg --printsrcinfo > "$source_srcinfo_temp"
+        mv "$source_srcinfo_temp" "$source_srcinfo"
+    fi
+fi
 
-sed -i -E "s/^sha256sums=\('[^']*'\)$/sha256sums=('$checksum')/" PKGBUILD
-grep -Fxq "sha256sums=('$checksum')" PKGBUILD
-
-if [[ $generate_srcinfo == true ]]; then
-    srcinfo=$(mktemp)
-    makepkg --printsrcinfo > "$srcinfo"
-    mv "$srcinfo" .SRCINFO
+if [[ $package_selection == all || $package_selection == floatlyrics-bin ]]; then
+    sed -i -E "s/^pkgver=.*/pkgver=$version/" "$bin_pkgbuild"
+    sed -i -E 's/^pkgrel=.*/pkgrel=1/' "$bin_pkgbuild"
+    bin_archive="$temp_dir/floatlyrics-$version.rpm"
+    curl --fail --location --retry 5 --retry-all-errors \
+        --output "$bin_archive" \
+        "https://github.com/ChouChiu/FloatLyrics/releases/download/v$version/floatlyrics-$version-1.x86_64.rpm"
+    bin_checksum=$(sha256sum "$bin_archive" | cut -d ' ' -f 1)
+    sed -i -E "s/^sha256sums_x86_64=\('[^']*'\)$/sha256sums_x86_64=('$bin_checksum')/" "$bin_pkgbuild"
+    grep -Fxq "sha256sums_x86_64=('$bin_checksum')" "$bin_pkgbuild"
+    if [[ $generate_srcinfo == true ]]; then
+        bin_srcinfo_temp="$temp_dir/floatlyrics-bin.SRCINFO"
+        (cd "$bin_dir" && makepkg --printsrcinfo) > "$bin_srcinfo_temp"
+        mv "$bin_srcinfo_temp" "$bin_srcinfo"
+    fi
 fi
