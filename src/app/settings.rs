@@ -44,6 +44,11 @@ pub(super) struct SettingsInit {
 
 pub(super) struct SettingsModel {
     visible: bool,
+    draft: Rc<RefCell<AppConfig>>,
+    config_file: PathBuf,
+    status: gtk::Label,
+    status_state: Rc<RefCell<SaveState>>,
+    i18n: I18n,
 }
 
 #[derive(Debug)]
@@ -51,6 +56,16 @@ pub(super) enum SettingsMsg {
     Show,
     Hide,
     OpenAbout,
+    SetLanguage(Language),
+    SetOffset(i64),
+    SetTranslation(bool),
+    SetRomanization(bool),
+    SetWidth(i32),
+    SetMargin(i32),
+    SetPanelHeight(i32),
+    SetOpacity(f64),
+    SetFonts(Vec<String>),
+    SetProviderOrder(Vec<LyricsProvider>),
 }
 
 #[derive(Debug)]
@@ -145,30 +160,6 @@ impl SimpleComponent for SettingsModel {
             });
         }
 
-        let persist: Rc<dyn Fn()> = {
-            let draft = Rc::clone(&draft);
-            let i18n = i18n.clone();
-            let status = status.clone();
-            let status_state = Rc::clone(&status_state);
-            let output = sender.output_sender().clone();
-            Rc::new(move || {
-                let next = draft.borrow().clone();
-                match next.save(&config_file) {
-                    Ok(()) => {
-                        *status_state.borrow_mut() = SaveState::Saved;
-                        status.set_label(&status_state.borrow().render(i18n.language()));
-                        status.remove_css_class("error");
-                        let _ = output.send(SettingsOutput::Saved(next));
-                    }
-                    Err(error) => {
-                        *status_state.borrow_mut() = SaveState::Failed(error.to_string());
-                        status.set_label(&status_state.borrow().render(i18n.language()));
-                        status.add_css_class("error");
-                    }
-                }
-            })
-        };
-
         let stack = gtk::Stack::builder()
             .transition_type(gtk::StackTransitionType::Crossfade)
             .transition_duration(180)
@@ -181,7 +172,7 @@ impl SimpleComponent for SettingsModel {
             "general",
             Text::General,
             "preferences-system-symbolic",
-            &general_page(&initial, &draft, &persist, &i18n),
+            &general_page(&initial, sender.input_sender(), &i18n),
             &i18n,
         );
         add_page(
@@ -189,7 +180,7 @@ impl SimpleComponent for SettingsModel {
             "display",
             Text::Display,
             "video-display-symbolic",
-            &display_page(&initial, &draft, &persist, &i18n),
+            &display_page(&initial, &draft, sender.input_sender(), &i18n),
             &i18n,
         );
         add_page(
@@ -197,13 +188,20 @@ impl SimpleComponent for SettingsModel {
             "sources",
             Text::LyricsSources,
             "view-list-symbolic",
-            &sources_page(&initial, &draft, &persist, &i18n),
+            &sources_page(&initial, sender.input_sender(), &i18n),
             &i18n,
         );
 
         let stack = &stack;
         let status = &status;
-        let model = Self { visible: false };
+        let model = Self {
+            visible: false,
+            draft,
+            config_file,
+            status: status.clone(),
+            status_state,
+            i18n: i18n.clone(),
+        };
         let widgets = view_output!();
         bind_window_title(&root, &i18n, Text::SettingsWindowTitle);
         bind_button_tooltip(&widgets.about_button, &i18n, Text::OpenAbout);
@@ -213,11 +211,51 @@ impl SimpleComponent for SettingsModel {
     }
 
     fn update(&mut self, message: Self::Input, sender: ComponentSender<Self>) {
+        let should_persist = !matches!(
+            message,
+            SettingsMsg::Show | SettingsMsg::Hide | SettingsMsg::OpenAbout
+        );
         match message {
             SettingsMsg::Show => self.visible = true,
             SettingsMsg::Hide => self.visible = false,
             SettingsMsg::OpenAbout => {
                 let _ = sender.output(SettingsOutput::OpenAbout);
+            }
+            SettingsMsg::SetLanguage(value) => self.draft.borrow_mut().general.language = value,
+            SettingsMsg::SetOffset(value) => self.draft.borrow_mut().lyrics.offset_ms = value,
+            SettingsMsg::SetTranslation(value) => {
+                self.draft.borrow_mut().lyrics.show_translation = value;
+            }
+            SettingsMsg::SetRomanization(value) => {
+                self.draft.borrow_mut().lyrics.show_romanization = value;
+            }
+            SettingsMsg::SetWidth(value) => self.draft.borrow_mut().window.width = value,
+            SettingsMsg::SetMargin(value) => self.draft.borrow_mut().window.margin = value,
+            SettingsMsg::SetPanelHeight(value) => {
+                self.draft.borrow_mut().window.bottom_panel_height = value;
+            }
+            SettingsMsg::SetOpacity(value) => self.draft.borrow_mut().window.opacity = value,
+            SettingsMsg::SetFonts(value) => self.draft.borrow_mut().lyrics.font_order = value,
+            SettingsMsg::SetProviderOrder(value) => {
+                self.draft.borrow_mut().lyrics.provider_order = value;
+            }
+        }
+        if should_persist {
+            let next = self.draft.borrow().clone();
+            match next.save(&self.config_file) {
+                Ok(()) => {
+                    *self.status_state.borrow_mut() = SaveState::Saved;
+                    self.status
+                        .set_label(&self.status_state.borrow().render(self.i18n.language()));
+                    self.status.remove_css_class("error");
+                    let _ = sender.output(SettingsOutput::Saved(next));
+                }
+                Err(error) => {
+                    *self.status_state.borrow_mut() = SaveState::Failed(error.to_string());
+                    self.status
+                        .set_label(&self.status_state.borrow().render(self.i18n.language()));
+                    self.status.add_css_class("error");
+                }
             }
         }
     }
@@ -225,8 +263,7 @@ impl SimpleComponent for SettingsModel {
 
 fn general_page(
     config: &AppConfig,
-    draft: &Rc<RefCell<AppConfig>>,
-    persist: &Rc<dyn Fn()>,
+    sender: &relm4::Sender<SettingsMsg>,
     i18n: &I18n,
 ) -> gtk::ScrolledWindow {
     let language_names = Language::ALL.map(Language::display_name);
@@ -235,8 +272,7 @@ fn general_page(
     language.set_width_request(190);
     let changing_language = Rc::new(Cell::new(false));
     {
-        let draft = Rc::clone(draft);
-        let persist = Rc::clone(persist);
+        let sender = sender.clone();
         let changing_language = Rc::clone(&changing_language);
         language.connect_selected_notify(move |input| {
             if changing_language.get() {
@@ -245,8 +281,7 @@ fn general_page(
             let Some(next_language) = Language::ALL.get(input.selected() as usize).copied() else {
                 return;
             };
-            draft.borrow_mut().general.language = next_language;
-            persist();
+            let _ = sender.send(SettingsMsg::SetLanguage(next_language));
         });
     }
     {
@@ -270,11 +305,9 @@ fn general_page(
         });
     }
     {
-        let draft = Rc::clone(draft);
-        let persist = Rc::clone(persist);
+        let sender = sender.clone();
         offset.connect_value_changed(move |input| {
-            draft.borrow_mut().lyrics.offset_ms = input.value_as_int() as i64;
-            persist();
+            let _ = sender.send(SettingsMsg::SetOffset(input.value_as_int() as i64));
         });
     }
 
@@ -283,11 +316,9 @@ fn general_page(
         .valign(gtk::Align::Center)
         .build();
     {
-        let draft = Rc::clone(draft);
-        let persist = Rc::clone(persist);
+        let sender = sender.clone();
         translation.connect_active_notify(move |input| {
-            draft.borrow_mut().lyrics.show_translation = input.is_active();
-            persist();
+            let _ = sender.send(SettingsMsg::SetTranslation(input.is_active()));
         });
     }
 
@@ -296,11 +327,9 @@ fn general_page(
         .valign(gtk::Align::Center)
         .build();
     {
-        let draft = Rc::clone(draft);
-        let persist = Rc::clone(persist);
+        let sender = sender.clone();
         romanization.connect_active_notify(move |input| {
-            draft.borrow_mut().lyrics.show_romanization = input.is_active();
-            persist();
+            let _ = sender.send(SettingsMsg::SetRomanization(input.is_active()));
         });
     }
 
@@ -342,7 +371,7 @@ fn general_page(
 fn display_page(
     config: &AppConfig,
     draft: &Rc<RefCell<AppConfig>>,
-    persist: &Rc<dyn Fn()>,
+    sender: &relm4::Sender<SettingsMsg>,
     i18n: &I18n,
 ) -> gtk::ScrolledWindow {
     let fonts = gtk::Button::with_label("");
@@ -353,9 +382,17 @@ fn display_page(
     }
     {
         let draft = Rc::clone(draft);
-        let persist = Rc::clone(persist);
+        let sender = sender.clone();
         let i18n = i18n.clone();
         fonts.connect_clicked(move |_| {
+            let persist: Rc<dyn Fn()> = {
+                let draft = Rc::clone(&draft);
+                let sender = sender.clone();
+                Rc::new(move || {
+                    let fonts = draft.borrow().lyrics.font_order.clone();
+                    let _ = sender.send(SettingsMsg::SetFonts(fonts));
+                })
+            };
             font_window(&draft, &persist, &i18n).present();
         });
     }
@@ -364,25 +401,19 @@ fn display_page(
     width.set_value(config.window.width as f64);
     width.set_numeric(true);
     width.set_width_chars(8);
-    connect_window_i32(&width, draft, persist, |config, value| {
-        config.window.width = value;
-    });
+    connect_window_i32(&width, sender, SettingsMsg::SetWidth);
 
     let margin = gtk::SpinButton::with_range(0.0, 500.0, 4.0);
     margin.set_value(config.window.margin as f64);
     margin.set_numeric(true);
     margin.set_width_chars(8);
-    connect_window_i32(&margin, draft, persist, |config, value| {
-        config.window.margin = value;
-    });
+    connect_window_i32(&margin, sender, SettingsMsg::SetMargin);
 
     let panel_height = gtk::SpinButton::with_range(0.0, 200.0, 2.0);
     panel_height.set_value(config.window.bottom_panel_height as f64);
     panel_height.set_numeric(true);
     panel_height.set_width_chars(8);
-    connect_window_i32(&panel_height, draft, persist, |config, value| {
-        config.window.bottom_panel_height = value;
-    });
+    connect_window_i32(&panel_height, sender, SettingsMsg::SetPanelHeight);
 
     let opacity = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.15, 1.0, 0.01);
     opacity.set_value(config.window.opacity.clamp(0.15, 1.0));
@@ -390,11 +421,9 @@ fn display_page(
     opacity.set_digits(2);
     opacity.set_width_request(200);
     {
-        let draft = Rc::clone(draft);
-        let persist = Rc::clone(persist);
+        let sender = sender.clone();
         opacity.connect_value_changed(move |input| {
-            draft.borrow_mut().window.opacity = input.value();
-            persist();
+            let _ = sender.send(SettingsMsg::SetOpacity(input.value()));
         });
     }
 
@@ -618,8 +647,7 @@ fn apply_font_preview(label: &gtk::Label, family: &str) {
 
 fn sources_page(
     config: &AppConfig,
-    draft: &Rc<RefCell<AppConfig>>,
-    persist: &Rc<dyn Fn()>,
+    sender: &relm4::Sender<SettingsMsg>,
     i18n: &I18n,
 ) -> gtk::ScrolledWindow {
     let source_model = gtk::StringList::new(&[
@@ -634,19 +662,18 @@ fn sources_page(
     source_order.set_selected(u32::from(netease_first));
     let updating_model = Rc::new(Cell::new(false));
     {
-        let draft = Rc::clone(draft);
-        let persist = Rc::clone(persist);
+        let sender = sender.clone();
         let updating_model = Rc::clone(&updating_model);
         source_order.connect_selected_notify(move |input| {
             if updating_model.get() {
                 return;
             }
-            draft.borrow_mut().lyrics.provider_order = if input.selected() == 1 {
+            let order = if input.selected() == 1 {
                 vec![LyricsProvider::NetEase, LyricsProvider::QqMusic]
             } else {
                 vec![LyricsProvider::QqMusic, LyricsProvider::NetEase]
             };
-            persist();
+            let _ = sender.send(SettingsMsg::SetProviderOrder(order));
         });
     }
     {
@@ -691,15 +718,12 @@ fn language_index(language: Language) -> u32 {
 
 fn connect_window_i32(
     input: &gtk::SpinButton,
-    draft: &Rc<RefCell<AppConfig>>,
-    persist: &Rc<dyn Fn()>,
-    update: impl Fn(&mut AppConfig, i32) + 'static,
+    sender: &relm4::Sender<SettingsMsg>,
+    message: impl Fn(i32) -> SettingsMsg + 'static,
 ) {
-    let draft = Rc::clone(draft);
-    let persist = Rc::clone(persist);
+    let sender = sender.clone();
     input.connect_value_changed(move |input| {
-        update(&mut draft.borrow_mut(), input.value_as_int());
-        persist();
+        let _ = sender.send(message(input.value_as_int()));
     });
 }
 

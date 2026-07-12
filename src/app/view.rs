@@ -150,14 +150,55 @@ impl WidgetTemplate for OverlayPanel {
     }
 }
 
-/// Narrow interface the controller uses to update the display.
-/// Decouples controller logic from the concrete [`OverlayView`].
+/// Narrow interface used by the playback controller.
+///
+/// Production updates are sent back through Relm4 as [`AppMsg`] values; tests
+/// can still provide a small in-memory implementation of this interface.
 pub(super) trait LyricsView {
     fn set_song_info(&self, value: &str);
     fn show_lyrics(&self, value: LyricSlotText, key: &str);
     fn show_status(&self, key: Text);
     fn set_progress(&self, position_ms: Option<u64>, duration_ms: Option<u64>);
     fn reset_progress(&self);
+}
+
+/// Message-only handle to the overlay component state.
+///
+/// Keeping GTK widgets out of the playback controller makes `AppModel::update`
+/// the single place where the concrete view is mutated.
+#[derive(Clone)]
+pub(super) struct OverlaySender {
+    sender: relm4::Sender<AppMsg>,
+}
+
+impl OverlaySender {
+    pub(super) fn new(sender: relm4::Sender<AppMsg>) -> Self {
+        Self { sender }
+    }
+}
+
+impl LyricsView for OverlaySender {
+    fn set_song_info(&self, value: &str) {
+        let _ = self.sender.send(AppMsg::SetSongInfo(value.to_string()));
+    }
+
+    fn show_lyrics(&self, value: LyricSlotText, key: &str) {
+        let _ = self.sender.send(AppMsg::ShowLyrics(value, key.to_string()));
+    }
+
+    fn show_status(&self, key: Text) {
+        let _ = self.sender.send(AppMsg::ShowStatus(key));
+    }
+
+    fn set_progress(&self, position_ms: Option<u64>, duration_ms: Option<u64>) {
+        let _ = self
+            .sender
+            .send(AppMsg::SetProgress(position_ms, duration_ms));
+    }
+
+    fn reset_progress(&self) {
+        let _ = self.sender.send(AppMsg::ResetProgress);
+    }
 }
 
 #[derive(Clone)]
@@ -542,31 +583,29 @@ fn reset_progress(floating: &OverlayView) {
     floating.progress_label.set_label("");
 }
 
-impl LyricsView for OverlayView {
-    fn set_song_info(&self, value: &str) {
+impl OverlayView {
+    pub(super) fn set_song_info(&self, value: &str) {
         self.song_info.set_label(value);
     }
 
-    fn show_lyrics(&self, value: LyricSlotText, key: &str) {
+    pub(super) fn show_lyrics(&self, value: LyricSlotText, key: &str) {
         *self.static_status.borrow_mut() = None;
         set_lyrics_slots(self, value, key);
     }
 
-    fn show_status(&self, key: Text) {
+    pub(super) fn show_status(&self, key: Text) {
         *self.static_status.borrow_mut() = Some(key);
         set_status_lyrics(self, self.i18n.text(key), key);
     }
 
-    fn set_progress(&self, position_ms: Option<u64>, duration_ms: Option<u64>) {
+    pub(super) fn set_progress(&self, position_ms: Option<u64>, duration_ms: Option<u64>) {
         update_progress(self, position_ms, duration_ms);
     }
 
-    fn reset_progress(&self) {
+    pub(super) fn reset_progress(&self) {
         reset_progress(self);
     }
-}
 
-impl OverlayView {
     pub(super) fn tick_widget(&self) -> gtk::Stack {
         self.lyrics_stack.clone()
     }

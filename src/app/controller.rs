@@ -24,7 +24,7 @@ use super::{
         LyricsDisplayState, PlaybackSnapshot, apply_position_sample, effective_position_ms,
         lyrics_frame,
     },
-    view::{LyricsView, OverlayView},
+    view::{LyricsView, OverlaySender},
 };
 
 #[derive(Debug)]
@@ -76,7 +76,7 @@ pub(super) struct Controller {
     lyrics_receiver: Rc<RefCell<mpsc::Receiver<LyricsFetchEvent>>>,
     lyrics_state: Rc<RefCell<LyricsDisplayState>>,
     latest: Rc<RefCell<Option<PlaybackSnapshot>>>,
-    floating: OverlayView,
+    floating: OverlaySender,
     cache: Rc<dyn LyricsCache>,
     config: Rc<RefCell<AppConfig>>,
     runtime: tokio::runtime::Handle,
@@ -87,7 +87,7 @@ impl Controller {
     pub(super) fn new(
         receiver: mpsc::Receiver<SpotifyWatcherEvent>,
         runtime: tokio::runtime::Handle,
-        floating: OverlayView,
+        floating: OverlaySender,
         cache: Rc<dyn LyricsCache>,
         config: Rc<RefCell<AppConfig>>,
     ) -> Self {

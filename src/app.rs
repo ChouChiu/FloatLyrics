@@ -47,11 +47,25 @@ struct AppModel {
     manual_search: Controller<manual_search::ManualSearchModel>,
     about: Controller<about::AboutModel>,
     controller: controller::Controller,
+    song_info: String,
+    lyrics: LyricsPresentation,
+    progress: (Option<u64>, Option<u64>),
+}
+
+#[derive(Debug, Clone)]
+enum LyricsPresentation {
+    Content(model::LyricSlotText, String),
+    Status(floatlyrics_core::i18n::Text),
 }
 
 #[derive(Debug)]
-pub(super) enum AppMsg {
+enum AppMsg {
     Tick,
+    SetSongInfo(String),
+    ShowLyrics(model::LyricSlotText, String),
+    ShowStatus(floatlyrics_core::i18n::Text),
+    SetProgress(Option<u64>, Option<u64>),
+    ResetProgress,
     OpenSettings,
     OpenManualSearch,
     OpenAbout,
@@ -121,7 +135,7 @@ impl SimpleComponent for AppModel {
         let controller = controller::Controller::new(
             spotify_receiver,
             runtime_handle.clone(),
-            overlay.clone(),
+            view::OverlaySender::new(sender.input_sender().clone()),
             Rc::clone(&cache),
             Rc::clone(&config),
         );
@@ -163,6 +177,9 @@ impl SimpleComponent for AppModel {
             manual_search,
             about,
             controller,
+            song_info: "FloatLyrics".to_string(),
+            lyrics: LyricsPresentation::Status(floatlyrics_core::i18n::Text::OpenSpotify),
+            progress: (None, None),
         };
         let widgets = view_output!();
         ComponentParts { model, widgets }
@@ -171,6 +188,15 @@ impl SimpleComponent for AppModel {
     fn update(&mut self, message: Self::Input, _sender: ComponentSender<Self>) {
         match message {
             AppMsg::Tick => self.controller.tick(),
+            AppMsg::SetSongInfo(value) => self.song_info = value,
+            AppMsg::ShowLyrics(value, key) => {
+                self.lyrics = LyricsPresentation::Content(value, key);
+            }
+            AppMsg::ShowStatus(key) => self.lyrics = LyricsPresentation::Status(key),
+            AppMsg::SetProgress(position_ms, duration_ms) => {
+                self.progress = (position_ms, duration_ms);
+            }
+            AppMsg::ResetProgress => self.progress = (None, None),
             AppMsg::OpenSettings => {
                 let _ = self.settings.sender().send(settings::SettingsMsg::Show);
             }
@@ -197,6 +223,22 @@ impl SimpleComponent for AppModel {
                 }
             }
             AppMsg::Quit => relm4::main_application().quit(),
+        }
+    }
+
+    fn post_view() {
+        self.overlay.set_song_info(&self.song_info);
+        match &self.lyrics {
+            LyricsPresentation::Content(value, key) => {
+                self.overlay.show_lyrics(value.clone(), key);
+            }
+            LyricsPresentation::Status(key) => self.overlay.show_status(*key),
+        }
+        let (position_ms, duration_ms) = self.progress;
+        if position_ms.is_none() && duration_ms.is_none() {
+            self.overlay.reset_progress();
+        } else {
+            self.overlay.set_progress(position_ms, duration_ms);
         }
     }
 }

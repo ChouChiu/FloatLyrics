@@ -5,7 +5,7 @@
 
 use gtk::prelude::*;
 use relm4::{ComponentParts, ComponentSender, SimpleComponent};
-use std::{cell::Cell, cell::RefCell, rc::Rc, sync::mpsc, time::Duration};
+use std::{cell::Cell, cell::RefCell, rc::Rc};
 
 use floatlyrics_core::{
     i18n::{I18n, Language, Text},
@@ -28,7 +28,7 @@ const WINDOW_WIDTH: i32 = 820;
 const WINDOW_HEIGHT: i32 = 560;
 
 #[derive(Debug)]
-enum SearchEvent {
+pub(super) enum SearchEvent {
     Candidates {
         generation: u64,
         result: Result<Vec<LyricsCandidate>, String>,
@@ -94,6 +94,7 @@ pub(super) struct ManualSearchModel {
     artist: gtk::Entry,
     start_search: Rc<dyn Fn()>,
     apply_selected: Rc<dyn Fn()>,
+    handle_event: Rc<dyn Fn(SearchEvent)>,
     controller: ControllerHandle,
 }
 
@@ -103,6 +104,7 @@ pub(super) enum ManualSearchMsg {
     Hide,
     Search,
     Apply,
+    Event(SearchEvent),
 }
 
 #[relm4::component(pub(super))]
@@ -289,7 +291,7 @@ impl SimpleComponent for ManualSearchModel {
                     .set_text(&preview_state.borrow().render(language));
             });
         }
-        let (event_sender, receiver) = mpsc::channel::<SearchEvent>();
+        let event_sender = sender.input_sender().clone();
         let rebuilding_results = Rc::new(Cell::new(false));
 
         {
@@ -324,11 +326,11 @@ impl SimpleComponent for ManualSearchModel {
                     let result = fetch_candidate_lyrics(&candidate)
                         .await
                         .map_err(|error| error.to_string());
-                    let _ = event_sender.send(SearchEvent::Preview {
+                    let _ = event_sender.send(ManualSearchMsg::Event(SearchEvent::Preview {
                         generation,
                         index,
                         result,
-                    });
+                    }));
                 });
             });
         }
@@ -393,7 +395,10 @@ impl SimpleComponent for ManualSearchModel {
                     let result = search_lyrics_candidates(&search_track, &providers)
                         .await
                         .map_err(|error| error.to_string());
-                    let _ = event_sender.send(SearchEvent::Candidates { generation, result });
+                    let _ = event_sender.send(ManualSearchMsg::Event(SearchEvent::Candidates {
+                        generation,
+                        result,
+                    }));
                 });
             })
         };
@@ -443,7 +448,7 @@ impl SimpleComponent for ManualSearchModel {
             })
         };
 
-        {
+        let handle_event: Rc<dyn Fn(SearchEvent)> = {
             let state = Rc::clone(&state);
             let results = results.clone();
             let spinner = spinner.clone();
@@ -452,74 +457,67 @@ impl SimpleComponent for ManualSearchModel {
             let i18n = i18n.clone();
             let set_status = Rc::clone(&set_status);
             let set_preview = Rc::clone(&set_preview);
-            gtk::glib::timeout_add_local(Duration::from_millis(50), move || {
-                for event in receiver.try_iter() {
-                    match event {
-                        SearchEvent::Candidates { generation, result } => {
-                            if state.borrow().generation != generation {
-                                continue;
+            Rc::new(move |event| match event {
+                SearchEvent::Candidates { generation, result } => {
+                    if state.borrow().generation != generation {
+                        return;
+                    }
+                    spinner.stop();
+                    search_button.set_sensitive(true);
+                    match result {
+                        Ok(candidates) => {
+                            let count = candidates.len();
+                            state.borrow_mut().candidates = candidates.clone();
+                            for candidate in &candidates {
+                                results.append(&candidate_row(candidate, i18n.language()));
                             }
-                            spinner.stop();
-                            search_button.set_sensitive(true);
-                            match result {
-                                Ok(candidates) => {
-                                    let count = candidates.len();
-                                    state.borrow_mut().candidates = candidates.clone();
-                                    for candidate in &candidates {
-                                        results.append(&candidate_row(candidate, i18n.language()));
-                                    }
-                                    if count == 0 {
-                                        set_status(ManualStatus::Text(Text::NoCandidates));
-                                        set_preview(PreviewState::Text(Text::NoCandidates));
-                                    } else {
-                                        set_status(ManualStatus::CandidatesFound(count));
-                                        if let Some(row) = results.row_at_index(0) {
-                                            results.select_row(Some(&row));
-                                        }
-                                    }
-                                }
-                                Err(error) => {
-                                    set_status(ManualStatus::Detail(Text::SearchFailed, error));
-                                    set_preview(PreviewState::Text(
-                                        Text::LyricsSearchPreviewFailed,
-                                    ));
+                            if count == 0 {
+                                set_status(ManualStatus::Text(Text::NoCandidates));
+                                set_preview(PreviewState::Text(Text::NoCandidates));
+                            } else {
+                                set_status(ManualStatus::CandidatesFound(count));
+                                if let Some(row) = results.row_at_index(0) {
+                                    results.select_row(Some(&row));
                                 }
                             }
                         }
-                        SearchEvent::Preview {
-                            generation,
-                            index,
-                            result,
-                        } => {
-                            let is_current = {
-                                let state = state.borrow();
-                                state.generation == generation && state.preview_index == Some(index)
-                            };
-                            if !is_current {
-                                continue;
-                            }
-                            match result {
-                                Ok(Some(fetched)) => {
-                                    set_preview(PreviewState::Lyrics(fetched.raw_lyrics.clone()));
-                                    state.borrow_mut().selected = Some((index, fetched));
-                                    apply.set_sensitive(true);
-                                    set_status(ManualStatus::Text(Text::PreviewReady));
-                                }
-                                Ok(None) => {
-                                    set_preview(PreviewState::Text(Text::CandidateUnavailable));
-                                    set_status(ManualStatus::Text(Text::CandidateUnavailable));
-                                }
-                                Err(error) => {
-                                    set_preview(PreviewState::Text(Text::PreviewLoadFailed));
-                                    set_status(ManualStatus::Detail(Text::LoadingFailed, error));
-                                }
-                            }
+                        Err(error) => {
+                            set_status(ManualStatus::Detail(Text::SearchFailed, error));
+                            set_preview(PreviewState::Text(Text::LyricsSearchPreviewFailed));
                         }
                     }
                 }
-                gtk::glib::ControlFlow::Continue
-            });
-        }
+                SearchEvent::Preview {
+                    generation,
+                    index,
+                    result,
+                } => {
+                    let is_current = {
+                        let state = state.borrow();
+                        state.generation == generation && state.preview_index == Some(index)
+                    };
+                    if !is_current {
+                        return;
+                    }
+                    match result {
+                        Ok(Some(fetched)) => {
+                            set_preview(PreviewState::Lyrics(fetched.raw_lyrics.clone()));
+                            state.borrow_mut().selected = Some((index, fetched));
+                            apply.set_sensitive(true);
+                            set_status(ManualStatus::Text(Text::PreviewReady));
+                        }
+                        Ok(None) => {
+                            set_preview(PreviewState::Text(Text::CandidateUnavailable));
+                            set_status(ManualStatus::Text(Text::CandidateUnavailable));
+                        }
+                        Err(error) => {
+                            set_preview(PreviewState::Text(Text::PreviewLoadFailed));
+                            set_status(ManualStatus::Detail(Text::LoadingFailed, error));
+                        }
+                    }
+                }
+            })
+        };
 
         {
             let state = Rc::clone(&state);
@@ -553,6 +551,7 @@ impl SimpleComponent for ManualSearchModel {
             artist: artist.clone(),
             start_search,
             apply_selected,
+            handle_event,
             controller,
         };
         let title_widget = &title;
@@ -585,6 +584,7 @@ impl SimpleComponent for ManualSearchModel {
             ManualSearchMsg::Hide => self.visible = false,
             ManualSearchMsg::Search => (self.start_search)(),
             ManualSearchMsg::Apply => (self.apply_selected)(),
+            ManualSearchMsg::Event(event) => (self.handle_event)(event),
         }
     }
 }
