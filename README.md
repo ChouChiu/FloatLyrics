@@ -1,6 +1,6 @@
 # FloatLyrics
 
-Linux Wayland 桌面悬浮歌词，自动跟踪 Spotify 播放状态并实时显示同步歌词。
+面向 Linux Wayland 的 Spotify 悬浮歌词：自动跟随当前曲目，在桌面上自由放置同步歌词浮窗，并呈现逐字卡拉 OK 效果。
 
 <table>
   <thead>
@@ -11,136 +11,127 @@ Linux Wayland 桌面悬浮歌词，自动跟踪 Spotify 播放状态并实时显
   </thead>
   <tbody>
     <tr>
-      <td><img src="docs/screenshots/lyrics.png" alt="歌词浮窗" width="1000"></td>
-      <td><img src="docs/screenshots/setting.png" alt="设置页"  width="1000"></td>
+      <td><img src="docs/screenshots/lyrics.png" alt="FloatLyrics 歌词浮窗" width="1000"></td>
+      <td><img src="docs/screenshots/setting.png" alt="FloatLyrics 设置页" width="1000"></td>
     </tr>
   </tbody>
 </table>
 
-> 私心安利：  
-> XLOV 是韩国 257 娱乐于 2025 年推出的四人跨国籍无性别概念团体。  
-> 团名将代表未知与否定的 “X”，与代表未完成爱情的 “LOV” 组合而成，融入每位成员独特的个性，以「无性别概念」为核心主题。  
-> 了解更多，前往 [维基百科](https://zh.wikipedia.org/zh-cn/XLOV)，[认人视频 1（B 站）](https://www.bilibili.com/video/BV1YPKS6LEDR/?vd_source=915fd0a7ea4424cb0a2d1c698d30a0b1)，[认人视频 2 （B 站）](https://www.bilibili.com/video/BV15ofmYjEKF/)，[官方油管账号](https://www.youtube.com/@XLOV_official)
+> [!TIP]
+> 私心安利：认识一下 XLOV
+>
+> XLOV 是韩国 257 Entertainment 于 2025 年推出的四人跨国籍组合，以「无性别概念」为核心。团名把代表未知与否定的 X 和代表未完成爱情的 LOV 组合在一起，也呼应成员各自鲜明、难以被单一定义的魅力。
+>
+> 想快速入坑，可以从 [维基百科](https://zh.wikipedia.org/zh-cn/XLOV)、[认人视频 1（哔哩哔哩）](https://www.bilibili.com/video/BV1YPKS6LEDR/)、[认人视频 2（哔哩哔哩）](https://www.bilibili.com/video/BV15ofmYjEKF/) 和 [XLOV 官方 YouTube](https://www.youtube.com/@XLOV_official) 开始。打开 Spotify，再让 FloatLyrics 陪你一起听。
 
-## 功能
+## 为什么用 FloatLyrics
 
-- **自动跟踪** — 实时获取 Spotify 播放状态，无需额外配置
-- **悬浮显示** — 始终置顶的浮层，不遮挡其他窗口交互
-- **同步歌词** — 支持逐字卡拉 OK 着色
-- **多源搜索** — 自动从 QQ 音乐、网易云音乐获取歌词，也可手动搜索
-- **本地缓存** — 歌词持久缓存，离线可用
-- **多语言** — English / 简体中文 / 繁體中文，运行时切换
-- **可拖拽** — 拖拽调整位置，自动吸附屏幕边缘
+- 开箱即用：通过 MPRIS 自动跟踪 Spotify 的曲目、播放状态和进度。
+- 专为桌面歌词设计：基于 GTK4 与 layer-shell，浮层始终置顶，同时不拦截其他窗口的鼠标操作。
+- 同步到每一个字：支持普通同步歌词、逐字歌词、翻译与罗马音显示。
+- 找不到也能自己选：自动搜索 QQ 音乐和网易云音乐，也可以为当前曲目手动选择结果。
+- 越用越省心：已匹配歌词写入本地 SQLite 缓存，之后可离线使用。
+- 适应你的桌面：浮窗可自由拖放，靠近屏幕边缘时自动吸附；还可调整透明度、字体、偏移量和底部面板预留。
+- 三种界面语言：English、简体中文与繁體中文可在运行时切换。
 
-## 环境要求
+## 运行要求
 
-| 组件 | 说明 |
+| 组件 | 要求 |
 |---|---|
-| 系统 | Linux Wayland（合成器需支持 layer-shell） |
-| Spotify | 官方或 Flatpak/Snap 客户端 |
-| 依赖 | GTK4 ≥ 4.12、gtk4-layer-shell |
+| 桌面会话 | Linux Wayland，合成器支持 layer-shell |
+| 播放器 | Spotify 官方客户端，或能暴露 Spotify MPRIS 名称的 Flatpak/Snap 客户端 |
+| 运行库 | GTK 4.12 或更高版本、gtk4-layer-shell |
 
-不支持 X11。
+FloatLyrics 不支持 X11。若不确定当前会话类型，可运行 `echo "$XDG_SESSION_TYPE"` 检查。
 
 ## 安装
 
 ### Arch Linux
 
-从 [AUR](https://aur.archlinux.org/packages/floatlyrics-bin) 安装：
+推荐安装预编译的 AUR 包：
 
 ```bash
 paru -S floatlyrics-bin
-# OR
+# 或
 yay -S floatlyrics-bin
 ```
 
-需要从源码构建时，安装 [floatlyrics](https://aur.archlinux.org/packages/floatlyrics)。
+也可以安装从源码构建的 [`floatlyrics`](https://aur.archlinux.org/packages/floatlyrics) 包。预编译包见 [`floatlyrics-bin`](https://aur.archlinux.org/packages/floatlyrics-bin)。
 
 ### Fedora / openSUSE
+
+从 [GitHub Releases](https://github.com/ChouChiu/FloatLyrics/releases) 下载适合架构的 RPM，然后安装：
 
 ```bash
 sudo dnf install ./floatlyrics-*.rpm
 ```
 
-### Debian / Ubuntu（25.04+）
+在 openSUSE 上也可使用 `sudo zypper install ./floatlyrics-*.rpm`。
+
+### Debian / Ubuntu
+
+从 [GitHub Releases](https://github.com/ChouChiu/FloatLyrics/releases) 下载 DEB，然后安装：
 
 ```bash
 sudo apt install ./floatlyrics_*.deb
 ```
 
-不支持 Ubuntu 24.04 及更早版本（缺少 `libgtk4-layer-shell0`）。
+需要 Ubuntu 25.04 或更新版本；Ubuntu 24.04 及更早版本缺少 `libgtk4-layer-shell0`。
 
 ### 从源码构建
 
+先安装 Rust 1.93+、C 工具链以及 GTK、layer-shell、OpenSSL 的开发包：
+
 ```bash
-# Arch
+# Arch Linux
 sudo pacman -S --needed base-devel git gtk4 gtk4-layer-shell openssl rust
 
 # Fedora
 sudo dnf install gcc git gtk4-devel gtk4-layer-shell-devel openssl-devel rust cargo
 
-# Debian/Ubuntu (25.04+)
+# Debian / Ubuntu 25.04+
 sudo apt install build-essential git libgtk-4-dev libgtk4-layer-shell-dev libssl-dev rustc cargo
+```
 
+然后构建：
+
+```bash
 git clone https://github.com/ChouChiu/FloatLyrics.git
 cd FloatLyrics
 cargo build --locked --release
 ```
 
-二进制文件位于 `target/release/floatlyrics`。
-
-在 Arch Linux 上构建 AUR 安装包：
-
-```bash
-packaging/build-aur.sh --cleanbuild
-```
-
-安装包会生成在仓库根目录。该脚本使用独立的 makepkg 工作目录，避免与 Rust 的 `src/` 目录冲突。
-
-## 维护 AUR 包
-
-发布 AUR 包前，对应的 Git tag 和 GitHub Release RPM 必须已存在。发布脚本会更新版本号、校验和与 `.SRCINFO`，校验 PKGBUILD，并在推送前要求确认。
-
-```bash
-# 只发布源码版
-packaging/release-aur.sh floatlyrics 1.0.0
-
-# 只发布预编译版
-packaging/release-aur.sh floatlyrics-bin 1.0.0
-
-# 同时发布两个包
-packaging/release-aur.sh all 1.0.0
-```
-
-只更新和校验本地包文件：
-
-```bash
-packaging/release-aur.sh --prepare-only all 1.0.0
-```
+生成的可执行文件位于 `target/release/floatlyrics`。如果你准备修改项目，请继续阅读 [贡献指南](CONTRIBUTING.md)。
 
 ## 使用
+
+启动 Spotify 后运行：
 
 ```bash
 floatlyrics
 ```
 
-| 参数 | 说明 |
-|---|---|
-| `--debug` | 启用详细日志 |
-| `--config <path>` | 指定配置文件路径 |
-| `--reset-window` | 重置窗口位置和大小 |
-| `--settings` | 直接打开设置窗口 |
-| `--select-lyrics` | 对当前曲目手动搜索歌词 |
+FloatLyrics 会自动等待并跟踪 Spotify。浮窗默认位于屏幕底部中央；将鼠标移到浮窗上可显示操作按钮，也可将它拖到桌面的其他位置。靠近屏幕边缘时，浮窗会自动吸附。
 
-启动后浮层自动吸附到屏幕边缘，拖拽可移动。
+常用启动参数：
+
+| 参数 | 用途 |
+|---|---|
+| `--debug` | 输出详细诊断日志 |
+| `--config <PATH>` | 使用指定的配置文件 |
+| `--reset-window` | 恢复默认窗口位置和尺寸 |
+| `--settings` | 启动时打开设置窗口 |
+| `--select-lyrics` | 为当前曲目打开手动歌词搜索 |
+
+完整参数以 `floatlyrics --help` 为准。
 
 ## 配置
 
-配置文件 `~/.config/floatlyrics/config.toml`，首次运行自动生成：
+大多数选项可直接在设置页修改。默认配置文件位于 `~/.config/floatlyrics/config.toml`，首次启动时自动创建：
 
 ```toml
 [general]
-language = "zh-CN"          # en | zh-CN | zh-TW
+language = "zh-CN" # en | zh-CN | zh-TW
 
 [window]
 anchor = "bottom-center"
@@ -160,16 +151,20 @@ font_order = ["Sans"]
 mpris_prefix = "org.mpris.MediaPlayer2.spotify"
 ```
 
-配置必须包含上述全部字段；未知字段或旧版、不完整的配置会在启动时报错。
-Flatpak/Snap 版 Spotify 可按实际 D-Bus 名称修改 `mpris_prefix`。
+配置采用严格校验：所有字段均需保留，未知字段、旧格式或不完整配置会在启动时报错。使用 Flatpak/Snap 版 Spotify 时，如果无法自动识别播放器，可按实际 D-Bus 名称调整 `mpris_prefix`。
 
-## 已知限制
+## 常见问题与限制
 
-- 仅支持 Wayland（不支持 X11）
-- 自动跟踪仅针对 Spotify
-- QQ 音乐与网易云音乐接口可能因服务端变更暂时不可用
-- 自动切歌后偶有进度偏差，暂停后恢复即可重新校准
+- 浮窗没有出现：确认正在使用 Wayland、合成器支持 layer-shell，并且 Spotify 已启动播放。
+- Flatpak/Snap Spotify 无法识别：检查播放器暴露的 MPRIS 名称，并修改 `spotify.mpris_prefix`。
+- 歌词进度偶尔偏移：可在设置中调整全局偏移量；切歌后若短暂失准，暂停再继续可重新校准。
+- 自动跟踪目前仅针对 Spotify。
+- QQ 音乐与网易云音乐接口可能因服务端变更暂时不可用；已经缓存的歌词不受影响。
+
+## 参与贡献
+
+欢迎提交 bug、功能建议、歌词解析改进、翻译和文档修正。开始编码前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)；较大的功能或行为变更建议先开 issue 讨论。
 
 ## 许可证
 
-[GPL-3.0-or-later](LICENSE)
+FloatLyrics 以 [GPL-3.0-or-later](LICENSE) 许可发布。
