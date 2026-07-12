@@ -14,6 +14,11 @@ fn default_window_uses_compact_width() {
 }
 
 #[test]
+fn default_font_order_uses_generic_sans() {
+    assert_eq!(AppConfig::default().lyrics.font_order, ["Sans"]);
+}
+
+#[test]
 fn loads_legacy_config_without_general_section() {
     let config: AppConfig = toml::from_str(
         r#"

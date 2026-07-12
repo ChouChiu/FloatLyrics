@@ -166,6 +166,8 @@ pub(super) struct OverlayView {
     content: gtk::Box,
     compact_width: Rc<Cell<i32>>,
     opacity_provider: gtk::CssProvider,
+    font_family: Rc<RefCell<String>>,
+    font_provider: gtk::CssProvider,
     placement: SharedPlacement,
     song_info: gtk::Label,
     progress: gtk::ProgressBar,
@@ -201,6 +203,7 @@ pub(super) fn build(
     sender: relm4::Sender<AppMsg>,
 ) -> OverlayView {
     let panel_width = compact_panel_width(config.window.width);
+    let font_family = Rc::new(RefCell::new(font_family(&config.lyrics.font_order)));
     window.set_title(Some("FloatLyrics Overlay"));
     window.set_decorated(false);
     window.set_resizable(false);
@@ -241,20 +244,20 @@ pub(super) fn build(
     let primary = lyric_slot(
         ["floating-slot-current"],
         ["floating-lyric-current"],
-        ["floating-translation-current"],
         i18n.text(Text::OpenSpotify),
         Some((panel_width, CURRENT_KARAOKE_HEIGHT)),
         translation_style(true),
         panel_width,
+        Rc::clone(&font_family),
     );
     let secondary = lyric_slot(
         ["floating-slot-current"],
         ["floating-lyric-current"],
-        ["floating-translation-current"],
         "",
         Some((panel_width, CURRENT_KARAOKE_HEIGHT)),
         translation_style(true),
         panel_width,
+        Rc::clone(&font_family),
     );
 
     lyrics_stack.add_named(&primary.container, Some("primary"));
@@ -291,12 +294,24 @@ pub(super) fn build(
         );
     }
 
+    let font_provider = gtk::CssProvider::new();
+    load_font_css(&font_provider, &font_family.borrow());
+    if let Some(display) = gtk::gdk::Display::default() {
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &font_provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 2,
+        );
+    }
+
     window.set_child(Some(&content));
     let overlay = OverlayView {
         window: window.clone(),
         content,
         compact_width: Rc::new(Cell::new(panel_width)),
         opacity_provider,
+        font_family,
+        font_provider,
         placement,
         song_info,
         progress,
@@ -321,11 +336,11 @@ pub(super) fn build(
 fn lyric_slot(
     container_classes: [&str; 1],
     text_classes: [&str; 1],
-    _translation_classes: [&str; 1],
     initial_text: &str,
     karaoke_size: Option<(i32, i32)>,
     translation_style: TextLineStyle,
     panel_width: i32,
+    font_family: Rc<RefCell<String>>,
 ) -> LyricSlotWidgets {
     let text = gtk::Label::builder()
         .label(initial_text)
@@ -337,11 +352,13 @@ fn lyric_slot(
         .css_classes(text_classes)
         .build();
 
-    let (text_widget, karaoke_area, karaoke_state) = lyric_text_widget(&text, karaoke_size);
+    let (text_widget, karaoke_area, karaoke_state) =
+        lyric_text_widget(&text, karaoke_size, Rc::clone(&font_family));
     let (translation_area, translation_state) = text_line_area(
         panel_width,
         translation_line_height(translation_style),
         translation_style,
+        &font_family.borrow(),
     );
     let text_row = lyric_line_row(&text_widget, 0, 0);
     let translation_widget: gtk::Widget = translation_area.clone().upcast();
@@ -403,6 +420,31 @@ fn load_opacity_css(provider: &gtk::CssProvider, opacity: f64) {
     let opacity = opacity.clamp(0.15, 1.0);
     provider.load_from_string(&format!(
         ".floating-panel {{ background: rgba(10, 12, 16, {opacity:.3}); }}"
+    ));
+}
+
+fn font_family(order: &[String]) -> String {
+    let families = order
+        .iter()
+        .map(|family| family.trim())
+        .filter(|family| !family.is_empty())
+        .collect::<Vec<_>>();
+    if families.is_empty() {
+        "Sans".to_string()
+    } else {
+        families.join(", ")
+    }
+}
+
+fn load_font_css(provider: &gtk::CssProvider, family: &str) {
+    let css_families = family
+        .split(',')
+        .map(str::trim)
+        .map(|name| format!("\"{}\"", name.replace('\\', "\\\\").replace('"', "\\\"")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    provider.load_from_string(&format!(
+        ".floating-panel {{ font-family: {css_families}; }}"
     ));
 }
 
@@ -558,13 +600,24 @@ impl OverlayView {
             self.window.set_margin(Edge::Left, left_margin);
         }
         load_opacity_css(&self.opacity_provider, config.window.opacity);
+        let family = font_family(&config.lyrics.font_order);
+        *self.font_family.borrow_mut() = family.clone();
+        load_font_css(&self.font_provider, &family);
+        for slot in &self.lyric_slots {
+            slot.translation_state.borrow_mut().font_family = family.clone();
+            slot.translation_area.queue_draw();
+            if let Some(area) = &slot.karaoke_area {
+                area.queue_draw();
+            }
+        }
         self.lyrics_transition.borrow_mut().current_key = None;
         self.sync_snap_classes();
     }
 
     fn resize_for_lyrics(&self, value: &LyricSlotText) {
         let measured_width =
-            lyric_content_width(&self.song_info, value).saturating_add(TEXT_HORIZONTAL_PADDING);
+            lyric_content_width(&self.song_info, value, &self.font_family.borrow())
+                .saturating_add(TEXT_HORIZONTAL_PADDING);
         let available_width = available_panel_width(&self.window, PANEL_HORIZONTAL_GUTTER)
             .unwrap_or(MAX_EXPANDED_PANEL_WIDTH)
             .saturating_sub(PANEL_CHROME_WIDTH)

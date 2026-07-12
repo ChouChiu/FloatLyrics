@@ -17,6 +17,7 @@ const CURRENT_TRANSLATION_FONT_PX: i32 = 13;
 pub(super) struct TextLineRenderState {
     pub(super) text: String,
     pub(super) style: TextLineStyle,
+    pub(super) font_family: String,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -33,34 +34,57 @@ impl Default for TextLineRenderState {
                 font_px: 14,
                 color: (1.0, 1.0, 1.0, 1.0),
             },
+            font_family: "Sans".to_string(),
         }
     }
 }
 
-pub(super) fn lyric_content_width(measure_widget: &gtk::Label, value: &LyricSlotText) -> i32 {
+pub(super) fn lyric_content_width(
+    measure_widget: &gtk::Label,
+    value: &LyricSlotText,
+    font_family: &str,
+) -> i32 {
     let lyric_text = value
         .karaoke
         .as_ref()
         .map_or(value.text.as_str(), |karaoke| karaoke.text.as_str());
-    let lyric_width = text_pixel_width(measure_widget, lyric_text, CURRENT_LYRIC_FONT_PX, true);
+    let lyric_width = text_pixel_width(
+        measure_widget,
+        lyric_text,
+        CURRENT_LYRIC_FONT_PX,
+        true,
+        font_family,
+    );
     let translation_width = text_pixel_width(
         measure_widget,
         &value.translation,
         CURRENT_TRANSLATION_FONT_PX,
         false,
+        font_family,
     );
 
     lyric_width.max(translation_width)
 }
 
-fn text_pixel_width(widget: &gtk::Label, text: &str, font_px: i32, bold: bool) -> i32 {
+fn text_pixel_width(
+    widget: &gtk::Label,
+    text: &str,
+    font_px: i32,
+    bold: bool,
+    font_family: &str,
+) -> i32 {
     if text.trim().is_empty() {
         return 0;
     }
 
     let layout = widget.create_pango_layout(Some(text));
-    let mut font =
-        gtk::pango::FontDescription::from_string(if bold { "Sans Bold" } else { "Sans" });
+    let mut font = gtk::pango::FontDescription::new();
+    font.set_family(font_family);
+    font.set_weight(if bold {
+        gtk::pango::Weight::Bold
+    } else {
+        gtk::pango::Weight::Normal
+    });
     font.set_absolute_size(font_px as f64 * gtk::pango::SCALE as f64);
     layout.set_font_description(Some(&font));
     layout.set_single_paragraph_mode(true);
@@ -71,10 +95,12 @@ pub(super) fn text_line_area(
     width: i32,
     height: i32,
     style: TextLineStyle,
+    font_family: &str,
 ) -> (gtk::DrawingArea, Rc<RefCell<TextLineRenderState>>) {
     let state = Rc::new(RefCell::new(TextLineRenderState {
         text: String::new(),
         style,
+        font_family: font_family.to_string(),
     }));
     let area = gtk::DrawingArea::builder()
         .width_request(width)
@@ -96,6 +122,7 @@ pub(super) fn text_line_area(
 pub(super) fn lyric_text_widget(
     text: &gtk::Label,
     karaoke_size: Option<(i32, i32)>,
+    font_family: Rc<RefCell<String>>,
 ) -> (
     gtk::Widget,
     Option<gtk::DrawingArea>,
@@ -116,7 +143,14 @@ pub(super) fn lyric_text_widget(
     {
         let state = Rc::clone(&state);
         area.set_draw_func(move |area, cr, width, height| {
-            draw_karaoke_line(area, cr, width, height, &state.borrow());
+            draw_karaoke_line(
+                area,
+                cr,
+                width,
+                height,
+                &state.borrow(),
+                &font_family.borrow(),
+            );
         });
     }
 
@@ -141,7 +175,8 @@ fn draw_text_line(
     }
 
     let layout = area.create_pango_layout(Some(&state.text));
-    let mut font = gtk::pango::FontDescription::from_string("Sans");
+    let mut font = gtk::pango::FontDescription::new();
+    font.set_family(&state.font_family);
     font.set_absolute_size(state.style.font_px as f64 * gtk::pango::SCALE as f64);
     layout.set_font_description(Some(&font));
     layout.set_single_paragraph_mode(true);
@@ -158,13 +193,16 @@ fn draw_karaoke_line(
     width: i32,
     height: i32,
     state: &KaraokeRenderState,
+    font_family: &str,
 ) {
     if state.text.trim().is_empty() {
         return;
     }
 
     let layout = area.create_pango_layout(Some(&state.text));
-    let mut font = gtk::pango::FontDescription::from_string("Sans Bold");
+    let mut font = gtk::pango::FontDescription::new();
+    font.set_family(font_family);
+    font.set_weight(gtk::pango::Weight::Bold);
     font.set_absolute_size(CURRENT_LYRIC_FONT_PX as f64 * gtk::pango::SCALE as f64);
     layout.set_font_description(Some(&font));
     layout.set_single_paragraph_mode(true);

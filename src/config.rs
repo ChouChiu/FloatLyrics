@@ -150,6 +150,9 @@ pub struct LyricsConfig {
     /// Whether romanized text is displayed.
     #[serde(default)]
     pub show_romanization: bool,
+    /// Ordered font-family fallback list used to render lyrics.
+    #[serde(default = "default_font_order")]
+    pub font_order: Vec<String>,
 }
 
 impl Default for LyricsConfig {
@@ -159,6 +162,7 @@ impl Default for LyricsConfig {
             provider_order: default_provider_order(),
             show_translation: true,
             show_romanization: false,
+            font_order: default_font_order(),
         }
     }
 }
@@ -201,6 +205,10 @@ fn default_show_translation() -> bool {
 
 fn default_provider_order() -> Vec<LyricsProvider> {
     LyricsProvider::default_order()
+}
+
+fn default_font_order() -> Vec<String> {
+    vec!["Sans".to_string()]
 }
 
 fn default_spotify_prefix() -> String {
