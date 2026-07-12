@@ -46,13 +46,15 @@ Linux Wayland 桌面悬浮歌词，自动跟踪 Spotify 播放状态并实时显
 
 ### Arch Linux
 
-从 [AUR](https://aur.archlinux.org/packages/floatlyrics) 安装：
+从 [AUR](https://aur.archlinux.org/packages/floatlyrics-bin) 安装：
 
 ```bash
-paru -S floatlyrics
+paru -S floatlyrics-bin
 # OR
-yay -S floatlyrics
+yay -S floatlyrics-bin
 ```
+
+需要从源码构建时，安装 [floatlyrics](https://aur.archlinux.org/packages/floatlyrics)。
 
 ### Fedora / openSUSE
 
@@ -94,6 +96,27 @@ packaging/build-aur.sh --cleanbuild
 ```
 
 安装包会生成在仓库根目录。该脚本使用独立的 makepkg 工作目录，避免与 Rust 的 `src/` 目录冲突。
+
+## 维护 AUR 包
+
+发布 AUR 包前，对应的 Git tag 和 GitHub Release RPM 必须已存在。发布脚本会更新版本号、校验和与 `.SRCINFO`，校验 PKGBUILD，并在推送前要求确认。
+
+```bash
+# 只发布源码版
+packaging/release-aur.sh floatlyrics 1.0.0
+
+# 只发布预编译版
+packaging/release-aur.sh floatlyrics-bin 1.0.0
+
+# 同时发布两个包
+packaging/release-aur.sh all 1.0.0
+```
+
+只更新和校验本地包文件：
+
+```bash
+packaging/release-aur.sh --prepare-only all 1.0.0
+```
 
 ## 使用
 
