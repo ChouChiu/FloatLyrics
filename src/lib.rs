@@ -1,8 +1,18 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#![warn(missing_docs)]
+
+//! FloatLyrics application library.
+//!
+//! This crate composes the GTK overlay, Spotify-compatible MPRIS watcher,
+//! configuration, lyrics services, and command-line entry point.
+
+/// GTK/Relm4 application composition.
 pub mod app;
+/// Persistent user configuration model.
 pub mod config;
+/// Spotify-compatible MPRIS metadata and watcher facade.
 pub mod mpris;
 
 use anyhow::Result;
@@ -33,11 +43,17 @@ struct Cli {
 }
 
 /// Runs FloatLyrics using command-line arguments from the current process.
+///
+/// # Errors
+///
+/// Returns an error when telemetry, user paths, configuration, the cache, or
+/// the asynchronous runtime cannot be initialized.
 pub fn run() -> Result<()> {
     configure_default_gtk_renderer();
 
     let cli = Cli::parse();
     floatlyrics_core::telemetry::init(cli.debug)?;
+    floatlyrics_core::i18n::validate_catalogues()?;
 
     let paths = AppPaths::resolve(cli.config.as_deref())?;
     let mut config = AppConfig::load_or_default(&paths.config_file)?;

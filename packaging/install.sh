@@ -27,6 +27,6 @@ done < <(find data/icons -type f -print0)
 install -Dm644 LICENSE "$destdir$prefix/share/licenses/floatlyrics/LICENSE"
 
 if [[ -d data/locale ]]; then
-    install -d "$destdir$prefix/share/locale"
-    cp -a data/locale/. "$destdir$prefix/share/locale/"
+    install -d "$destdir$prefix/share/floatlyrics/locale"
+    cp -a data/locale/. "$destdir$prefix/share/floatlyrics/locale/"
 fi

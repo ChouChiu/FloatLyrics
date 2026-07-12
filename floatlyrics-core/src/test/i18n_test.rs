@@ -43,3 +43,22 @@ fn changing_language_notifies_subscribers_once() {
         &[Language::English, Language::SimplifiedChinese]
     );
 }
+
+#[test]
+fn runtime_json_catalogues_are_complete() {
+    let locale_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../data/locale");
+
+    for language in Language::ALL {
+        let catalog = Catalog::load_file(&locale_dir, language)
+            .unwrap_or_else(|| panic!("{} catalogue is missing or incomplete", language.code()));
+        assert_ne!(
+            catalog.text(Text::SettingsWindowTitle),
+            "SettingsWindowTitle"
+        );
+    }
+}
+
+#[test]
+fn missing_catalogue_entry_falls_back_to_its_stable_key() {
+    assert_eq!(Catalog::default().text(Text::Saved), "Saved");
+}
