@@ -1,19 +1,18 @@
-# AGENTS.md
+# AGENTS.md — FloatLyrics
 
 ## Workspace
 
-Cargo workspace with three crates. Dependency direction:
-`floatlyrics` (root) -> `floatlyrics-lyrics` -> `floatlyrics-core`.
+Cargo workspace of three crates (edition 2024, MSRV 1.93):
 
-- `floatlyrics-core` — paths, i18n, telemetry, track fingerprinting. No GTK or DBus.
-- `floatlyrics-lyrics` — lyrics models, parsing, search, timeline, SQLite cache (rusqlite `bundled`).
-- `floatlyrics` — CLI, GTK4 layer-shell UI, MPRIS/DBus watcher, app composition root.
+```
+floatlyrics (src/)          ← binary + lib: CLI, Relm4/GTK4 layer-shell UI, MPRIS
+  └─ floatlyrics-lyrics     ← lyrics model, LRC/QRC parsing, search, SQLite cache
+       └─ floatlyrics-core  ← paths, i18n, telemetry, track fingerprinting
+```
 
-Rust edition 2024, MSRV 1.93 (stable, see `rust-toolchain.toml`).
+Dependency direction is top→bottom. Domain logic goes above the GTK/D-Bus/DB boundary.
 
-## Commands
-
-All commands use `--locked`:
+## Commands (always use `--locked`)
 
 ```bash
 cargo fmt --all -- --check
@@ -22,63 +21,43 @@ cargo test --locked --all-targets --all-features
 cargo build --locked --release
 ```
 
-Filter tests by module: `cargo test lyrics::`, `cargo test mpris::`, `cargo test cache::`, etc.
+Filter tests: `cargo test lyrics::`, `cargo test mpris::`, etc.
 
-`cargo test --locked` (without `--all-targets` / `--all-features`) also works for focused iterations; CI uses the full flags.
+Docs (warnings are errors): `cargo docs` / `cargo docs-open` (aliases in `.cargo/config.toml`).
 
-## Crate alias note
+Run locally: `cargo run -- --debug`
 
-The `gtk` crate in `Cargo.toml` is aliased from `gtk4` (`package = "gtk4"`). Code uses `use gtk::...` but it resolves to the GTK4 Rust bindings (v0.11, requiring GTK 4.12+ system library). Relm4 v0.11 drives the UI.
+## i18n — three-locale invariant
 
-## App ID
+Every user-visible string must exist in all three `data/locale/{en,zh-CN,zh-TW}.json` files. When adding a new key, also add it to the `define_text_keys!` macro in `floatlyrics-core/src/i18n.rs`. Never bypass the localization layer.
 
-`io.github.chouchiu.floatlyrics` — used in `gtk::Application`, desktop file, metainfo, and packaging scripts.
+At startup, `i18n::validate_catalogues()` checks that all keys are present in all locales. Tests for i18n live in `floatlyrics-core/src/test/i18n_test.rs`.
 
-## GTK runtime expectations
+## Tests
 
-`src/lib.rs:54-67` sets `GSK_RENDERER=gl` and `GTK_A11Y=none` at process startup (before GTK init). The app requires a Wayland compositor with layer-shell support and a running D-Bus session bus.
+- Tests are `#[cfg(test)]` modules dispatched via `#[path = "test/foo_test.rs"]` to `src/test/` (binary crate) or `src/test/` (sub-crates).
+- Unit tests must not depend on running Spotify, D-Bus, network, or developer-local paths.
+- File system / database tests use `tempfile` for isolation.
+- Test names describe observable behavior (e.g. `parses_enhanced_lrc`).
 
-## i18n
+## Commit style
 
-Translations are loaded at runtime from JSON files in `data/locale/` and shipped to
-`/usr/share/floatlyrics/locale/`. Three languages: English, Simplified Chinese,
-Traditional Chinese. `FLOATLYRICS_LOCALE_DIR` overrides the resource directory.
-`Language::text(key)` uses a process-wide lazy cache, and the `I18n` subscriber
-pattern updates GTK widgets when the active language changes.
+Conventional Commits: `<type>(<scope>): <description>` — lowercase imperative English.
 
-When adding a new user-visible string:
-1. Add a variant to the `define_text_keys!` invocation.
-2. Add the same key to `data/locale/en.json`, `zh-CN.json`, and `zh-TW.json`.
+Common types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`.
+Common scopes: `app`, `lyrics`, `mpris`, `infra`, `ui`.
 
-## SPDX headers
+## build.rs
 
-Every source file must start with:
-```rust
-// SPDX-FileCopyrightText: 2026 ChouChiu
-// SPDX-License-Identifier: GPL-3.0-or-later
-```
-`.toml` files use `#` instead of `//`.
+Generates `dep_list.rs` into `OUT_DIR` by running `cargo metadata --locked`. Consumed by About/Acknowledgements page. Touching `Cargo.toml`, `Cargo.lock`, or `build.rs` triggers re-run.
 
-## Build script
+## Toolchain
 
-`build.rs` generates `dep_list.rs` in `OUT_DIR` from `Cargo.toml` + `Cargo.lock` + `cargo metadata`. Used by the about dialog to list open-source dependencies. Re-runs when `Cargo.toml`, `Cargo.lock`, or `build.rs` change.
+`rust-toolchain.toml` pins stable with `rustfmt`, `clippy`, `rust-src`, `rust-analyzer`. CI runs in an Arch Linux container (GTK4, gtk4-layer-shell, OpenSSL system deps required).
 
-## Testing rules
+## Quirks
 
-- Tests are `#[cfg(test)]` modules pointing to `test/` subdirectories via `#[path = "test/xxx_test.rs"]`.
-- Unit tests **must not** depend on a running Spotify instance, D-Bus session, or network.
-- Use `tempfile` for filesystem/database isolation.
-
-## Config
-
-`src/config.rs` — written atomically (temp file + rename). Config path: `~/.config/floatlyrics/config.toml`. Database: `~/.local/share/floatlyrics/floatlyrics.sqlite3`.
-
-## Commits
-
-Conventional Commits: `<type>(<scope>): <description>`. Common scopes: `app`, `lyrics`, `mpris`, `infra`, `ui`.
-
-## CI
-
-- `build.yml` runs on every push/PR in `archlinux:latest`. Builds .deb and .rpm artifacts.
-- `release.yml` triggers on tags `v*.*.*`, runs on `ubuntu-24.04`, validates tag matches Cargo.toml version.
-- Both workflows cache `~/.cargo/registry`, `~/.cargo/git`, and `target`.
+- `--debug` CLI flag enables verbose tracing (not just debug builds).
+- Config writes use atomic temp-file + rename in `src/config.rs`.
+- `gtk::init()` is NOT called — Relm4 manages GTK init internally.
+- The binary is a Wayland layer-shell overlay; it cannot run under X11 or without a compositor supporting `layer-shell`.

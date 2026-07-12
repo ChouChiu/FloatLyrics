@@ -1,24 +1,70 @@
 # FloatLyrics
 
-Linux Wayland 桌面悬浮歌词应用，基于 Rust、Relm4 与 GTK4 layer-shell 构建，
-通过 MPRIS 跟踪 Spotify 播放状态并显示同步歌词。
+Linux Wayland 桌面悬浮歌词，自动跟踪 Spotify 播放状态并实时显示同步歌词。
+
+<table>
+  <thead>
+    <tr>
+      <th>歌词浮窗</th>
+      <th>设置页</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><img src="docs/screenshots/lyrics.png" alt="歌词浮窗" width="1000"></td>
+      <td><img src="docs/screenshots/setting.png" alt="设置页"  width="1000"></td>
+    </tr>
+  </tbody>
+</table>
+
+## 功能
+
+- **自动跟踪** — 实时获取 Spotify 播放状态，无需额外配置
+- **悬浮显示** — 始终置顶的浮层，不遮挡其他窗口交互
+- **同步歌词** — 支持逐字卡拉 OK 着色
+- **多源搜索** — 自动从 QQ 音乐、网易云音乐获取歌词，也可手动搜索
+- **本地缓存** — 歌词持久缓存，离线可用
+- **多语言** — English / 简体中文 / 繁體中文，运行时切换
+- **可拖拽** — 拖拽调整位置，自动吸附屏幕边缘
 
 ## 环境要求
 
-- Linux Wayland 合成器，需支持 **layer-shell** 协议
-- GTK 4.12+
-- gtk4-layer-shell
-- Spotify 客户端（或使用匹配 MPRIS 总线名前缀的兼容客户端）
-- 从源码构建需 Rust 1.93+
+| 组件 | 说明 |
+|---|---|
+| 系统 | Linux Wayland（合成器需支持 layer-shell） |
+| Spotify | 官方或 Flatpak/Snap 客户端 |
+| 依赖 | GTK4 ≥ 4.12、gtk4-layer-shell |
+
+不支持 X11。
 
 ## 安装
 
-每个 [release](https://github.com/ChouChiu/FloatLyrics/releases) 提供预构建的
-`.deb` 和 `.rpm` 包。
+### Fedora / openSUSE
+
+```bash
+sudo dnf install ./floatlyrics-*.rpm
+```
+
+### Debian / Ubuntu（25.04+）
+
+```bash
+sudo apt install ./floatlyrics_*.deb
+```
+
+不支持 Ubuntu 24.04 及更早版本（缺少 `libgtk4-layer-shell0`）。
 
 ### 从源码构建
 
 ```bash
+# Arch
+sudo pacman -S --needed base-devel git gtk4 gtk4-layer-shell openssl rust
+
+# Fedora
+sudo dnf install gcc git gtk4-devel gtk4-layer-shell-devel openssl-devel rust cargo
+
+# Debian/Ubuntu (25.04+)
+sudo apt install build-essential git libgtk-4-dev libgtk4-layer-shell-dev libssl-dev rustc cargo
+
 git clone https://github.com/ChouChiu/FloatLyrics.git
 cd FloatLyrics
 cargo build --locked --release
@@ -35,77 +81,42 @@ floatlyrics
 | 参数 | 说明 |
 |---|---|
 | `--debug` | 启用详细日志 |
-| `--config <path>` | 使用指定的配置文件 |
-| `--reset-window` | 将窗口位置和大小重置为默认值 |
+| `--config <path>` | 指定配置文件路径 |
+| `--reset-window` | 重置窗口位置和大小 |
 | `--settings` | 直接打开设置窗口 |
-| `--select-lyrics` | 打开当前曲目的手动歌词搜索 |
+| `--select-lyrics` | 对当前曲目手动搜索歌词 |
+
+启动后浮层自动吸附到屏幕边缘，拖拽可移动。
 
 ## 配置
 
-配置文件位于 `~/.config/floatlyrics/config.toml`（首次启动自动生成）。若 Spotify
-客户端使用非标准 MPRIS 总线名前缀，可覆盖配置项：
+配置文件 `~/.config/floatlyrics/config.toml`，首次运行自动生成：
 
 ```toml
+[general]
+language = "zh-CN"          # en | zh-CN | zh-TW
+
+[window]
+position = [0, 0]
+size = [800, 200]
+
+[lyrics]
+font_size = 28
+providers = ["qq", "netease"]
+
 [spotify]
 mpris_prefix = "org.mpris.MediaPlayer2.spotify"
 ```
 
-数据库与缓存：`~/.local/share/floatlyrics/floatlyrics.sqlite3`。
-
-## 架构
-
-Cargo 工作空间，包含三个 crate，自上而下分层：
-
-| Crate | 职责 |
-|---|---|
-| `floatlyrics` | CLI、Relm4/GTK4 layer-shell 界面、MPRIS 监听、应用组合根 |
-| `floatlyrics-lyrics` | 歌词模型、解析、搜索、时间轴、SQLite 缓存 |
-| `floatlyrics-core` | 应用路径、i18n、遥测、曲目指纹 |
-
-依赖方向：`floatlyrics` → `floatlyrics-lyrics` → `floatlyrics-core`。
-
-主要源模块：
-
-- `src/lib.rs` — 命令行解析、GTK 渲染器初始化、启动流程
-- `src/app.rs` — Relm4 应用组件、消息路由与窗口生命周期
-- `src/app/controller.rs` — 播放控制器与状态机
-- `src/app/model.rs` — 独立于 GTK 的展示模型
-- `src/app/view.rs`、`src/app/view/` — GTK 组件与 layer-shell 窗口
-- `src/app/settings.rs`、`src/app/manual_search.rs`、`src/app/about.rs` — 设置、搜索、关于页面
-- `src/mpris/` — D-Bus MPRIS 监听与播放位置同步
-- `src/config.rs` — 原子化配置读写（临时文件 + 重命名）
-- `floatlyrics-core/src/i18n.rs`、`data/locale/*.json` — 运行时 i18n（English / 简体中文 / 繁體中文）
-- `floatlyrics-lyrics/src/lyrics/` — LRC 解析、QQ 音乐与网易云音乐搜索、时间轴
-
-## 功能
-
-- 通过 MPRIS 跟踪 Spotify 播放状态
-- GTK4 layer-shell 悬浮歌词显示
-- 按可配置顺序从 QQ 音乐和网易云音乐自动抓取歌词
-- 手动搜索歌词并持久绑定到当前曲目
-- SQLite 缓存曲目、歌词、手动匹配及设置
-- 支持英文、简体中文、繁體中文
-- 设置窗口、开源依赖列表的关于页面
+若 Spotify 使用 Flatpak/Snap，可能需要修改 `mpris_prefix` 为实际 D-Bus 名称
+（如 `org.mpris.MediaPlayer2.spotify.instanceXXXXXXX`）。
 
 ## 已知限制
 
-- 仅支持 Wayland，且合成器须支持 layer-shell 协议
-- 仅自动跟踪 Spotify（或使用配置的 MPRIS 前缀的兼容客户端）
-- QQ 音乐与网易云音乐的歌词接口为非官方接口，可能因服务端变更而暂时不可用
-- 自动切歌后歌词进度可能超前，可手动暂停后恢复以重新校准
-
-## 开发
-
-```bash
-cargo fmt --all -- --check
-cargo clippy --locked --all-targets --all-features -- -D warnings
-cargo test --locked --all-targets --all-features
-cargo build --locked --release
-```
-
-筛选测试：`cargo test lyrics::`、`cargo test mpris::` 等。
-
-提交规范与工作流详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+- 仅支持 Wayland（不支持 X11）
+- 自动跟踪仅针对 Spotify（其他 MPRIS 客户端需手动配置）
+- QQ 音乐与网易云音乐接口可能因服务端变更暂时不可用
+- 自动切歌后偶有进度偏差，暂停后恢复即可重新校准
 
 ## 许可证
 
