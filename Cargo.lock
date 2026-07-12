@@ -558,7 +558,7 @@ dependencies = [
 
 [[package]]
 name = "floatlyrics"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -583,7 +583,7 @@ dependencies = [
 
 [[package]]
 name = "floatlyrics-core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "directories",
@@ -597,7 +597,7 @@ dependencies = [
 
 [[package]]
 name = "floatlyrics-lyrics"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "floatlyrics-core",
