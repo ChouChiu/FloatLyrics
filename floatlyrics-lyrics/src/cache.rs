@@ -8,46 +8,77 @@ use std::{path::Path, str::FromStr};
 use crate::lyrics::LyricsProvider;
 use floatlyrics_core::track::TrackMetadata;
 
-/// Trait abstracting lyrics cache operations.
-/// Enables decoupling controller and manual-search from the concrete [`Cache`] type.
+mod schema;
+
+/// Persistence boundary used by lyrics controllers.
+///
+/// Implementations may use SQLite, another database, or an in-memory test
+/// double. Methods use domain values so callers do not depend on SQL details.
 pub trait LyricsCache {
+    /// Records the latest track metadata and returns its stable fingerprint.
+    ///
+    /// # Errors
+    /// Returns an error when serialization or persistence fails.
     fn upsert_track(&self, track: &TrackMetadata) -> anyhow::Result<String>;
 
-    fn insert_lyrics(
-        &self,
-        provider: LyricsProvider,
-        provider_track_id: Option<&str>,
-        title: &str,
-        artists: &[String],
-        raw_lyrics: &str,
-    ) -> anyhow::Result<i64>;
+    /// Stores a reusable lyrics document and returns its backend identifier.
+    ///
+    /// # Errors
+    /// Returns an error when serialization or persistence fails.
+    fn insert_lyrics(&self, lyrics: LyricsInsert<'_>) -> anyhow::Result<i64>;
 
+    /// Associates a track fingerprint with manually selected lyrics.
+    ///
+    /// # Errors
+    /// Returns an error when either identifier is invalid or persistence fails.
     fn bind_manual_match(&self, track_fingerprint: &str, lyrics_id: i64) -> anyhow::Result<()>;
 
+    /// Loads the best cached lyrics, preferring a manual selection.
+    ///
+    /// Providers are considered in `provider_order` after the manual mapping.
+    ///
+    /// # Errors
+    /// Returns an error when stored data is invalid or cannot be read.
     fn lyrics_for_track(
         &self,
         track_fingerprint: &str,
         provider_order: &[LyricsProvider],
     ) -> anyhow::Result<Option<CachedLyrics>>;
 
+    /// Records an automatic provider result and returns its backend identifier.
+    ///
+    /// # Errors
+    /// Returns an error when serialization or persistence fails.
     fn insert_provider_result(&self, result: ProviderResultInsert<'_>) -> anyhow::Result<i64>;
 }
 
+/// Lyrics document returned by a cache lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CachedLyrics {
+    /// Backend-specific row identifier.
     pub id: i64,
+    /// Provider that supplied the document.
     pub provider: LyricsProvider,
+    /// Provider-specific track identifier, when available.
     pub provider_track_id: Option<String>,
+    /// Title stored with the lyrics.
     pub title: String,
+    /// Artists stored with the lyrics.
     pub artists: Vec<String>,
+    /// Original lyrics payload.
     pub raw_lyrics: String,
 }
 
+/// SQLite-backed implementation of [`LyricsCache`].
 pub struct Cache {
     conn: Connection,
 }
 
 impl Cache {
+    /// Opens or creates a cache at `path` and applies its schema.
+    ///
+    /// # Errors
+    /// Returns an error if the directory, database, or schema cannot be created.
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -61,6 +92,10 @@ impl Cache {
         Ok(cache)
     }
 
+    /// Opens an isolated in-memory cache.
+    ///
+    /// # Errors
+    /// Returns an error if SQLite cannot initialize the database or schema.
     pub fn open_memory() -> Result<Self> {
         let cache = Self {
             conn: Connection::open_in_memory().context("opening in-memory database")?,
@@ -70,63 +105,11 @@ impl Cache {
     }
 
     fn migrate(&self) -> Result<()> {
-        self.conn.execute_batch(
-            r#"
-            PRAGMA foreign_keys = ON;
-
-            CREATE TABLE IF NOT EXISTS tracks (
-                fingerprint TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                artists_json TEXT NOT NULL,
-                album TEXT,
-                duration_ms INTEGER,
-                mpris_track_id TEXT,
-                last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS lyrics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                provider TEXT NOT NULL,
-                provider_track_id TEXT,
-                title TEXT NOT NULL,
-                artists_json TEXT NOT NULL,
-                raw_lyrics TEXT NOT NULL,
-                content_hash TEXT NOT NULL UNIQUE,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS manual_matches (
-                track_fingerprint TEXT PRIMARY KEY REFERENCES tracks(fingerprint) ON DELETE CASCADE,
-                lyrics_id INTEGER NOT NULL REFERENCES lyrics(id) ON DELETE CASCADE,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS provider_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                track_fingerprint TEXT NOT NULL REFERENCES tracks(fingerprint) ON DELETE CASCADE,
-                provider TEXT NOT NULL,
-                provider_track_id TEXT,
-                title TEXT NOT NULL,
-                artists_json TEXT NOT NULL,
-                score REAL NOT NULL DEFAULT 0,
-                raw_lyrics TEXT,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE INDEX IF NOT EXISTS provider_results_track_provider_score
-                ON provider_results(track_fingerprint, provider, score DESC, id DESC);
-            "#,
-        )?;
+        self.conn.execute_batch(schema::MIGRATION)?;
         Ok(())
     }
 
-    pub fn upsert_track(&self, track: &TrackMetadata) -> Result<String> {
+    fn upsert_track(&self, track: &TrackMetadata) -> Result<String> {
         let fingerprint = track.fingerprint();
         let artists_json = serde_json::to_string(&track.artists)?;
         let duration_ms: Option<i64> = track.duration_ms.and_then(|value| value.try_into().ok());
@@ -154,18 +137,12 @@ impl Cache {
         Ok(fingerprint)
     }
 
-    pub fn insert_lyrics(
-        &self,
-        provider: LyricsProvider,
-        provider_track_id: Option<&str>,
-        title: &str,
-        artists: &[String],
-        raw_lyrics: &str,
-    ) -> Result<i64> {
-        let artists_json = serde_json::to_string(artists)?;
-        let content_hash = floatlyrics_core::track::track_fingerprint(title, artists, None, None)
-            + ":"
-            + &hash_content(raw_lyrics);
+    fn insert_lyrics(&self, lyrics: LyricsInsert<'_>) -> Result<i64> {
+        let artists_json = serde_json::to_string(lyrics.artists)?;
+        let content_hash =
+            floatlyrics_core::track::track_fingerprint(lyrics.title, lyrics.artists, None, None)
+                + ":"
+                + &floatlyrics_core::digest::sha256_hex(lyrics.raw_lyrics);
 
         self.conn.execute(
             r#"
@@ -174,11 +151,11 @@ impl Cache {
             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
             "#,
             params![
-                provider.as_str(),
-                provider_track_id,
-                title,
+                lyrics.provider.as_str(),
+                lyrics.provider_track_id,
+                lyrics.title,
                 artists_json,
-                raw_lyrics,
+                lyrics.raw_lyrics,
                 content_hash
             ],
         )?;
@@ -191,7 +168,7 @@ impl Cache {
         Ok(id)
     }
 
-    pub fn bind_manual_match(&self, track_fingerprint: &str, lyrics_id: i64) -> Result<()> {
+    fn bind_manual_match(&self, track_fingerprint: &str, lyrics_id: i64) -> Result<()> {
         self.conn.execute(
             r#"
             INSERT INTO manual_matches (track_fingerprint, lyrics_id)
@@ -205,7 +182,7 @@ impl Cache {
         Ok(())
     }
 
-    pub fn lyrics_for_track(
+    fn lyrics_for_track(
         &self,
         track_fingerprint: &str,
         provider_order: &[LyricsProvider],
@@ -261,7 +238,7 @@ impl Cache {
             .context("loading cached provider result")
     }
 
-    pub fn insert_provider_result(&self, result: ProviderResultInsert<'_>) -> Result<i64> {
+    fn insert_provider_result(&self, result: ProviderResultInsert<'_>) -> Result<i64> {
         let artists_json = serde_json::to_string(result.artists)?;
         self.conn.execute(
             r#"
@@ -288,22 +265,8 @@ impl LyricsCache for Cache {
         Cache::upsert_track(self, track)
     }
 
-    fn insert_lyrics(
-        &self,
-        provider: LyricsProvider,
-        provider_track_id: Option<&str>,
-        title: &str,
-        artists: &[String],
-        raw_lyrics: &str,
-    ) -> anyhow::Result<i64> {
-        Cache::insert_lyrics(
-            self,
-            provider,
-            provider_track_id,
-            title,
-            artists,
-            raw_lyrics,
-        )
+    fn insert_lyrics(&self, lyrics: LyricsInsert<'_>) -> anyhow::Result<i64> {
+        Cache::insert_lyrics(self, lyrics)
     }
 
     fn bind_manual_match(&self, track_fingerprint: &str, lyrics_id: i64) -> anyhow::Result<()> {
@@ -323,14 +286,37 @@ impl LyricsCache for Cache {
     }
 }
 
+/// Borrowed input for storing a manually reusable lyrics document.
+#[derive(Debug, Clone, Copy)]
+pub struct LyricsInsert<'a> {
+    /// Provider that supplied the lyrics.
+    pub provider: LyricsProvider,
+    /// Provider-specific track identifier, when available.
+    pub provider_track_id: Option<&'a str>,
+    /// Track title reported by the provider.
+    pub title: &'a str,
+    /// Track artists reported by the provider.
+    pub artists: &'a [String],
+    /// Original lyrics payload.
+    pub raw_lyrics: &'a str,
+}
+
+/// Borrowed input for recording an automatic provider search result.
 #[derive(Debug, Clone, Copy)]
 pub struct ProviderResultInsert<'a> {
+    /// Fingerprint of the requested track.
     pub track_fingerprint: &'a str,
+    /// Provider that handled the request.
     pub provider: LyricsProvider,
+    /// Provider-specific track identifier, when available.
     pub provider_track_id: Option<&'a str>,
+    /// Title returned by the provider.
     pub title: &'a str,
+    /// Artists returned by the provider.
     pub artists: &'a [String],
+    /// Provider match score; higher values are preferred.
     pub score: f64,
+    /// Original lyrics payload, or `None` for an unsuccessful result.
     pub raw_lyrics: Option<&'a str>,
 }
 
@@ -349,14 +335,6 @@ fn row_to_cached_lyrics(row: &rusqlite::Row<'_>) -> rusqlite::Result<CachedLyric
         })?,
         raw_lyrics: row.get(5)?,
     })
-}
-
-fn hash_content(content: &str) -> String {
-    use sha2::{Digest, Sha256};
-
-    let mut hasher = Sha256::new();
-    hasher.update(content.as_bytes());
-    format!("{:x}", hasher.finalize())
 }
 
 #[cfg(test)]

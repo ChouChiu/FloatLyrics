@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+//! Provider search orchestration and candidate ranking.
+
 use anyhow::Result;
 use std::{cmp::Reverse, collections::HashSet};
 
@@ -13,6 +15,12 @@ use super::{
 
 const MANUAL_SEARCH_LIMIT: usize = 12;
 
+/// Searches configured providers and returns ranked, deduplicated candidates.
+///
+/// At most twelve candidates are returned.
+///
+/// # Errors
+/// Returns an error when a provider search reports a recoverable failure.
 pub async fn search_lyrics_candidates(
     track: &TrackMetadata,
     provider_order: &[LyricsProvider],
@@ -61,6 +69,12 @@ fn finalize_candidates(mut candidates: Vec<LyricsCandidate>) -> Vec<LyricsCandid
     candidates
 }
 
+/// Downloads the lyrics represented by a manually selected candidate.
+///
+/// Empty provider responses are returned as `Ok(None)`.
+///
+/// # Errors
+/// Returns an error when a provider reports a recoverable download failure.
 pub async fn fetch_candidate_lyrics(candidate: &LyricsCandidate) -> Result<Option<FetchedLyrics>> {
     let raw_lyrics = fetch_candidate_raw_lyrics(candidate).await;
     let Some(raw_lyrics) = raw_lyrics.map(|value| value.trim().to_string()) else {
@@ -81,35 +95,23 @@ pub async fn fetch_candidate_lyrics(candidate: &LyricsCandidate) -> Result<Optio
 }
 
 async fn fetch_candidate_raw_lyrics(candidate: &LyricsCandidate) -> Option<String> {
-    use lyrics_helper::search::providers::web::{netease, qq_music};
-
-    match candidate.provider {
-        LyricsProvider::QqMusic => qq_music::api::get_lyrics(
-            &candidate.provider_track_id,
-            candidate.numeric_id,
-            &candidate.title,
-            &candidate.artists.join(", "),
-            &candidate.album,
-            candidate.duration_ms,
-        )
-        .await
-        .and_then(|(lyric, translation)| {
-            lyric.map(|lyric| combine_lyrics_with_translation(&lyric, translation.as_deref()))
-        }),
-        LyricsProvider::NetEase => {
-            let song_id = candidate.provider_track_id.parse().ok()?;
-            netease::api::get_lyrics(song_id)
-                .await
-                .and_then(|(lyric, translation)| {
-                    lyric.map(|lyric| {
-                        combine_lyrics_with_translation(&lyric, translation.as_deref())
-                    })
-                })
-        }
-        LyricsProvider::LrcLib => None,
-    }
+    let artist = candidate.artists.join(", ");
+    fetch_raw_lyrics(ProviderTrackRef {
+        provider: candidate.provider,
+        id: &candidate.provider_track_id,
+        numeric_id: candidate.numeric_id,
+        title: &candidate.title,
+        artist: &artist,
+        album: &candidate.album,
+        duration_ms: candidate.duration_ms,
+    })
+    .await
 }
 
+/// Searches providers in priority order and returns the first acceptable result.
+///
+/// # Errors
+/// Returns an error when a provider reports a recoverable search failure.
 pub async fn search_best_lyrics(
     track: &TrackMetadata,
     provider_order: &[LyricsProvider],
@@ -171,33 +173,54 @@ async fn fetch_result_lyrics(
     provider: LyricsProvider,
     result: &lyrics_helper::searchers::search_result::SearchResult,
 ) -> Option<String> {
+    let artist = result.artist();
+    fetch_raw_lyrics(ProviderTrackRef {
+        provider,
+        id: &result.id,
+        numeric_id: result.numeric_id,
+        title: &result.title,
+        artist: &artist,
+        album: &result.album,
+        duration_ms: result.duration_ms,
+    })
+    .await
+}
+
+struct ProviderTrackRef<'a> {
+    provider: LyricsProvider,
+    id: &'a str,
+    numeric_id: Option<i64>,
+    title: &'a str,
+    artist: &'a str,
+    album: &'a str,
+    duration_ms: Option<i32>,
+}
+
+async fn fetch_raw_lyrics(track: ProviderTrackRef<'_>) -> Option<String> {
     use lyrics_helper::search::providers::web::{netease, qq_music};
 
-    match provider {
-        LyricsProvider::QqMusic => qq_music::api::get_lyrics(
-            &result.id,
-            result.numeric_id,
-            &result.title,
-            &result.artist(),
-            &result.album,
-            result.duration_ms,
-        )
-        .await
-        .and_then(|(lyric, translation)| {
-            lyric.map(|lyric| combine_lyrics_with_translation(&lyric, translation.as_deref()))
-        }),
-        LyricsProvider::NetEase => {
-            let song_id = result.id.parse().ok()?;
-            netease::api::get_lyrics(song_id)
-                .await
-                .and_then(|(lyric, translation)| {
-                    lyric.map(|lyric| {
-                        combine_lyrics_with_translation(&lyric, translation.as_deref())
-                    })
-                })
+    let response = match track.provider {
+        LyricsProvider::QqMusic => {
+            qq_music::api::get_lyrics(
+                track.id,
+                track.numeric_id,
+                track.title,
+                track.artist,
+                track.album,
+                track.duration_ms,
+            )
+            .await
         }
-        LyricsProvider::LrcLib => None,
-    }
+        LyricsProvider::NetEase => {
+            let song_id = track.id.parse().ok()?;
+            netease::api::get_lyrics(song_id).await
+        }
+        LyricsProvider::LrcLib => return None,
+    };
+
+    response.and_then(|(lyrics, translation)| {
+        lyrics.map(|lyrics| combine_lyrics_with_translation(&lyrics, translation.as_deref()))
+    })
 }
 
 pub(super) fn lyrics_helper_metadata(
@@ -212,23 +235,28 @@ pub(super) fn lyrics_helper_metadata(
     metadata
 }
 
+/// Validated provider priority used by automatic search.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchPlan {
     providers: Vec<LyricsProvider>,
 }
 
 impl SearchPlan {
+    /// Builds a plan, removing unsupported and repeated providers.
     pub fn new(providers: impl IntoIterator<Item = LyricsProvider>) -> Self {
         let mut providers = providers.into_iter().collect::<Vec<_>>();
-        providers.retain(|provider| LyricsProvider::default_order().contains(provider));
-        providers.dedup();
+        let supported = LyricsProvider::default_order();
+        let mut seen = HashSet::new();
+        providers.retain(|provider| supported.contains(provider) && seen.insert(*provider));
         Self { providers }
     }
 
+    /// Builds the default QQ Music then NetEase plan.
     pub fn default_mvp() -> Self {
         Self::new(LyricsProvider::default_order())
     }
 
+    /// Returns providers in search priority order.
     pub fn providers(&self) -> &[LyricsProvider] {
         &self.providers
     }

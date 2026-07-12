@@ -12,7 +12,7 @@ use floatlyrics_core::{
     track::TrackMetadata,
 };
 use floatlyrics_lyrics::{
-    cache::LyricsCache,
+    cache::{LyricsCache, LyricsInsert},
     lyrics::{
         FetchedLyrics, LyricsCandidate, LyricsProvider, fetch_candidate_lyrics,
         search_lyrics_candidates,
@@ -421,13 +421,13 @@ impl SimpleComponent for ManualSearchModel {
                     return;
                 }
                 let result = cache
-                    .insert_lyrics(
-                        fetched.provider,
-                        fetched.provider_track_id.as_deref(),
-                        &fetched.title,
-                        &fetched.artists,
-                        &fetched.raw_lyrics,
-                    )
+                    .insert_lyrics(LyricsInsert {
+                        provider: fetched.provider,
+                        provider_track_id: fetched.provider_track_id.as_deref(),
+                        title: &fetched.title,
+                        artists: &fetched.artists,
+                        raw_lyrics: &fetched.raw_lyrics,
+                    })
                     .and_then(|lyrics_id| {
                         cache.bind_manual_match(&target.fingerprint(), lyrics_id)
                     });
@@ -641,20 +641,12 @@ fn duration_text(duration_ms: Option<i32>) -> String {
 }
 
 fn install_css() {
-    let provider = gtk::CssProvider::new();
-    provider.load_from_string(
+    super::style::install(
         r#"
         .manual-search-bar, .manual-search-footer { padding: 12px; }
         .manual-result-row { padding: 10px 12px; }
         "#,
     );
-    if let Some(display) = gtk::gdk::Display::default() {
-        gtk::style_context_add_provider_for_display(
-            &display,
-            &provider,
-            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
-    }
 }
 
 #[cfg(test)]

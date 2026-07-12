@@ -29,13 +29,13 @@ fn manual_match_wins_over_provider_cache() {
         .unwrap();
 
     let manual_id = cache
-        .insert_lyrics(
-            LyricsProvider::LrcLib,
-            Some("manual-1"),
-            "A Song",
-            &track.artists,
-            "[00:01.00]manual",
-        )
+        .insert_lyrics(LyricsInsert {
+            provider: LyricsProvider::LrcLib,
+            provider_track_id: Some("manual-1"),
+            title: "A Song",
+            artists: &track.artists,
+            raw_lyrics: "[00:01.00]manual",
+        })
         .unwrap();
     cache.bind_manual_match(&fingerprint, manual_id).unwrap();
 

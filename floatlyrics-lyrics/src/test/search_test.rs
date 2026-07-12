@@ -25,3 +25,17 @@ fn candidate(provider: LyricsProvider, id: &str, score: i32) -> LyricsCandidate 
         match_score: score,
     }
 }
+
+#[test]
+fn search_plan_removes_non_adjacent_duplicate_providers() {
+    let plan = SearchPlan::new([
+        LyricsProvider::QqMusic,
+        LyricsProvider::NetEase,
+        LyricsProvider::QqMusic,
+    ]);
+
+    assert_eq!(
+        plan.providers(),
+        &[LyricsProvider::QqMusic, LyricsProvider::NetEase]
+    );
+}
