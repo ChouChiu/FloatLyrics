@@ -142,6 +142,10 @@ pub struct LyricsConfig {
     pub show_romanization: bool,
     /// Ordered font-family fallback list used to render lyrics.
     pub font_order: Vec<String>,
+    /// Font size in pixels for the current lyric line.
+    pub lyric_font_size: i32,
+    /// Font size in pixels for translation text.
+    pub translation_font_size: i32,
 }
 
 impl Default for LyricsConfig {
@@ -152,6 +156,8 @@ impl Default for LyricsConfig {
             show_translation: true,
             show_romanization: false,
             font_order: default_font_order(),
+            lyric_font_size: default_lyric_font_size(),
+            translation_font_size: default_translation_font_size(),
         }
     }
 }
@@ -194,6 +200,14 @@ fn default_provider_order() -> Vec<LyricsProvider> {
 
 fn default_font_order() -> Vec<String> {
     vec!["Sans".to_string()]
+}
+
+fn default_lyric_font_size() -> i32 {
+    24
+}
+
+fn default_translation_font_size() -> i32 {
+    13
 }
 
 fn default_spotify_prefix() -> String {

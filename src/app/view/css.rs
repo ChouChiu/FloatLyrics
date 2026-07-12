@@ -48,27 +48,23 @@ pub(super) fn panel_css(panel_alpha: f64) -> String {
 
         .floating-lyric-current {
             color: white;
-            font-size: 24px;
             font-weight: 750;
             text-shadow: 0 2px 8px rgba(0,0,0,0.85);
         }
 
         .floating-lyric-adjacent {
             color: rgba(255,255,255,0.66);
-            font-size: 13px;
             text-shadow: 0 2px 8px rgba(0,0,0,0.85);
         }
 
         .floating-translation-current {
             color: rgba(255,255,255,0.78);
-            font-size: 13px;
             font-weight: 500;
             text-shadow: none;
         }
 
         .floating-translation-adjacent {
             color: rgba(255,255,255,0.50);
-            font-size: 11px;
             text-shadow: none;
         }
 
@@ -106,4 +102,19 @@ pub(super) fn panel_css(panel_alpha: f64) -> String {
         }
         "#;
     css.replace("__PANEL_ALPHA__", &format!("{panel_alpha:.3}"))
+}
+
+/// Returns CSS that sets the lyric and translation font sizes,
+/// loaded on a higher-priority provider so it overrides `panel_css`.
+pub(super) fn font_size_css(lyric_px: i32, translation_px: i32) -> String {
+    let adjacent_lyric_px = (lyric_px * 2 / 3).max(10);
+    let adjacent_translation_px = (translation_px * 5 / 6).max(8);
+    format!(
+        r#"
+        .floating-lyric-current {{ font-size: {lyric_px}px; }}
+        .floating-lyric-adjacent {{ font-size: {adjacent_lyric_px}px; }}
+        .floating-translation-current {{ font-size: {translation_px}px; }}
+        .floating-translation-adjacent {{ font-size: {adjacent_translation_px}px; }}
+        "#
+    )
 }

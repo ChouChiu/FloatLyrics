@@ -176,6 +176,7 @@ pub(super) struct OverlayView {
     opacity_provider: gtk::CssProvider,
     font_family: Rc<RefCell<String>>,
     font_provider: gtk::CssProvider,
+    font_size_provider: gtk::CssProvider,
     placement: SharedPlacement,
     song_info: gtk::Label,
     lyrics_stack: gtk::Stack,
@@ -183,6 +184,8 @@ pub(super) struct OverlayView {
     lyrics_transition: Rc<RefCell<LyricsTransitionState>>,
     i18n: I18n,
     static_status: Rc<RefCell<Option<Text>>>,
+    lyric_font_size: Rc<Cell<i32>>,
+    translation_font_size: Rc<Cell<i32>>,
 }
 
 #[derive(Clone)]
@@ -245,23 +248,28 @@ pub(super) fn build(
     bind_button_tooltip(&settings_button, &i18n, Text::OpenSettingsTooltip);
     bind_button_tooltip(&close_button, &i18n, Text::CloseTooltip);
 
+    let lyric_font_size = Rc::new(Cell::new(config.lyrics.lyric_font_size));
+    let translation_font_size = Rc::new(Cell::new(config.lyrics.translation_font_size));
+
     let primary = lyric_slot(
         ["floating-slot-current"],
         ["floating-lyric-current"],
         i18n.text(Text::OpenSpotify),
         Some((panel_width, CURRENT_KARAOKE_HEIGHT)),
-        translation_style(true),
+        translation_style(true, config.lyrics.translation_font_size),
         panel_width,
         Rc::clone(&font_family),
+        Rc::clone(&lyric_font_size),
     );
     let secondary = lyric_slot(
         ["floating-slot-current"],
         ["floating-lyric-current"],
         "",
         Some((panel_width, CURRENT_KARAOKE_HEIGHT)),
-        translation_style(true),
+        translation_style(true, config.lyrics.translation_font_size),
         panel_width,
         Rc::clone(&font_family),
+        Rc::clone(&lyric_font_size),
     );
 
     lyrics_stack.add_named(&primary.container, Some("primary"));
@@ -308,6 +316,20 @@ pub(super) fn build(
         );
     }
 
+    let font_size_provider = gtk::CssProvider::new();
+    load_font_size_css(
+        &font_size_provider,
+        config.lyrics.lyric_font_size,
+        config.lyrics.translation_font_size,
+    );
+    if let Some(display) = gtk::gdk::Display::default() {
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &font_size_provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 3,
+        );
+    }
+
     window.set_child(Some(&content));
     let overlay = OverlayView {
         window: window.clone(),
@@ -316,6 +338,7 @@ pub(super) fn build(
         opacity_provider,
         font_family,
         font_provider,
+        font_size_provider,
         placement,
         song_info,
         lyrics_stack,
@@ -323,6 +346,8 @@ pub(super) fn build(
         lyrics_transition,
         i18n: i18n.clone(),
         static_status: Rc::new(RefCell::new(Some(Text::OpenSpotify))),
+        lyric_font_size,
+        translation_font_size,
     };
     {
         let overlay = overlay.clone();
@@ -335,6 +360,7 @@ pub(super) fn build(
     overlay
 }
 
+#[allow(clippy::too_many_arguments)]
 fn lyric_slot(
     container_classes: [&str; 1],
     text_classes: [&str; 1],
@@ -343,6 +369,7 @@ fn lyric_slot(
     translation_style: TextLineStyle,
     panel_width: i32,
     font_family: Rc<RefCell<String>>,
+    lyric_font_size: Rc<Cell<i32>>,
 ) -> LyricSlotWidgets {
     let text = gtk::Label::builder()
         .label(initial_text)
@@ -355,7 +382,7 @@ fn lyric_slot(
         .build();
 
     let (text_widget, karaoke_area, karaoke_state) =
-        lyric_text_widget(&text, karaoke_size, Rc::clone(&font_family));
+        lyric_text_widget(&text, karaoke_size, Rc::clone(&font_family), lyric_font_size);
     let (translation_area, translation_state) = text_line_area(
         panel_width,
         translation_line_height(translation_style),
@@ -384,18 +411,13 @@ fn lyric_slot(
     }
 }
 
-fn translation_style(is_current: bool) -> TextLineStyle {
-    if is_current {
-        TextLineStyle {
-            font_px: 13,
-            color: (1.0, 1.0, 1.0, 0.78),
-        }
+fn translation_style(is_current: bool, translation_font_px: i32) -> TextLineStyle {
+    let (font_px, color) = if is_current {
+        (translation_font_px, (1.0, 1.0, 1.0, 0.78))
     } else {
-        TextLineStyle {
-            font_px: 11,
-            color: (1.0, 1.0, 1.0, 0.50),
-        }
-    }
+        ((translation_font_px * 5 / 6).max(8), (1.0, 1.0, 1.0, 0.50))
+    };
+    TextLineStyle { font_px, color }
 }
 
 fn translation_line_height(style: TextLineStyle) -> i32 {
@@ -448,6 +470,10 @@ fn load_font_css(provider: &gtk::CssProvider, family: &str) {
     provider.load_from_string(&format!(
         ".floating-panel {{ font-family: {css_families}; }}"
     ));
+}
+
+fn load_font_size_css(provider: &gtk::CssProvider, lyric_px: i32, translation_px: i32) {
+    provider.load_from_string(&css::font_size_css(lyric_px, translation_px));
 }
 
 fn expanded_panel_width(compact_width: i32, content_width: i32, maximum_width: i32) -> i32 {
@@ -576,11 +602,21 @@ impl OverlayView {
             self.window.set_margin(Edge::Left, left_margin);
         }
         load_opacity_css(&self.opacity_provider, config.window.opacity);
+        load_font_size_css(
+            &self.font_size_provider,
+            config.lyrics.lyric_font_size,
+            config.lyrics.translation_font_size,
+        );
+        self.lyric_font_size.set(config.lyrics.lyric_font_size);
+        self.translation_font_size.set(config.lyrics.translation_font_size);
         let family = font_family(&config.lyrics.font_order);
         *self.font_family.borrow_mut() = family.clone();
         load_font_css(&self.font_provider, &family);
         for slot in &self.lyric_slots {
             slot.translation_state.borrow_mut().font_family = family.clone();
+            let new_translation_style =
+                translation_style(true, config.lyrics.translation_font_size);
+            slot.translation_state.borrow_mut().style = new_translation_style;
             slot.translation_area.queue_draw();
             if let Some(area) = &slot.karaoke_area {
                 area.queue_draw();
@@ -592,7 +628,13 @@ impl OverlayView {
 
     fn resize_for_lyrics(&self, value: &LyricSlotText) {
         let measured_width =
-            lyric_content_width(&self.song_info, value, &self.font_family.borrow())
+            lyric_content_width(
+                &self.song_info,
+                value,
+                &self.font_family.borrow(),
+                self.lyric_font_size.get(),
+                self.translation_font_size.get(),
+            )
                 .saturating_add(TEXT_HORIZONTAL_PADDING);
         let available_width = available_panel_width(&self.window, PANEL_HORIZONTAL_GUTTER)
             .unwrap_or(MAX_EXPANDED_PANEL_WIDTH)

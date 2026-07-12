@@ -66,6 +66,8 @@ pub(super) enum SettingsMsg {
     SetOpacity(f64),
     SetFonts(Vec<String>),
     SetProviderOrder(Vec<LyricsProvider>),
+    SetLyricFontSize(i32),
+    SetTranslationFontSize(i32),
 }
 
 #[derive(Debug)]
@@ -238,6 +240,12 @@ impl SimpleComponent for SettingsModel {
             SettingsMsg::SetFonts(value) => self.draft.borrow_mut().lyrics.font_order = value,
             SettingsMsg::SetProviderOrder(value) => {
                 self.draft.borrow_mut().lyrics.provider_order = value;
+            }
+            SettingsMsg::SetLyricFontSize(value) => {
+                self.draft.borrow_mut().lyrics.lyric_font_size = value;
+            }
+            SettingsMsg::SetTranslationFontSize(value) => {
+                self.draft.borrow_mut().lyrics.translation_font_size = value;
             }
         }
         if should_persist {
@@ -427,6 +435,18 @@ fn display_page(
         });
     }
 
+    let lyric_font_size = gtk::SpinButton::with_range(12.0, 56.0, 1.0);
+    lyric_font_size.set_value(config.lyrics.lyric_font_size as f64);
+    lyric_font_size.set_numeric(true);
+    lyric_font_size.set_width_chars(8);
+    connect_window_i32(&lyric_font_size, sender, SettingsMsg::SetLyricFontSize);
+
+    let translation_font_size = gtk::SpinButton::with_range(8.0, 36.0, 1.0);
+    translation_font_size.set_value(config.lyrics.translation_font_size as f64);
+    translation_font_size.set_numeric(true);
+    translation_font_size.set_width_chars(8);
+    connect_window_i32(&translation_font_size, sender, SettingsMsg::SetTranslationFontSize);
+
     page(
         i18n,
         Text::DisplayTitle,
@@ -452,6 +472,20 @@ fn display_page(
                 &opacity,
             ),
             setting_row(i18n, Text::Fonts, Text::FontsDescription, &fonts),
+        ]),
+        setting_card(&[
+            setting_row(
+                i18n,
+                Text::LyricFontSize,
+                Text::LyricFontSizeDescription,
+                &lyric_font_size,
+            ),
+            setting_row(
+                i18n,
+                Text::TranslationFontSize,
+                Text::TranslationFontSizeDescription,
+                &translation_font_size,
+            ),
         ])],
     )
 }

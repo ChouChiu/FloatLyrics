@@ -4,14 +4,11 @@
 //! Pango/Cairo text rendering for translations and syllable-level karaoke.
 
 use gtk::prelude::*;
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::{Cell, RefCell}, rc::Rc};
 
 use floatlyrics_lyrics::lyrics::TimedSyllable;
 
 use super::super::model::{KaraokeRenderState, LyricSlotText, syllable_progress};
-
-const CURRENT_LYRIC_FONT_PX: i32 = 21;
-const CURRENT_TRANSLATION_FONT_PX: i32 = 13;
 
 #[derive(Debug, Clone)]
 pub(super) struct TextLineRenderState {
@@ -43,6 +40,8 @@ pub(super) fn lyric_content_width(
     measure_widget: &gtk::Label,
     value: &LyricSlotText,
     font_family: &str,
+    lyric_font_px: i32,
+    translation_font_px: i32,
 ) -> i32 {
     let lyric_text = value
         .karaoke
@@ -51,14 +50,14 @@ pub(super) fn lyric_content_width(
     let lyric_width = text_pixel_width(
         measure_widget,
         lyric_text,
-        CURRENT_LYRIC_FONT_PX,
+        lyric_font_px,
         true,
         font_family,
     );
     let translation_width = text_pixel_width(
         measure_widget,
         &value.translation,
-        CURRENT_TRANSLATION_FONT_PX,
+        translation_font_px,
         false,
         font_family,
     );
@@ -123,6 +122,7 @@ pub(super) fn lyric_text_widget(
     text: &gtk::Label,
     karaoke_size: Option<(i32, i32)>,
     font_family: Rc<RefCell<String>>,
+    lyric_font_size: Rc<Cell<i32>>,
 ) -> (
     gtk::Widget,
     Option<gtk::DrawingArea>,
@@ -142,6 +142,7 @@ pub(super) fn lyric_text_widget(
         .build();
     {
         let state = Rc::clone(&state);
+        let font_size = Rc::clone(&lyric_font_size);
         area.set_draw_func(move |area, cr, width, height| {
             draw_karaoke_line(
                 area,
@@ -150,6 +151,7 @@ pub(super) fn lyric_text_widget(
                 height,
                 &state.borrow(),
                 &font_family.borrow(),
+                font_size.get(),
             );
         });
     }
@@ -194,6 +196,7 @@ fn draw_karaoke_line(
     height: i32,
     state: &KaraokeRenderState,
     font_family: &str,
+    font_px: i32,
 ) {
     if state.text.trim().is_empty() {
         return;
@@ -203,7 +206,7 @@ fn draw_karaoke_line(
     let mut font = gtk::pango::FontDescription::new();
     font.set_family(font_family);
     font.set_weight(gtk::pango::Weight::Bold);
-    font.set_absolute_size(CURRENT_LYRIC_FONT_PX as f64 * gtk::pango::SCALE as f64);
+    font.set_absolute_size(font_px as f64 * gtk::pango::SCALE as f64);
     layout.set_font_description(Some(&font));
     layout.set_single_paragraph_mode(true);
 
