@@ -23,7 +23,7 @@ makedepends=('cargo')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 # Replace SKIP with the v1.0.0 source archive checksum before publishing to AUR:
 #   updpkgsums && makepkg --printsrcinfo > .SRCINFO
-sha256sums=('a678954a97d931e58a5575d744da98e5bade8e900188d41fd689397d5a020cad')
+sha256sums=('f787d189b0257dddbafded01151f03b44bcb692887f8e70f37d35b94d37708c9')
 
 prepare() {
     cd "FloatLyrics-$pkgver"
