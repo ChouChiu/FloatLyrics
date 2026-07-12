@@ -56,6 +56,9 @@ jobs:
           key: ${{ runner.os }}-arch-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-arch-cargo-
+      
+      - name: Mark workspace as safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Verify third-party license data
         run: |
