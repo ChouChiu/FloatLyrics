@@ -15,6 +15,6 @@ pkgbase = floatlyrics
 	depends = openssl
 	depends = pango
 	source = floatlyrics-1.0.0.tar.gz::https://github.com/ChouChiu/FloatLyrics/archive/refs/tags/v1.0.0.tar.gz
-	sha256sums = f787d189b0257dddbafded01151f03b44bcb692887f8e70f37d35b94d37708c9
+	sha256sums = 123b3d005728633cbcc142894cc23606c95c173cd4d9efcb569cd8c20ca0502a
 
 pkgname = floatlyrics
