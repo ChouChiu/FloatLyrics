@@ -4,7 +4,7 @@
 //! Relm4 application composition root.
 //!
 //! Runtime and infrastructure dependencies are created here.  Relm4 owns the
-//! top-level window and routes UI actions through [`AppMsg`], while the
+//! top-level window and routes UI actions through `AppMsg`, while the
 //! playback controller remains independent from the concrete widget tree.
 
 mod about;
@@ -13,6 +13,7 @@ mod localization;
 mod manual_search;
 mod model;
 mod settings;
+mod style;
 mod view;
 
 use anyhow::{Context, Result};
@@ -56,6 +57,29 @@ pub(super) enum AppMsg {
     OpenAbout,
     ConfigChanged(AppConfig),
     Quit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AppCommand {
+    OpenSettings,
+    OpenManualSearch,
+}
+
+impl AppCommand {
+    fn from_argument(argument: &OsStr) -> Option<Self> {
+        match argument.to_str()? {
+            "--settings" => Some(Self::OpenSettings),
+            "--select-lyrics" => Some(Self::OpenManualSearch),
+            _ => None,
+        }
+    }
+
+    fn message(self) -> AppMsg {
+        match self {
+            Self::OpenSettings => AppMsg::OpenSettings,
+            Self::OpenManualSearch => AppMsg::OpenManualSearch,
+        }
+    }
 }
 
 #[relm4::component]
@@ -177,6 +201,13 @@ impl SimpleComponent for AppModel {
     }
 }
 
+/// Starts the GTK application with resolved `paths` and loaded `config`.
+///
+/// The function blocks until the application exits.
+///
+/// # Errors
+///
+/// Returns an error when the lyrics cache or Tokio runtime cannot initialize.
 pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
     // Open the cache before GTK starts so initialization errors remain
     // recoverable through the public `Result` API.
@@ -194,11 +225,8 @@ pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
     app.connect_command_line(|app, command_line| {
         app.activate();
         let arguments = command_line.arguments();
-        if command_requests_settings(&arguments) {
-            APP_BROKER.send(AppMsg::OpenSettings);
-        }
-        if command_requests_manual_search(&arguments) {
-            APP_BROKER.send(AppMsg::OpenManualSearch);
+        for command in requested_commands(&arguments) {
+            APP_BROKER.send(command.message());
         }
         gtk::glib::ExitCode::SUCCESS
     });
@@ -214,16 +242,10 @@ pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
     Ok(())
 }
 
-fn command_requests_settings(arguments: &[std::ffi::OsString]) -> bool {
+fn requested_commands(arguments: &[std::ffi::OsString]) -> impl Iterator<Item = AppCommand> + '_ {
     arguments
         .iter()
-        .any(|argument| argument == OsStr::new("--settings"))
-}
-
-fn command_requests_manual_search(arguments: &[std::ffi::OsString]) -> bool {
-    arguments
-        .iter()
-        .any(|argument| argument == OsStr::new("--select-lyrics"))
+        .filter_map(|argument| AppCommand::from_argument(argument))
 }
 
 #[cfg(test)]

@@ -241,19 +241,11 @@ fn dependencies_page(i18n: &I18n) -> gtk::ScrolledWindow {
 }
 
 fn install_css() {
-    let provider = gtk::CssProvider::new();
-    provider.load_from_string(
+    super::style::install(
         r#"
         .about-page { padding: 36px 48px; }
         .about-summary { font-size: 1.08em; }
         .acknowledgements-icon { color: @accent_color; }
         "#,
     );
-    if let Some(display) = gtk::gdk::Display::default() {
-        gtk::style_context_add_provider_for_display(
-            &display,
-            &provider,
-            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
-    }
 }

@@ -68,7 +68,7 @@ impl ControllerHandle {
     }
 }
 
-/// Decoupled controller: owns playback state and exposes a [`tick`] method
+/// Decoupled controller: owns playback state and exposes a [`Controller::tick`] method
 /// that the caller drives from the GTK main loop (or from tests).
 pub(super) struct Controller {
     handle: ControllerHandle,
