@@ -5,7 +5,7 @@
 
 ## 开发环境
 
-FloatLyrics 是 Rust 2024 单包项目，运行和界面测试需要 Linux Wayland、GTK4、
+FloatLyrics 是由三个 crate 组成的 Rust 2024 workspace，运行和界面测试需要 Linux Wayland、GTK4、
 `gtk4-layer-shell` 和会话 D-Bus。单元测试不得依赖正在运行的 Spotify、D-Bus 或网络。
 
 在 Arch Linux 上准备环境：
@@ -32,12 +32,12 @@ cargo run -- --debug
 
 ## 项目结构
 
-- `src/main.rs`：最小二进制入口。
-- `src/lib.rs`：命令行解析和启动流程。
+- `floatlyrics-core`：路径、国际化、遥测、摘要和曲目指纹，不依赖 GTK 或 D-Bus。
+- `floatlyrics-lyrics`：歌词模型、解析、搜索、时间轴以及 SQLite 缓存。
+- `src/main.rs`、`src/lib.rs`：最小二进制入口、命令行解析和启动流程。
 - `src/app.rs`、`src/app/`：Relm4 应用装配与消息流、控制器、展示状态和 GTK 界面。
-- `src/lyrics.rs`、`src/lyrics/`：歌词模型、搜索、解析、匹配和时间轴。
 - `src/mpris.rs`、`src/mpris/`：MPRIS 监听和播放位置同步。
-- `src/cache.rs`、`src/config.rs`、`src/paths.rs`：SQLite、配置和本地路径。
+- `src/config.rs`：应用配置及其原子写入逻辑。
 - `data/`：桌面入口、图标和应用元数据等发布资源。
 
 请把领域逻辑放入聚焦模块，并让 GTK、数据库、操作系统和网络边界保持清晰。
@@ -50,7 +50,8 @@ cargo run -- --debug
 - 保持 `main.rs` 精简；可复用行为应放在领域模块中。
 - 不要在业务逻辑或测试中依赖开发者本机路径、账户、网络或桌面会话。
 - 改动界面文本时，同步维护 English、简体中文和繁體中文翻译；不要绕过本地化层
-  直接加入新的用户可见字符串。
+  直接加入新的用户可见字符串。翻译资源位于 `data/locale/*.json`，新增键时还需同步
+  更新 `floatlyrics-core/src/i18n.rs` 中的 `define_text_keys!` 列表。
 - 不提交 `target/`、本地 SQLite 文件、凭据或个人配置。
 
 测试放在实现旁的 `#[cfg(test)]` 模块中，测试名应描述可观察行为，例如
@@ -64,6 +65,17 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked
 cargo build --locked --release
 ```
+
+## 文档
+
+生成三个 workspace crate 的文档，包括私有实现细节，但不生成第三方依赖文档：
+
+```bash
+cargo docs
+```
+
+使用 `cargo docs-open` 可生成相同文档并在默认浏览器中打开。两个别名均配置在
+`.cargo/config.toml`，保证本地与 CI 使用相同参数；文档警告会作为错误处理。
 
 只改动特定模块时可以先运行过滤测试（例如 `cargo test lyrics::`），但拉取请求提交前
 仍需运行完整检查。

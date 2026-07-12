@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: 2026 ChouChiu
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[build]
+rustdocflags = ["-D", "warnings"]
+
+[alias]
+docs = "doc --locked --workspace --no-deps --document-private-items"
+docs-open = "doc --locked --workspace --no-deps --document-private-items --open"

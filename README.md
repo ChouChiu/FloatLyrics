@@ -74,7 +74,7 @@ Cargo 工作空间，包含三个 crate，自上而下分层：
 - `src/app/settings.rs`、`src/app/manual_search.rs`、`src/app/about.rs` — 设置、搜索、关于页面
 - `src/mpris/` — D-Bus MPRIS 监听与播放位置同步
 - `src/config.rs` — 原子化配置读写（临时文件 + 重命名）
-- `floatlyrics-core/src/i18n.rs` — 编译期 i18n（English / 简体中文 / 繁體中文）
+- `floatlyrics-core/src/i18n.rs`、`data/locale/*.json` — 运行时 i18n（English / 简体中文 / 繁體中文）
 - `floatlyrics-lyrics/src/lyrics/` — LRC 解析、QQ 音乐与网易云音乐搜索、时间轴
 
 ## 功能

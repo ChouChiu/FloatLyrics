@@ -22,9 +22,13 @@ cargo test --locked --all-targets --all-features
 cargo build --locked --release
 ```
 
-Filter tests by module: `cargo test lyrics::`, `cargo test mpris::`, etc.
+Filter tests by module: `cargo test lyrics::`, `cargo test mpris::`, `cargo test cache::`, etc.
 
-`make validate-data` is mentioned in README but **does not exist** — no Makefile in repo.
+`cargo test --locked` (without `--all-targets` / `--all-features`) also works for focused iterations; CI uses the full flags.
+
+## Crate alias note
+
+The `gtk` crate in `Cargo.toml` is aliased from `gtk4` (`package = "gtk4"`). Code uses `use gtk::...` but it resolves to the GTK4 Rust bindings (v0.11, requiring GTK 4.12+ system library). Relm4 v0.11 drives the UI.
 
 ## App ID
 
@@ -36,11 +40,15 @@ Filter tests by module: `cargo test lyrics::`, `cargo test mpris::`, etc.
 
 ## i18n
 
-Translations are **compiled in** (`floatlyrics-core/src/i18n.rs`), not loaded from external files. Three languages: English, Simplified Chinese, Traditional Chinese. Supported via a const function dispatch (`language.text(key)`) and an `I18n` subscriber pattern for GTK widgets. The `data/locale/` directory exists only for potential future use — it is not currently shipped.
+Translations are loaded at runtime from JSON files in `data/locale/` and shipped to
+`/usr/share/floatlyrics/locale/`. Three languages: English, Simplified Chinese,
+Traditional Chinese. `FLOATLYRICS_LOCALE_DIR` overrides the resource directory.
+`Language::text(key)` uses a process-wide lazy cache, and the `I18n` subscriber
+pattern updates GTK widgets when the active language changes.
 
 When adding a new user-visible string:
-1. Add a variant to `Text` enum.
-2. Add entries to `english()`, `simplified_chinese()`, and `traditional_chinese()`.
+1. Add a variant to the `define_text_keys!` invocation.
+2. Add the same key to `data/locale/en.json`, `zh-CN.json`, and `zh-TW.json`.
 
 ## SPDX headers
 
