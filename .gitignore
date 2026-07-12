@@ -32,3 +32,4 @@ rustc-ice-*.txt
 pkg/
 *.pkg.tar.*
 *.tar.gz
+src/FloatLyrics-*
