@@ -30,7 +30,7 @@ pub struct AppConfig {
 
 /// General application preferences.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct GeneralConfig {
     /// Active user-interface language.
     pub language: Language,
@@ -94,7 +94,7 @@ fn temporary_config_path(path: &Path) -> Result<PathBuf> {
 
 /// Overlay window geometry and appearance preferences.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct WindowConfig {
     /// Logical anchor used by the overlay.
     pub anchor: WindowAnchor,
@@ -130,7 +130,7 @@ pub enum WindowAnchor {
 
 /// Lyrics timing, secondary-text, and provider preferences.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct LyricsConfig {
     /// Global playback offset in milliseconds.
     pub offset_ms: i64,
@@ -146,6 +146,12 @@ pub struct LyricsConfig {
     pub lyric_font_size: i32,
     /// Font size in pixels for translation text.
     pub translation_font_size: i32,
+    /// Color for played (filled) karaoke syllables, as `#RRGGBBAA` hex.
+    pub played_color: String,
+    /// Color for unplayed karaoke syllables, as `#RRGGBBAA` hex.
+    pub unplayed_color: String,
+    /// Color for translation text, as `#RRGGBBAA` hex.
+    pub translation_color: String,
 }
 
 impl Default for LyricsConfig {
@@ -158,13 +164,49 @@ impl Default for LyricsConfig {
             font_order: default_font_order(),
             lyric_font_size: default_lyric_font_size(),
             translation_font_size: default_translation_font_size(),
+            played_color: default_played_color(),
+            unplayed_color: default_unplayed_color(),
+            translation_color: default_translation_color(),
         }
     }
 }
 
+/// Parses an `#RRGGBBAA` hex color string into an `(r, g, b, a)` tuple with
+/// each channel in `0.0..=1.0`. Returns white when the input is invalid.
+pub fn parse_hex_color(hex: &str) -> (f64, f64, f64, f64) {
+    let hex = hex.trim().trim_start_matches('#');
+    if hex.len() < 6 {
+        return (1.0, 1.0, 1.0, 1.0);
+    }
+    let parse_byte = |offset: usize| {
+        u8::from_str_radix(&hex[offset..offset + 2], 16).unwrap_or(0xff) as f64 / 255.0
+    };
+    let r = parse_byte(0);
+    let g = parse_byte(2);
+    let b = parse_byte(4);
+    let a = if hex.len() >= 8 {
+        parse_byte(6)
+    } else {
+        1.0
+    };
+    (r, g, b, a)
+}
+
+/// Formats an `(r, g, b, a)` tuple as an `#RRGGBBAA` hex string.
+pub fn format_hex_color(color: (f64, f64, f64, f64)) -> String {
+    let to_byte = |channel: f64| (channel.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!(
+        "#{:02X}{:02X}{:02X}{:02X}",
+        to_byte(color.0),
+        to_byte(color.1),
+        to_byte(color.2),
+        to_byte(color.3),
+    )
+}
+
 /// Spotify-compatible MPRIS discovery preferences.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct SpotifyConfig {
     /// D-Bus well-known-name prefix accepted as a player instance.
     pub mpris_prefix: String,
@@ -208,6 +250,18 @@ fn default_lyric_font_size() -> i32 {
 
 fn default_translation_font_size() -> i32 {
     13
+}
+
+fn default_played_color() -> String {
+    "#FFFFFFFF".to_string()
+}
+
+fn default_unplayed_color() -> String {
+    "#9EA6B3FF".to_string()
+}
+
+fn default_translation_color() -> String {
+    "#FFFFFFC7".to_string()
 }
 
 fn default_spotify_prefix() -> String {

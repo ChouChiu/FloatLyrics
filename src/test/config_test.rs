@@ -50,3 +50,34 @@ fn save_replaces_config_without_leaving_a_temporary_file() {
         .collect::<Vec<_>>();
     assert_eq!(entries, vec!["config.toml"]);
 }
+
+#[test]
+fn missing_color_fields_fall_back_to_defaults() {
+    let old_format = r#"
+[general]
+language = "en"
+
+[window]
+anchor = "bottom-center"
+margin = 96
+width = 350
+opacity = 0.78
+bottom_panel_height = 36
+
+[lyrics]
+offset_ms = 0
+provider_order = ["qq-music", "netease"]
+show_translation = true
+show_romanization = false
+font_order = ["Sans"]
+lyric_font_size = 24
+translation_font_size = 13
+
+[spotify]
+mpris_prefix = "org.mpris.MediaPlayer2.spotify"
+"#;
+    let config: AppConfig = toml::from_str(old_format).unwrap();
+    assert_eq!(config.lyrics.played_color, "#FFFFFFFF");
+    assert_eq!(config.lyrics.unplayed_color, "#9EA6B3FF");
+    assert_eq!(config.lyrics.translation_color, "#FFFFFFC7");
+}
