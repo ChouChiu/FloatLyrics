@@ -31,7 +31,7 @@
 - 同步到每一个字：支持普通同步歌词、逐字歌词、翻译与罗马音显示。
 - 找不到也能自己选：自动搜索 QQ 音乐和网易云音乐，也可以为当前曲目手动选择结果。
 - 越用越省心：已匹配歌词写入本地 SQLite 缓存，之后可离线使用。
-- 适应你的桌面：浮窗可自由拖放，靠近屏幕边缘时自动吸附；还可调整透明度、字体、偏移量和底部面板预留。
+- 适应你的桌面：浮窗可自由拖放，靠近屏幕边缘时自动吸附；还可调整透明度、字体、字号、偏移量、文字颜色和底部面板预留。
 - 三种界面语言：English、简体中文与繁體中文可在运行时切换。
 
 ## 运行要求
@@ -146,12 +146,17 @@ provider_order = ["qq-music", "netease"]
 show_translation = true
 show_romanization = false
 font_order = ["Sans"]
+lyric_font_size = 24
+translation_font_size = 13
+played_color = "#FFFFFFFF"
+unplayed_color = "#9EA6B3FF"
+translation_color = "#FFFFFFC7"
 
 [spotify]
 mpris_prefix = "org.mpris.MediaPlayer2.spotify"
 ```
 
-配置采用严格校验：所有字段均需保留，未知字段、旧格式或不完整配置会在启动时报错。使用 Flatpak/Snap 版 Spotify 时，如果无法自动识别播放器，可按实际 D-Bus 名称调整 `mpris_prefix`。
+配置采用严格校验：顶层 section 不可缺失，未知字段会在启动时报错；section 内缺失的字段将自动回退到默认值。使用 Flatpak/Snap 版 Spotify 时，如果无法自动识别播放器，可按实际 D-Bus 名称调整 `mpris_prefix`。
 
 ## 常见问题与限制
 
