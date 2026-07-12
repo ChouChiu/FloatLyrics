@@ -85,9 +85,7 @@ fn string_vec_value(value: &OwnedValue) -> Option<Vec<String>> {
 }
 
 fn u64_value(value: &OwnedValue) -> Option<u64> {
-    u64::try_from(value.try_clone().ok()?)
-        .ok()
-        .or_else(|| i64::try_from(value.try_clone().ok()?).ok()?.try_into().ok())
+    i64::try_from(value.try_clone().ok()?).ok()?.try_into().ok()
 }
 
 fn object_path_value(value: &OwnedValue) -> Option<String> {
@@ -142,17 +140,17 @@ pub enum PlaybackStatus {
     Paused,
     /// Playback is stopped.
     Stopped,
-    /// Status value not recognized by this version.
-    Unknown(String),
 }
 
-impl From<&str> for PlaybackStatus {
-    fn from(value: &str) -> Self {
+impl TryFrom<&str> for PlaybackStatus {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self> {
         match value {
-            "Playing" => Self::Playing,
-            "Paused" => Self::Paused,
-            "Stopped" => Self::Stopped,
-            other => Self::Unknown(other.to_string()),
+            "Playing" => Ok(Self::Playing),
+            "Paused" => Ok(Self::Paused),
+            "Stopped" => Ok(Self::Stopped),
+            other => anyhow::bail!("unknown MPRIS playback status: {other}"),
         }
     }
 }

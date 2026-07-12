@@ -16,26 +16,23 @@ use floatlyrics_lyrics::lyrics::LyricsProvider;
 
 /// Complete application configuration persisted as TOML.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct AppConfig {
     /// General application preferences.
-    #[serde(default)]
     pub general: GeneralConfig,
     /// Overlay window preferences.
-    #[serde(default)]
     pub window: WindowConfig,
     /// Lyrics display and provider preferences.
-    #[serde(default)]
     pub lyrics: LyricsConfig,
     /// Spotify-compatible MPRIS preferences.
-    #[serde(default)]
     pub spotify: SpotifyConfig,
 }
 
 /// General application preferences.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct GeneralConfig {
     /// Active user-interface language.
-    #[serde(default)]
     pub language: Language,
 }
 
@@ -97,21 +94,17 @@ fn temporary_config_path(path: &Path) -> Result<PathBuf> {
 
 /// Overlay window geometry and appearance preferences.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct WindowConfig {
     /// Logical anchor used by the overlay.
-    #[serde(default = "default_anchor")]
     pub anchor: WindowAnchor,
     /// Distance from the selected screen edge, in pixels.
-    #[serde(default = "default_margin")]
     pub margin: i32,
     /// Preferred compact overlay width, in pixels.
-    #[serde(default = "default_width")]
     pub width: i32,
     /// Background alpha in the inclusive range `0.0..=1.0`.
-    #[serde(default = "default_opacity")]
     pub opacity: f64,
     /// Height of a reserved bottom desktop panel, in pixels.
-    #[serde(default)]
     pub bottom_panel_height: i32,
 }
 
@@ -137,21 +130,17 @@ pub enum WindowAnchor {
 
 /// Lyrics timing, secondary-text, and provider preferences.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct LyricsConfig {
     /// Global playback offset in milliseconds.
-    #[serde(default)]
     pub offset_ms: i64,
     /// Automatic search priority.
-    #[serde(default = "default_provider_order")]
     pub provider_order: Vec<LyricsProvider>,
     /// Whether translated text is displayed and fetched.
-    #[serde(default = "default_show_translation")]
     pub show_translation: bool,
     /// Whether romanized text is displayed.
-    #[serde(default)]
     pub show_romanization: bool,
     /// Ordered font-family fallback list used to render lyrics.
-    #[serde(default = "default_font_order")]
     pub font_order: Vec<String>,
 }
 
@@ -169,9 +158,9 @@ impl Default for LyricsConfig {
 
 /// Spotify-compatible MPRIS discovery preferences.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct SpotifyConfig {
     /// D-Bus well-known-name prefix accepted as a player instance.
-    #[serde(default = "default_spotify_prefix")]
     pub mpris_prefix: String,
 }
 
@@ -197,10 +186,6 @@ fn default_width() -> i32 {
 
 fn default_opacity() -> f64 {
     0.78
-}
-
-fn default_show_translation() -> bool {
-    true
 }
 
 fn default_provider_order() -> Vec<LyricsProvider> {

@@ -57,8 +57,3 @@ fn runtime_json_catalogues_are_complete() {
         );
     }
 }
-
-#[test]
-fn missing_catalogue_entry_falls_back_to_its_stable_key() {
-    assert_eq!(Catalog::default().text(Text::Saved), "Saved");
-}

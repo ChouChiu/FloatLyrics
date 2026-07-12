@@ -76,37 +76,24 @@ pub fn spawn_spotify_watcher(
 }
 
 /// Spawns an MPRIS watcher for player names matching `mpris_prefix`.
-///
-/// This extension point supports Spotify variants or compatible players without
-/// coupling the application controller to D-Bus.
 pub fn spawn_spotify_watcher_with_prefix(
     runtime: &tokio::runtime::Handle,
     sender: Sender<SpotifyWatcherEvent>,
     mpris_prefix: String,
 ) {
     runtime.spawn(async move {
-        if let Err(error) = watch_spotify(sender.clone(), mpris_prefix).await {
+        if let Err(error) = watch_spotify(sender.clone(), &mpris_prefix).await {
             let _ = sender.send(SpotifyWatcherEvent::Error(error.to_string()));
         }
     });
 }
 
-async fn watch_spotify(
-    sender: Sender<SpotifyWatcherEvent>,
-    configured_prefix: String,
-) -> Result<()> {
+async fn watch_spotify(sender: Sender<SpotifyWatcherEvent>, mpris_prefix: &str) -> Result<()> {
     let connection = Connection::session()
         .await
         .context("connecting to session D-Bus")?;
-    let prefix = configured_prefix.trim();
-    let prefix = if prefix.is_empty() {
-        SPOTIFY_MPRIS_PREFIX
-    } else {
-        prefix
-    };
-
     loop {
-        let names = mpris_names_with_prefix(&connection, prefix)
+        let names = mpris_names_with_prefix(&connection, mpris_prefix)
             .await
             .context("listing MPRIS names")?;
 
@@ -236,11 +223,11 @@ async fn read_player_state(player: &Proxy<'_>, bus_name: &str) -> Result<Spotify
     let metadata = player
         .get_property::<HashMap<String, OwnedValue>>("Metadata")
         .await
-        .unwrap_or_default();
+        .context("reading MPRIS metadata")?;
     let playback_status = player
         .get_property::<String>("PlaybackStatus")
         .await
-        .unwrap_or_else(|_| "Stopped".to_string());
+        .context("reading MPRIS playback status")?;
     let position_us = player.get_property::<i64>("Position").await.ok();
 
     let track = spotify_metadata_from_mpris(&metadata)
@@ -248,7 +235,7 @@ async fn read_player_state(player: &Proxy<'_>, bus_name: &str) -> Result<Spotify
 
     Ok(SpotifyPlayerState {
         bus_name: bus_name.to_string(),
-        playback_status: PlaybackStatus::from(playback_status.as_str()),
+        playback_status: PlaybackStatus::try_from(playback_status.as_str())?,
         position_ms: position_us.and_then(position_us_to_ms),
         track,
     })

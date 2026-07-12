@@ -3,8 +3,8 @@
 
 //! Spotify MPRIS facade.
 //!
-//! The public API is stable while D-Bus watching, metadata models, and position
-//! synchronization are isolated behind focused modules.
+//! D-Bus watching, metadata models, and position synchronization are isolated
+//! behind focused modules.
 
 mod model;
 mod position;

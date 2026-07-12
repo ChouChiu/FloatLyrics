@@ -143,24 +143,30 @@ floatlyrics
 language = "zh-CN"          # en | zh-CN | zh-TW
 
 [window]
-position = [0, 0]
-size = [800, 200]
+anchor = "bottom-center"
+margin = 96
+width = 350
+opacity = 0.78
+bottom_panel_height = 36
 
 [lyrics]
-font_size = 28
-providers = ["qq", "netease"]
+offset_ms = 0
+provider_order = ["qq-music", "netease"]
+show_translation = true
+show_romanization = false
+font_order = ["Sans"]
 
 [spotify]
 mpris_prefix = "org.mpris.MediaPlayer2.spotify"
 ```
 
-若 Spotify 使用 Flatpak/Snap，可能需要修改 `mpris_prefix` 为实际 D-Bus 名称
-（如 `org.mpris.MediaPlayer2.spotify.instanceXXXXXXX`）。
+配置必须包含上述全部字段；未知字段或旧版、不完整的配置会在启动时报错。
+Flatpak/Snap 版 Spotify 可按实际 D-Bus 名称修改 `mpris_prefix`。
 
 ## 已知限制
 
 - 仅支持 Wayland（不支持 X11）
-- 自动跟踪仅针对 Spotify（其他 MPRIS 客户端需手动配置）
+- 自动跟踪仅针对 Spotify
 - QQ 音乐与网易云音乐接口可能因服务端变更暂时不可用
 - 自动切歌后偶有进度偏差，暂停后恢复即可重新校准
 

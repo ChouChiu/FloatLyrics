@@ -12,6 +12,7 @@ pub enum LyricsProvider {
     /// QQ Music.
     QqMusic,
     /// NetEase Cloud Music.
+    #[serde(rename = "netease")]
     NetEase,
 }
 
@@ -41,8 +42,8 @@ impl std::str::FromStr for LyricsProvider {
 
     fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
         match value {
-            "qq-music" | "qq" => Ok(Self::QqMusic),
-            "netease" | "netease-cloud-music" => Ok(Self::NetEase),
+            "qq-music" => Ok(Self::QqMusic),
+            "netease" => Ok(Self::NetEase),
             _ => Err(LyricsProviderParseError(value.to_string())),
         }
     }

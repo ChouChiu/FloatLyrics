@@ -19,17 +19,19 @@ fn default_font_order_uses_generic_sans() {
 }
 
 #[test]
-fn loads_legacy_config_without_general_section() {
-    let config: AppConfig = toml::from_str(
-        r#"
-            [window]
-            width = 500
-            "#,
-    )
-    .unwrap();
+fn rejects_incomplete_config() {
+    assert!(toml::from_str::<AppConfig>("[window]\nwidth = 500").is_err());
+}
 
-    assert_eq!(config.window.width, 500);
-    assert!(Language::ALL.contains(&config.general.language));
+#[test]
+fn rejects_unknown_config_fields() {
+    let mut value = toml::Value::try_from(AppConfig::default()).unwrap();
+    value
+        .as_table_mut()
+        .unwrap()
+        .insert("obsolete".to_string(), toml::Table::new().into());
+
+    assert!(toml::from_str::<AppConfig>(&value.to_string()).is_err());
 }
 
 #[test]

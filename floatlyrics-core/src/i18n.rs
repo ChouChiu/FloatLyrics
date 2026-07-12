@@ -24,13 +24,13 @@ const XDG_DATA_DIRS_ENV: &str = "XDG_DATA_DIRS";
 /// Language supported by the compiled translation catalogue.
 pub enum Language {
     /// English (`en`).
-    #[serde(rename = "en", alias = "en-US", alias = "en-GB")]
+    #[serde(rename = "en")]
     English,
     /// Simplified Chinese (`zh-CN`).
-    #[serde(rename = "zh-CN", alias = "zh-cn", alias = "zh-Hans")]
+    #[serde(rename = "zh-CN")]
     SimplifiedChinese,
     /// Traditional Chinese (`zh-TW`).
-    #[serde(rename = "zh-TW", alias = "zh-tw", alias = "zh-Hant", alias = "zh-HK")]
+    #[serde(rename = "zh-TW")]
     TraditionalChinese,
 }
 
@@ -88,8 +88,7 @@ impl Language {
 
     /// Looks up a runtime catalogue entry.
     ///
-    /// The catalogue is loaded once on first use. Missing resources or keys
-    /// fall back to the stable key name so startup remains recoverable.
+    /// The validated catalogue is loaded once on first use.
     pub fn text(self, key: Text) -> &'static str {
         self.catalog().text(key)
     }
@@ -131,7 +130,7 @@ impl Language {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Catalog {
     entries: HashMap<String, String>,
 }
@@ -141,7 +140,7 @@ impl Catalog {
         locale_directories()
             .into_iter()
             .find_map(|directory| Self::load_file(&directory, language))
-            .unwrap_or_default()
+            .unwrap_or_else(|| panic!("{} locale catalogue was not validated", language.code()))
     }
 
     fn load_file(directory: &Path, language: Language) -> Option<Self> {
@@ -157,7 +156,7 @@ impl Catalog {
     fn text(&self, key: Text) -> &str {
         self.entries
             .get(key.key())
-            .map_or(key.key(), String::as_str)
+            .expect("validated locale catalogue is missing a declared key")
     }
 }
 
