@@ -312,6 +312,8 @@ define_text_keys!(
     DisplayDescription,
     PanelWidth,
     PanelWidthDescription,
+    RememberWindowPosition,
+    RememberWindowPositionDescription,
     BottomMargin,
     BottomMarginDescription,
     BottomPanelHeight,

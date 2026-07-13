@@ -84,6 +84,8 @@
   "OpenSpotify": "Open Spotify to start tracking",
   "PanelWidth": "Panel width",
   "PanelWidthDescription": "Pixels; long lyrics can expand the panel",
+  "RememberWindowPosition": "Remember floating window position",
+  "RememberWindowPositionDescription": "Restore the last dragged position after restarting",
   "PreviewLoadFailed": "Could not load the lyrics preview",
   "PreviewReady": "Preview loaded; the selected lyrics can be applied",
   "ProjectWebsite": "Project website",

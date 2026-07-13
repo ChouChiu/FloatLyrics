@@ -10,7 +10,7 @@ use std::{cell::Cell, cell::RefCell, path::PathBuf, rc::Rc};
 use floatlyrics_core::i18n::{I18n, Language, Text};
 use floatlyrics_lyrics::lyrics::{ChineseRomanizationMode, LyricsProvider};
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, WindowPosition};
 
 use super::localization::{
     bind_button_tooltip, bind_label, bind_stack_page_title, bind_window_title,
@@ -62,6 +62,8 @@ pub(super) enum SettingsMsg {
     SetRomanization(bool),
     SetChineseRomanization(ChineseRomanizationMode),
     SetWidth(i32),
+    SetRememberPosition(bool),
+    SetWindowPosition(WindowPosition),
     SetMargin(i32),
     SetPanelHeight(i32),
     SetOpacity(f64),
@@ -241,6 +243,16 @@ impl SimpleComponent for SettingsModel {
                 self.draft.borrow_mut().lyrics.chinese_romanization = value;
             }
             SettingsMsg::SetWidth(value) => self.draft.borrow_mut().window.width = value,
+            SettingsMsg::SetRememberPosition(value) => {
+                let mut draft = self.draft.borrow_mut();
+                draft.window.remember_position = value;
+                if !value {
+                    draft.window.position = None;
+                }
+            }
+            SettingsMsg::SetWindowPosition(value) => {
+                self.draft.borrow_mut().window.position = Some(value);
+            }
             SettingsMsg::SetMargin(value) => self.draft.borrow_mut().window.margin = value,
             SettingsMsg::SetPanelHeight(value) => {
                 self.draft.borrow_mut().window.bottom_panel_height = value;
@@ -479,6 +491,17 @@ fn display_page(
     width.set_width_chars(8);
     connect_window_i32(&width, sender, SettingsMsg::SetWidth);
 
+    let remember_position = gtk::Switch::builder()
+        .active(config.window.remember_position)
+        .valign(gtk::Align::Center)
+        .build();
+    {
+        let sender = sender.clone();
+        remember_position.connect_active_notify(move |input| {
+            let _ = sender.send(SettingsMsg::SetRememberPosition(input.is_active()));
+        });
+    }
+
     let margin = gtk::SpinButton::with_range(0.0, 500.0, 4.0);
     margin.set_value(config.window.margin as f64);
     margin.set_numeric(true);
@@ -536,6 +559,12 @@ fn display_page(
         &[
             setting_card(&[
                 setting_row(i18n, Text::PanelWidth, Text::PanelWidthDescription, &width),
+                setting_row(
+                    i18n,
+                    Text::RememberWindowPosition,
+                    Text::RememberWindowPositionDescription,
+                    &remember_position,
+                ),
                 setting_row(
                     i18n,
                     Text::BottomMargin,

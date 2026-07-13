@@ -98,6 +98,10 @@ fn temporary_config_path(path: &Path) -> Result<PathBuf> {
 pub struct WindowConfig {
     /// Logical anchor used by the overlay.
     pub anchor: WindowAnchor,
+    /// Whether the overlay position is restored after restarting.
+    pub remember_position: bool,
+    /// Last position selected by dragging, expressed relative to the monitor.
+    pub position: Option<WindowPosition>,
     /// Distance from the selected screen edge, in pixels.
     pub margin: i32,
     /// Preferred compact overlay width, in pixels.
@@ -112,12 +116,24 @@ impl Default for WindowConfig {
     fn default() -> Self {
         Self {
             anchor: default_anchor(),
+            remember_position: true,
+            position: None,
             margin: default_margin(),
             width: default_width(),
             opacity: default_opacity(),
             bottom_panel_height: 36,
         }
     }
+}
+
+/// Monitor-relative center point used to restore the floating overlay.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct WindowPosition {
+    /// Horizontal center as a fraction of the monitor width.
+    pub horizontal: f64,
+    /// Vertical center as a fraction of the monitor height.
+    pub vertical: f64,
 }
 
 /// Logical overlay anchor persisted in configuration.

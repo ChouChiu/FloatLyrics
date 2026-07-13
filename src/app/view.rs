@@ -22,8 +22,8 @@ use super::AppMsg;
 use super::localization::bind_button_tooltip;
 use super::model::{KaraokeRenderState, LyricSlotText};
 use positioning::{
-    SharedPlacement, apply_snap_css_classes, attach_floating_drag, available_panel_width,
-    bottom_margin_from_placement, initial_x, left_margin_for_width,
+    SharedPlacement, WindowPlacement, apply_snap_css_classes, attach_floating_drag,
+    available_panel_width, bottom_margin_from_placement, initial_x, left_margin_for_width,
 };
 use rendering::{
     TextLineRenderState, TextLineStyle, lyric_content_width, lyric_text_widget, text_line_area,
@@ -243,6 +243,11 @@ pub(super) fn build(
     sender: relm4::Sender<AppMsg>,
 ) -> OverlayView {
     let panel_width = compact_panel_width(config.window.width);
+    let initial_placement = if config.window.remember_position {
+        config.window.position.map(WindowPlacement::from_position)
+    } else {
+        None
+    };
     let karaoke_height = karaoke_line_height(config.lyrics.lyric_font_size).max(MIN_KARAOKE_HEIGHT);
     let viewport_h = viewport_height(
         config.lyrics.lyric_font_size,
@@ -265,16 +270,37 @@ pub(super) fn build(
     window.set_anchor(Edge::Top, false);
     window.set_margin(
         Edge::Left,
-        initial_x(panel_width.saturating_add(PANEL_CHROME_WIDTH)).unwrap_or_default(),
+        initial_placement
+            .and_then(|placement| {
+                left_margin_for_width(
+                    window,
+                    &placement,
+                    panel_width.saturating_add(PANEL_CHROME_WIDTH),
+                )
+            })
+            .or_else(|| initial_x(panel_width.saturating_add(PANEL_CHROME_WIDTH)))
+            .unwrap_or_default(),
     );
-    window.set_margin(Edge::Bottom, effective_bottom_margin(config));
+    window.set_margin(
+        Edge::Bottom,
+        initial_placement
+            .and_then(|placement| {
+                bottom_margin_from_placement(
+                    window,
+                    &placement,
+                    panel_width.saturating_add(PANEL_CHROME_WIDTH),
+                    FALLBACK_PANEL_HEIGHT,
+                )
+            })
+            .unwrap_or_else(|| effective_bottom_margin(config)),
+    );
     window.set_exclusive_zone(-1);
     window.add_css_class("floating-window");
 
     let panel = OverlayPanel::init(OverlayPanelInit {
         width: panel_width,
         viewport_height: viewport_h,
-        sender,
+        sender: sender.clone(),
     });
     let song_info = panel.song_info.clone();
     let manual_search_button = panel.manual_search_button.clone();
@@ -331,6 +357,10 @@ pub(super) fn build(
         &content,
         panel_width.saturating_add(PANEL_CHROME_WIDTH),
         FALLBACK_PANEL_HEIGHT,
+        initial_placement,
+        move |position| {
+            let _ = sender.send(AppMsg::WindowMoved(position));
+        },
     );
 
     let provider = gtk::CssProvider::new();

@@ -27,7 +27,10 @@ use std::{cell::RefCell, ffi::OsStr, rc::Rc, sync::mpsc};
 use floatlyrics_core::{i18n::I18n, paths::AppPaths};
 use floatlyrics_lyrics::cache::{Cache, LyricsCache};
 
-use crate::{config::AppConfig, mpris::spawn_spotify_watcher_with_prefix};
+use crate::{
+    config::{AppConfig, WindowPosition},
+    mpris::spawn_spotify_watcher_with_prefix,
+};
 
 static APP_BROKER: MessageBroker<AppMsg> = MessageBroker::new();
 
@@ -66,6 +69,7 @@ enum AppMsg {
     OpenSettings,
     OpenManualSearch,
     OpenAbout,
+    WindowMoved(WindowPosition),
     ConfigChanged(AppConfig),
     Quit,
 }
@@ -200,6 +204,14 @@ impl SimpleComponent for AppModel {
             }
             AppMsg::OpenAbout => {
                 let _ = self.about.sender().send(about::AboutMsg::Show);
+            }
+            AppMsg::WindowMoved(position) => {
+                if self.config.borrow().window.remember_position {
+                    let _ = self
+                        .settings
+                        .sender()
+                        .send(settings::SettingsMsg::SetWindowPosition(position));
+                }
             }
             AppMsg::ConfigChanged(next_config) => {
                 let reload_lyrics = should_reload_lyrics(&self.config.borrow(), &next_config);

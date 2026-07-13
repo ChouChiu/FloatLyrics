@@ -11,6 +11,8 @@ fn default_provider_order_matches_plan() {
 #[test]
 fn default_window_uses_compact_width() {
     assert_eq!(AppConfig::default().window.width, 350);
+    assert!(AppConfig::default().window.remember_position);
+    assert_eq!(AppConfig::default().window.position, None);
 }
 
 #[test]
@@ -92,10 +94,26 @@ mpris_prefix = "org.mpris.MediaPlayer2.spotify"
     assert_eq!(config.lyrics.translation_color, "#FFFFFFC7");
     assert_eq!(config.lyrics.romanization_font_size, 12);
     assert_eq!(config.lyrics.romanization_color, "#B8D8F0E6");
+    assert!(config.window.remember_position);
+    assert_eq!(config.window.position, None);
     assert_eq!(
         config.lyrics.chinese_romanization,
         ChineseRomanizationMode::Auto
     );
+}
+
+#[test]
+fn remembered_window_position_round_trips_in_config() {
+    let mut config = AppConfig::default();
+    config.window.position = Some(WindowPosition {
+        horizontal: 0.25,
+        vertical: 0.75,
+    });
+
+    let serialized = toml::to_string(&config).unwrap();
+    let restored: AppConfig = toml::from_str(&serialized).unwrap();
+
+    assert_eq!(restored, config);
 }
 
 #[test]

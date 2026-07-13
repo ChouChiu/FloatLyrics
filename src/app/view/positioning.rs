@@ -7,6 +7,8 @@ use gtk::prelude::*;
 use gtk4_layer_shell::{Edge, LayerShell};
 use std::{cell::RefCell, rc::Rc};
 
+use crate::config::WindowPosition;
+
 const SNAP_THRESHOLD_PX: i32 = 12;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -28,6 +30,22 @@ impl Default for WindowPlacement {
         Self {
             horizontal: AxisAnchor::Center,
             vertical: AxisAnchor::Free(0.5),
+        }
+    }
+}
+
+impl WindowPlacement {
+    pub(super) fn from_position(position: WindowPosition) -> Self {
+        Self {
+            horizontal: anchor_from_factor(position.horizontal),
+            vertical: anchor_from_factor(position.vertical),
+        }
+    }
+
+    fn position(self) -> WindowPosition {
+        WindowPosition {
+            horizontal: anchor_factor(self.horizontal),
+            vertical: anchor_factor(self.vertical),
         }
     }
 }
@@ -54,9 +72,13 @@ pub(super) fn attach_floating_drag(
     content: &gtk::Box,
     fallback_width: i32,
     fallback_height: i32,
+    initial_placement: Option<WindowPlacement>,
+    on_drag_end: impl Fn(WindowPosition) + 'static,
 ) -> SharedPlacement {
     let drag_origin = Rc::new(RefCell::new(DragOrigin::default()));
-    let placement = Rc::new(RefCell::new(WindowPlacement::default()));
+    let placement = Rc::new(RefCell::new(initial_placement.unwrap_or_else(|| {
+        placement_for_window(window, fallback_width, fallback_height).unwrap_or_default()
+    })));
     let gesture = gtk::GestureDrag::new();
 
     {
@@ -91,6 +113,13 @@ pub(super) fn attach_floating_drag(
             window.set_margin(Edge::Left, next_left);
             window.set_margin(Edge::Bottom, next_bottom);
             apply_snap_css_classes(&content, &next_placement);
+        });
+    }
+
+    {
+        let placement = Rc::clone(&placement);
+        gesture.connect_drag_end(move |_, _, _| {
+            on_drag_end(placement.borrow().position());
         });
     }
 
@@ -195,6 +224,45 @@ fn placement_at(x: i32, y: i32, geometry: FloatingGeometry) -> WindowPlacement {
     WindowPlacement {
         horizontal: snap_axis(x, geometry.surface_width, geometry.viewport_width).1,
         vertical: snap_axis(y, geometry.surface_height, geometry.viewport_height).1,
+    }
+}
+
+fn placement_for_window(
+    window: &gtk::ApplicationWindow,
+    fallback_width: i32,
+    fallback_height: i32,
+) -> Option<WindowPlacement> {
+    let geometry = floating_geometry(window, fallback_width, fallback_height)?;
+    Some(placement_at(
+        window.margin(Edge::Left),
+        y_from_bottom_margin(window.margin(Edge::Bottom), geometry),
+        geometry,
+    ))
+}
+
+fn anchor_from_factor(factor: f64) -> AxisAnchor {
+    let factor = if factor.is_finite() {
+        factor.clamp(0.0, 1.0)
+    } else {
+        0.5
+    };
+    if factor == 0.0 {
+        AxisAnchor::Start
+    } else if factor == 0.5 {
+        AxisAnchor::Center
+    } else if factor == 1.0 {
+        AxisAnchor::End
+    } else {
+        AxisAnchor::Free(factor)
+    }
+}
+
+fn anchor_factor(anchor: AxisAnchor) -> f64 {
+    match anchor {
+        AxisAnchor::Start => 0.0,
+        AxisAnchor::Center => 0.5,
+        AxisAnchor::End => 1.0,
+        AxisAnchor::Free(factor) => factor.clamp(0.0, 1.0),
     }
 }
 

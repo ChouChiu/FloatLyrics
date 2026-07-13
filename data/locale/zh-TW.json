@@ -84,6 +84,8 @@
   "OpenSpotify": "開啟 Spotify 後即可開始追蹤",
   "PanelWidth": "面板寬度",
   "PanelWidthDescription": "像素；較長歌詞仍可自動展開面板",
+  "RememberWindowPosition": "記住浮窗位置",
+  "RememberWindowPositionDescription": "重新啟動後恢復上次拖動的位置",
   "PreviewLoadFailed": "載入歌詞預覽失敗",
   "PreviewReady": "預覽已載入，可套用所選歌詞",
   "ProjectWebsite": "專案網站",

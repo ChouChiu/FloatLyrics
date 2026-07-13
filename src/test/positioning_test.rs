@@ -54,3 +54,29 @@ fn converts_between_top_y_and_bottom_margin() {
     assert_eq!(bottom_margin_from_y(0, geometry()), 500);
     assert_eq!(bottom_margin_from_y(500, geometry()), 0);
 }
+
+#[test]
+fn window_position_round_trips_placement_anchors() {
+    for placement in [
+        WindowPlacement {
+            horizontal: AxisAnchor::Start,
+            vertical: AxisAnchor::End,
+        },
+        WindowPlacement {
+            horizontal: AxisAnchor::Center,
+            vertical: AxisAnchor::Free(0.72),
+        },
+    ] {
+        assert_eq!(
+            WindowPlacement::from_position(placement.position()),
+            placement
+        );
+    }
+}
+
+#[test]
+fn invalid_saved_position_falls_back_to_center() {
+    assert_eq!(anchor_from_factor(f64::NAN), AxisAnchor::Center);
+    assert_eq!(anchor_from_factor(-0.5), AxisAnchor::Start);
+    assert_eq!(anchor_from_factor(1.5), AxisAnchor::End);
+}
