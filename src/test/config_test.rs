@@ -101,11 +101,11 @@ mpris_prefix = "org.mpris.MediaPlayer2.spotify"
 #[test]
 fn chinese_romanization_mode_round_trips_in_config() {
     let mut config = AppConfig::default();
-    config.lyrics.chinese_romanization = ChineseRomanizationMode::CantoneseJyutping;
+    config.lyrics.chinese_romanization = ChineseRomanizationMode::CantoneseJyutpingNoTones;
 
     let serialized = toml::to_string(&config).unwrap();
     let restored: AppConfig = toml::from_str(&serialized).unwrap();
 
-    assert!(serialized.contains("chinese_romanization = \"cantonese-jyutping\""));
+    assert!(serialized.contains("chinese_romanization = \"cantonese-jyutping-no-tones\""));
     assert_eq!(restored, config);
 }

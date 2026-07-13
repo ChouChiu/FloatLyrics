@@ -109,6 +109,7 @@
   "RomanizationAutomatic": "Automatic",
   "MandarinPinyin": "Mandarin Pinyin",
   "CantoneseJyutping": "Cantonese Jyutping",
+  "CantoneseJyutpingWithoutTones": "Jyutping (without tones)",
   "ShowTranslation": "Show translations",
   "ShowTranslationDescription": "When supplied by the lyrics source",
   "SongTitle": "Song title",

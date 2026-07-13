@@ -124,6 +124,18 @@ fn generates_cantonese_jyutping_when_requested() {
 }
 
 #[test]
+fn generates_cantonese_jyutping_without_tones_when_requested() {
+    let mut lines = vec![line(0, None, "喜歡你")];
+
+    generate_local_romanization_with_mode(
+        &mut lines,
+        ChineseRomanizationMode::CantoneseJyutpingNoTones,
+    );
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("hei fun nei"));
+}
+
+#[test]
 fn automatic_chinese_mode_uses_explicit_cantonese_markers() {
     let mut lines = vec![line(0, None, "佢喜歡你")];
 

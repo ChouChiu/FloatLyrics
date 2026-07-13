@@ -307,6 +307,7 @@ define_text_keys!(
     RomanizationAutomatic,
     MandarinPinyin,
     CantoneseJyutping,
+    CantoneseJyutpingWithoutTones,
     DisplayTitle,
     DisplayDescription,
     PanelWidth,

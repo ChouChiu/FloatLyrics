@@ -109,6 +109,7 @@
   "RomanizationAutomatic": "自動",
   "MandarinPinyin": "普通話拼音",
   "CantoneseJyutping": "粵語粵拼",
+  "CantoneseJyutpingWithoutTones": "粵拼（無聲調）",
   "ShowTranslation": "顯示翻譯",
   "ShowTranslationDescription": "歌詞來源提供翻譯時顯示",
   "SongTitle": "歌曲名稱",

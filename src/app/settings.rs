@@ -881,11 +881,12 @@ fn chinese_romanization_index(mode: ChineseRomanizationMode) -> u32 {
         .unwrap_or_default() as u32
 }
 
-fn romanization_mode_names(language: Language) -> [&'static str; 3] {
+fn romanization_mode_names(language: Language) -> [&'static str; 4] {
     [
         language.text(Text::RomanizationAutomatic),
         language.text(Text::MandarinPinyin),
         language.text(Text::CantoneseJyutping),
+        language.text(Text::CantoneseJyutpingWithoutTones),
     ]
 }
 

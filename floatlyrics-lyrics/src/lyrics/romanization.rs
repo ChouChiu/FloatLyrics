@@ -23,11 +23,18 @@ pub enum ChineseRomanizationMode {
     MandarinPinyin,
     /// Always generate Cantonese Jyutping.
     CantoneseJyutping,
+    /// Always generate Cantonese Jyutping without tone numbers.
+    CantoneseJyutpingNoTones,
 }
 
 impl ChineseRomanizationMode {
     /// Modes in their stable settings-menu order.
-    pub const ALL: [Self; 3] = [Self::Auto, Self::MandarinPinyin, Self::CantoneseJyutping];
+    pub const ALL: [Self; 4] = [
+        Self::Auto,
+        Self::MandarinPinyin,
+        Self::CantoneseJyutping,
+        Self::CantoneseJyutpingNoTones,
+    ];
 }
 
 /// Replaces any existing pronunciation with locally generated romanization.
@@ -83,7 +90,10 @@ pub fn generate_local_romanization_with_mode(
             (romanization, japanese_segments(&line.text))
         } else if contains_han(&line.text) {
             match chinese_mode {
-                ChineseRomanizationMode::CantoneseJyutping => cantonese_jyutping(&line.text),
+                ChineseRomanizationMode::CantoneseJyutping => cantonese_jyutping(&line.text, true),
+                ChineseRomanizationMode::CantoneseJyutpingNoTones => {
+                    cantonese_jyutping(&line.text, false)
+                }
                 ChineseRomanizationMode::Auto | ChineseRomanizationMode::MandarinPinyin => {
                     (chinese_pinyin(&line.text), chinese_segments(&line.text))
                 }
@@ -192,7 +202,7 @@ struct CantoneseAnnotation {
     jyutping: Option<String>,
 }
 
-fn cantonese_jyutping(text: &str) -> (String, Vec<RomanizationSegment>) {
+fn cantonese_jyutping(text: &str, include_tones: bool) -> (String, Vec<RomanizationSegment>) {
     let traditional = lyrics_helper::helpers::chinese_helper::to_traditional(text);
     let annotations = serde_json::from_slice::<Vec<CantoneseAnnotation>>(&rust_canto::annotate(
         traditional.as_bytes(),
@@ -208,7 +218,7 @@ fn cantonese_jyutping(text: &str) -> (String, Vec<RomanizationSegment>) {
             .by_ref()
             .take(annotation.word.chars().count())
             .collect::<String>();
-        let jyutping = annotation
+        let mut jyutping = annotation
             .jyutping
             .filter(|_| {
                 source
@@ -216,6 +226,9 @@ fn cantonese_jyutping(text: &str) -> (String, Vec<RomanizationSegment>) {
                     .any(|character| character.to_pinyin().is_some())
             })
             .unwrap_or_default();
+        if !include_tones {
+            jyutping = jyutping_without_tones(&jyutping);
+        }
         if jyutping.is_empty() {
             if previous_was_jyutping && source.starts_with(char::is_alphanumeric) {
                 push_separator(&mut output);
@@ -243,6 +256,16 @@ fn cantonese_jyutping(text: &str) -> (String, Vec<RomanizationSegment>) {
     }
 
     (output, segments)
+}
+
+fn jyutping_without_tones(value: &str) -> String {
+    value
+        .split_whitespace()
+        .map(|syllable| {
+            syllable.trim_end_matches(|character: char| ('1'..='6').contains(&character))
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn japanese_segments(text: &str) -> Vec<RomanizationSegment> {
