@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Stylesheet constants shared by the overlay view.
+//! Stylesheet constants used by the frontend overlay view.
 
 /// Returns the main panel CSS string with the given panel alpha value
 /// substituted for `__PANEL_ALPHA__`.
@@ -46,36 +46,6 @@ pub(super) fn panel_css(panel_alpha: f64) -> String {
             background: rgba(255,255,255,0.20);
         }
 
-        .floating-lyric-current {
-            color: white;
-            font-weight: 750;
-            text-shadow: 0 2px 8px rgba(0,0,0,0.85);
-        }
-
-        .floating-lyric-adjacent {
-            color: rgba(255,255,255,0.66);
-            text-shadow: 0 2px 8px rgba(0,0,0,0.85);
-        }
-
-        .floating-translation-current {
-            color: rgba(255,255,255,0.78);
-            font-weight: 500;
-            text-shadow: none;
-        }
-
-        .floating-translation-adjacent {
-            color: rgba(255,255,255,0.50);
-            text-shadow: none;
-        }
-
-        .floating-slot-current {
-            margin: 1px 0;
-        }
-
-        .floating-slot-adjacent {
-            margin: 0;
-        }
-
         .floating-separator {
             margin: 3px 0 1px 0;
             background: rgba(255,255,255,0.24);
@@ -102,20 +72,4 @@ pub(super) fn panel_css(panel_alpha: f64) -> String {
         }
         "#;
     css.replace("__PANEL_ALPHA__", &format!("{panel_alpha:.3}"))
-}
-
-/// Returns CSS that sets the lyric and secondary-text font sizes,
-/// loaded on a higher-priority provider so it overrides `panel_css`.
-pub(super) fn font_size_css(lyric_px: i32, romanization_px: i32, translation_px: i32) -> String {
-    let adjacent_lyric_px = (lyric_px * 2 / 3).max(10);
-    let adjacent_translation_px = (translation_px * 5 / 6).max(8);
-    format!(
-        r#"
-        .floating-lyric-current {{ font-size: {lyric_px}px; }}
-        .floating-lyric-adjacent {{ font-size: {adjacent_lyric_px}px; }}
-        .floating-romanization-current {{ font-size: {romanization_px}px; }}
-        .floating-translation-current {{ font-size: {translation_px}px; }}
-        .floating-translation-adjacent {{ font-size: {adjacent_translation_px}px; }}
-        "#
-    )
 }

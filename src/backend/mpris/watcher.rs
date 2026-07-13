@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Asynchronous discovery and observation of MPRIS player instances.
+//! Backend discovery and observation of MPRIS player instances.
 
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
@@ -250,5 +250,5 @@ async fn read_player_position(player: &Proxy<'_>) -> Option<u64> {
 }
 
 #[cfg(test)]
-#[path = "../test/watcher_test.rs"]
+#[path = "../../test/watcher_test.rs"]
 mod tests;

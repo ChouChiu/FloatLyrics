@@ -31,7 +31,10 @@ FloatLyrics is a Cargo workspace using Rust 2024 with a declared MSRV of Rust
 1.93:
 
 ```text
-floatlyrics (src/)              binary + library: CLI, app assembly, GTK/Relm4, MPRIS
+floatlyrics (src/)              binary + library: CLI and application layers
+  ├─ frontend/                  GTK/Relm4/WebKit views and UI adapters
+  ├─ backend/                   playback, lyrics orchestration, cache, and MPRIS
+  ├─ shared/                    configuration and cross-layer data contracts
   └─ floatlyrics-lyrics/        lyrics model, LRC/QRC parsing, search, SQLite cache
        └─ floatlyrics-core/     paths, i18n, telemetry, track fingerprinting
 ```
@@ -45,6 +48,11 @@ application-layer concern from a higher crate.
 | Lyrics models, parsing, filtering, romanization, timeline, provider search, cache | `floatlyrics-lyrics` | No application UI, configuration, or MPRIS concerns |
 | CLI, startup, persisted configuration, MPRIS, GTK/Relm4 UI | root crate | May compose both lower crates |
 
+Inside the root crate, dependencies flow from `frontend` to `backend` to
+`shared`; `frontend` may also consume `shared` contracts directly. Backend
+modules must not import GTK, Relm4, WebKit, or frontend messages. Shared modules
+must not import either application layer.
+
 Keep domain decisions outside GTK widgets, D-Bus adapters, provider-specific
 HTTP code, and SQLite statements where practical. Provider payloads should be
 converted to provider-neutral lyrics types at the adapter boundary. SQL details
@@ -56,9 +64,9 @@ behavior belongs in `src/lib.rs` or a focused module.
 | Path | Responsibility |
 |---|---|
 | `src/lib.rs` | CLI arguments, environment defaults, and application startup |
-| `src/app.rs`, `src/app/` | Relm4 composition, controllers, presentation models, views, settings |
-| `src/mpris.rs`, `src/mpris/` | player discovery, events, and playback-position synchronization |
-| `src/config.rs` | persisted TOML model and atomic writes |
+| `src/frontend.rs`, `src/frontend/` | Relm4 composition, GTK/WebKit views, settings, and UI adapters |
+| `src/backend.rs`, `src/backend/` | playback controller, lyrics/search services, cache coordination, and MPRIS |
+| `src/shared.rs`, `src/shared/` | persisted TOML model and cross-layer presentation contracts |
 | `floatlyrics-lyrics/src/lyrics/` | provider-neutral models, parsing, filtering, romanization, timeline, search |
 | `floatlyrics-lyrics/src/cache.rs`, `cache/` | cache boundary, SQLite access, and schema |
 | `floatlyrics-core/src/i18n.rs` | locale selection, typed text keys, catalogue validation |
@@ -193,7 +201,8 @@ discovery and is the preferred way to isolate catalogue tests.
 - Treat field renames/removals, default changes, type changes, and serialized
   enum value changes as compatibility changes. Add deliberate migration or
   compatibility behavior and test an existing TOML representation.
-- Preserve the temporary-file-plus-rename atomic write path in `src/config.rs`,
+- Preserve the temporary-file-plus-rename atomic write path in
+  `src/shared/config.rs`,
   including cleanup on failure.
 - Validate user-controlled numeric ranges at the existing configuration/domain
   boundary; do not rely on GTK widgets as the sole validation layer.

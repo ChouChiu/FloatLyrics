@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Shared GTK application stylesheet registration.
+//! Shared frontend stylesheet registration.
 
 pub(super) fn install(css: &str) {
     let provider = gtk::CssProvider::new();

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Provider-neutral state converted from MPRIS properties and signals.
+//! Backend state converted from MPRIS properties and signals.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Coordinates playback events, lyrics retrieval, caching, and view updates.
+//! Coordinates backend playback events, lyrics retrieval, and caching.
 
 use std::{cell::RefCell, rc::Rc, sync::mpsc, time::Instant};
 
@@ -17,18 +17,22 @@ use floatlyrics_lyrics::{
     },
 };
 
-use crate::{
-    config::AppConfig,
-    mpris::{SpotifyPlayerState, SpotifyWatcherEvent},
-};
+use crate::shared::{config::AppConfig, presentation::LyricSlotText};
 
 use super::{
     model::{
         LyricsDisplayState, PlaybackSnapshot, apply_position_sample, effective_position_ms,
         lyrics_frame,
     },
-    view::{LyricsView, OverlaySender},
+    mpris::{SpotifyPlayerState, SpotifyWatcherEvent},
 };
+
+/// Output boundary implemented by the frontend overlay adapter.
+pub(crate) trait LyricsView {
+    fn set_song_info(&self, value: &str);
+    fn show_lyrics(&self, value: LyricSlotText, key: &str);
+    fn show_status(&self, key: Text);
+}
 
 #[derive(Debug)]
 struct LyricsFetchEvent {
@@ -61,17 +65,17 @@ struct SpotifyUiContext<'a> {
 }
 
 #[derive(Clone)]
-pub(super) struct ControllerHandle {
+pub(crate) struct ControllerHandle {
     lyrics_state: Rc<RefCell<LyricsDisplayState>>,
     latest: Rc<RefCell<Option<PlaybackSnapshot>>>,
 }
 
 impl ControllerHandle {
-    pub(super) fn reload_lyrics(&self) {
+    pub(crate) fn reload_lyrics(&self) {
         self.lyrics_state.borrow_mut().track_fingerprint = None;
     }
 
-    pub(super) fn current_track(&self) -> Option<TrackMetadata> {
+    pub(crate) fn current_track(&self) -> Option<TrackMetadata> {
         self.latest
             .borrow()
             .as_ref()
@@ -81,14 +85,14 @@ impl ControllerHandle {
 
 /// Decoupled controller: owns playback state and exposes a [`Controller::tick`] method
 /// that the caller drives from the GTK main loop (or from tests).
-pub(super) struct Controller {
+pub(crate) struct Controller {
     handle: ControllerHandle,
     receiver: Rc<RefCell<mpsc::Receiver<SpotifyWatcherEvent>>>,
     lyrics_receiver: Rc<RefCell<mpsc::Receiver<LyricsFetchEvent>>>,
     romanization_receiver: Rc<RefCell<mpsc::Receiver<RomanizationEvent>>>,
     lyrics_state: Rc<RefCell<LyricsDisplayState>>,
     latest: Rc<RefCell<Option<PlaybackSnapshot>>>,
-    floating: OverlaySender,
+    floating: Rc<dyn LyricsView>,
     cache: Rc<dyn LyricsCache>,
     config: Rc<RefCell<AppConfig>>,
     runtime: tokio::runtime::Handle,
@@ -97,10 +101,10 @@ pub(super) struct Controller {
 }
 
 impl Controller {
-    pub(super) fn new(
+    pub(crate) fn new(
         receiver: mpsc::Receiver<SpotifyWatcherEvent>,
         runtime: tokio::runtime::Handle,
-        floating: OverlaySender,
+        floating: Rc<dyn LyricsView>,
         cache: Rc<dyn LyricsCache>,
         config: Rc<RefCell<AppConfig>>,
     ) -> Self {
@@ -134,16 +138,16 @@ impl Controller {
 
     /// Returns a lightweight handle used by settings and manual-search to
     /// query current track and trigger a lyrics reload.
-    pub(super) fn handle(&self) -> ControllerHandle {
+    pub(crate) fn handle(&self) -> ControllerHandle {
         self.handle.clone()
     }
 
     /// Process one frame: drain incoming events, check for new lyrics,
     /// and refresh the display. Call from the GTK tick callback.
-    pub(super) fn tick(&self) {
+    pub(crate) fn tick(&self) {
         let config = self.config.borrow().clone();
         let ctx = SpotifyUiContext {
-            floating: &self.floating,
+            floating: self.floating.as_ref(),
             cache: &*self.cache,
             config: &config,
             runtime: &self.runtime,

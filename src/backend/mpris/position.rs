@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+//! Backend playback position synchronization helpers.
+
 use floatlyrics_core::track::TrackMetadata;
 
 use super::model::SpotifyPlayerState;

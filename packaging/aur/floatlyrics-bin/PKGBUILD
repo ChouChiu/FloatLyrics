@@ -18,6 +18,7 @@ depends=(
     'libgcc'
     'openssl'
     'pango'
+    'webkitgtk-6.0'
 )
 provides=("floatlyrics=$pkgver")
 conflicts=('floatlyrics')

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! GTK-independent presentation state and playback clock calculations.
+//! Backend playback state and deterministic clock calculations.
 
 use std::time::Instant;
 
@@ -9,14 +9,14 @@ use floatlyrics_core::{
     i18n::{Language, Message, Text},
     track::TrackMetadata,
 };
-use floatlyrics_lyrics::lyrics::{
-    TimedLine, TimedSyllable, active_line_index, line_index_at_or_before,
+use floatlyrics_lyrics::lyrics::{TimedLine, active_line_index, line_index_at_or_before};
+
+use crate::shared::{
+    config::AppConfig,
+    presentation::{KaraokeRenderState, LyricSlotText, LyricsFrame},
 };
 
-use crate::{
-    config::AppConfig,
-    mpris::{PlaybackStatus, SpotifyPlayerState},
-};
+use super::mpris::{PlaybackStatus, SpotifyPlayerState};
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct LyricsDisplayState {
@@ -29,41 +29,6 @@ pub(super) struct LyricsDisplayState {
 pub(super) struct PlaybackSnapshot {
     pub(super) state: SpotifyPlayerState,
     pub(super) received_at: Instant,
-}
-
-#[derive(Debug, Clone, Default)]
-pub(super) struct KaraokeRenderState {
-    pub(super) text: String,
-    pub(super) syllables: Vec<TimedSyllable>,
-    pub(super) position_ms: u64,
-}
-
-#[derive(Debug, Clone, Default)]
-pub(super) struct LyricSlotText {
-    pub(super) text: String,
-    pub(super) karaoke: Option<KaraokeRenderState>,
-    pub(super) romanization: String,
-    pub(super) translation: String,
-}
-
-impl LyricSlotText {
-    fn empty() -> Self {
-        Self::default()
-    }
-
-    pub(super) fn message(message: &str) -> Self {
-        Self {
-            text: message.to_string(),
-            karaoke: None,
-            romanization: String::new(),
-            translation: String::new(),
-        }
-    }
-}
-
-pub(super) struct LyricsFrame {
-    pub(super) key: String,
-    pub(super) content: LyricSlotText,
 }
 
 pub(super) fn lyrics_frame(
@@ -154,14 +119,6 @@ fn current_line_text(
 
 fn adjusted_position_ms(position_ms: u64, offset_ms: i64) -> u64 {
     (position_ms as i128 + offset_ms as i128).clamp(0, u64::MAX as i128) as u64
-}
-
-pub(super) fn syllable_progress(syllable: &TimedSyllable, position_ms: u64) -> f64 {
-    let duration = syllable.end_ms.saturating_sub(syllable.start_ms);
-    if duration == 0 {
-        return 1.0;
-    }
-    position_ms.saturating_sub(syllable.start_ms).min(duration) as f64 / duration as f64
 }
 
 fn is_placeholder_text(value: &str) -> bool {

@@ -1,27 +1,23 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Track-specific manual lyrics search and selection window.
+//! Track-specific manual lyrics search and selection frontend.
 
 use gtk::prelude::*;
 use relm4::{ComponentParts, ComponentSender, SimpleComponent};
 use std::{cell::Cell, cell::RefCell, rc::Rc};
 
+use crate::{
+    backend::{ControllerHandle, ManualSearchService},
+    shared::manual_search::{FetchedLyrics, LyricsCandidate, LyricsProvider},
+};
 use floatlyrics_core::{
     i18n::{I18n, Language, Text},
     track::TrackMetadata,
 };
-use floatlyrics_lyrics::{
-    cache::{LyricsCache, LyricsInsert},
-    lyrics::{
-        FetchedLyrics, LyricsCandidate, LyricsProvider, fetch_candidate_lyrics,
-        search_lyrics_candidates, simplify_search_text,
-    },
-};
 
-use super::{
-    controller::ControllerHandle,
-    localization::{bind_button_label, bind_entry_placeholder, bind_label, bind_window_title},
+use super::localization::{
+    bind_button_label, bind_entry_placeholder, bind_label, bind_window_title,
 };
 
 const WINDOW_WIDTH: i32 = 820;
@@ -82,8 +78,7 @@ impl PreviewState {
 }
 
 pub(super) struct ManualSearchInit {
-    pub(super) runtime: tokio::runtime::Handle,
-    pub(super) cache: Rc<dyn LyricsCache>,
+    pub(super) service: ManualSearchService,
     pub(super) controller: ControllerHandle,
     pub(super) i18n: I18n,
 }
@@ -213,8 +208,7 @@ impl SimpleComponent for ManualSearchModel {
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
         let ManualSearchInit {
-            runtime,
-            cache,
+            service,
             controller,
             i18n,
         } = init;
@@ -296,7 +290,7 @@ impl SimpleComponent for ManualSearchModel {
 
         {
             let state = Rc::clone(&state);
-            let runtime = runtime.clone();
+            let service = service.clone();
             let event_sender = event_sender.clone();
             let apply = apply.clone();
             let set_status = Rc::clone(&set_status);
@@ -322,10 +316,7 @@ impl SimpleComponent for ManualSearchModel {
                 set_status(ManualStatus::Text(Text::LoadingPreview));
                 set_preview(PreviewState::Text(Text::LoadingPreview));
                 let event_sender = event_sender.clone();
-                runtime.spawn(async move {
-                    let result = fetch_candidate_lyrics(&candidate)
-                        .await
-                        .map_err(|error| error.to_string());
+                service.preview(candidate, move |result| {
                     let _ = event_sender.send(ManualSearchMsg::Event(SearchEvent::Preview {
                         generation,
                         index,
@@ -337,7 +328,7 @@ impl SimpleComponent for ManualSearchModel {
 
         let start_search: Rc<dyn Fn()> = {
             let state = Rc::clone(&state);
-            let runtime = runtime.clone();
+            let service = service.clone();
             let event_sender = event_sender.clone();
             let title = title.clone();
             let artist = artist.clone();
@@ -390,11 +381,7 @@ impl SimpleComponent for ManualSearchModel {
                 search_button.set_sensitive(false);
                 spinner.start();
                 let event_sender = event_sender.clone();
-                runtime.spawn(async move {
-                    let providers = LyricsProvider::default_order();
-                    let result = search_lyrics_candidates(&search_track, &providers)
-                        .await
-                        .map_err(|error| error.to_string());
+                service.search(search_track, move |result| {
                     let _ = event_sender.send(ManualSearchMsg::Event(SearchEvent::Candidates {
                         generation,
                         result,
@@ -405,7 +392,7 @@ impl SimpleComponent for ManualSearchModel {
 
         let apply_selected: Rc<dyn Fn()> = {
             let state = Rc::clone(&state);
-            let cache = Rc::clone(&cache);
+            let service = service.clone();
             let controller = controller.clone();
             let set_status = Rc::clone(&set_status);
             Rc::new(move || {
@@ -425,18 +412,7 @@ impl SimpleComponent for ManualSearchModel {
                     set_status(ManualStatus::Text(Text::TrackChanged));
                     return;
                 }
-                let result = cache
-                    .insert_lyrics(LyricsInsert {
-                        provider: fetched.provider,
-                        provider_track_id: fetched.provider_track_id.as_deref(),
-                        title: &fetched.title,
-                        artists: &fetched.artists,
-                        raw_lyrics: &fetched.raw_lyrics,
-                    })
-                    .and_then(|lyrics_id| {
-                        cache.bind_manual_match(&target.fingerprint(), lyrics_id)
-                    });
-                match result {
+                match service.apply(target, fetched) {
                     Ok(()) => {
                         controller.reload_lyrics();
                         set_status(ManualStatus::Text(Text::LyricsApplied));
@@ -591,10 +567,7 @@ impl SimpleComponent for ManualSearchModel {
 }
 
 fn search_field_values(track: &TrackMetadata) -> (String, String) {
-    (
-        simplify_search_text(&track.title),
-        simplify_search_text(&track.display_artist()),
-    )
+    ManualSearchService::search_field_values(track)
 }
 
 fn candidate_row(candidate: &LyricsCandidate, language: Language) -> gtk::ListBoxRow {

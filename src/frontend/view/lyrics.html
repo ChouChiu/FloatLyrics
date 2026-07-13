@@ -1,0 +1,251 @@
+<!--
+SPDX-FileCopyrightText: 2026 ChouChiu
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta name="color-scheme" content="dark">
+  <style>
+    :root {
+      color-scheme: dark;
+      background: transparent;
+      --font-family: Sans;
+      --lyric-size: 24px;
+      --romanization-size: 12px;
+      --translation-size: 13px;
+      --played-color: rgba(255, 255, 255, 1);
+      --unplayed-color: rgba(158, 166, 179, 1);
+      --romanization-color: rgba(184, 216, 240, 0.9);
+      --translation-color: rgba(255, 255, 255, 0.78);
+    }
+
+    * { box-sizing: border-box; }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: transparent;
+      user-select: none;
+      pointer-events: none;
+    }
+
+    #viewport {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      font-family: var(--font-family);
+    }
+
+    .slot {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      opacity: 0;
+    }
+
+    .slot.active { opacity: 1; }
+
+    .primary {
+      position: relative;
+      width: 100%;
+      min-height: 36px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-align: center;
+      font-size: var(--lyric-size);
+      font-weight: 750;
+      line-height: 1.5;
+      text-overflow: ellipsis;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.85);
+    }
+
+    .primary .base,
+    .primary .played {
+      display: block;
+      width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .primary .base { color: var(--unplayed-color); }
+    .primary.plain .base { color: white; }
+
+    .primary .played {
+      position: absolute;
+      inset: 0;
+      color: var(--played-color);
+      clip-path: inset(0 100% 0 0);
+    }
+
+    .secondary {
+      width: 100%;
+      overflow: hidden;
+      white-space: nowrap;
+      text-align: center;
+      text-overflow: ellipsis;
+      font-weight: 400;
+      line-height: 1.5;
+    }
+
+    .romanization {
+      color: var(--romanization-color);
+      font-size: var(--romanization-size);
+    }
+
+    .translation {
+      color: var(--translation-color);
+      font-size: var(--translation-size);
+    }
+
+    .secondary:empty { display: none; }
+  </style>
+</head>
+<body>
+  <main id="viewport" aria-live="off">
+    <section class="slot active"><div class="primary plain"><span class="base"></span><span class="played"></span></div><div class="secondary romanization"></div><div class="secondary translation"></div></section>
+    <section class="slot"><div class="primary plain"><span class="base"></span><span class="played"></span></div><div class="secondary romanization"></div><div class="secondary translation"></div></section>
+  </main>
+  <script>
+    (() => {
+      const root = document.documentElement;
+      const slots = Array.from(document.querySelectorAll('.slot'));
+      let currentKey = null;
+      let activeSlot = 0;
+      let transitionMs = 180;
+
+      function applyStyle(style) {
+        root.style.setProperty('--font-family', style.font_family);
+        root.style.setProperty('--lyric-size', `${style.lyric_font_px}px`);
+        root.style.setProperty('--romanization-size', `${style.romanization_font_px}px`);
+        root.style.setProperty('--translation-size', `${style.translation_font_px}px`);
+        root.style.setProperty('--played-color', style.played_color);
+        root.style.setProperty('--unplayed-color', style.unplayed_color);
+        root.style.setProperty('--romanization-color', style.romanization_color);
+        root.style.setProperty('--translation-color', style.translation_color);
+        transitionMs = Math.max(0, Number(style.transition_ms) || 0);
+      }
+
+      function findSyllableRanges(text, syllables) {
+        let searchFrom = 0;
+        return syllables.map((syllable) => {
+          if (!syllable.text) {
+            return { start: searchFrom, end: searchFrom };
+          }
+          const start = text.indexOf(syllable.text, searchFrom);
+          if (start < 0) return null;
+          const end = start + syllable.text.length;
+          searchFrom = end;
+          return { start, end };
+        });
+      }
+
+      function xAtOffset(textNode, offset, lineRect) {
+        const range = document.createRange();
+        range.setStart(textNode, Math.min(offset, textNode.length));
+        range.setEnd(textNode, Math.min(offset, textNode.length));
+        return range.getBoundingClientRect().left - lineRect.left;
+      }
+
+      function karaokeFill(primary, karaoke) {
+        const base = primary.querySelector('.base');
+        const lineRect = primary.getBoundingClientRect();
+        const textNode = base.firstChild;
+        if (!textNode || !karaoke.syllables.length) return lineRect.width;
+
+        const ranges = findSyllableRanges(karaoke.text, karaoke.syllables);
+        for (let index = 0; index < karaoke.syllables.length; index += 1) {
+          const syllable = karaoke.syllables[index];
+          if (karaoke.position_ms < syllable.start_ms) {
+            const previous = index > 0 ? ranges[index - 1] : null;
+            return previous ? xAtOffset(textNode, previous.end, lineRect) : 0;
+          }
+          if (karaoke.position_ms < syllable.end_ms) {
+            const range = ranges[index];
+            if (!range) {
+              return lineRect.width * (index / karaoke.syllables.length);
+            }
+            const start = xAtOffset(textNode, range.start, lineRect);
+            const end = xAtOffset(textNode, range.end, lineRect);
+            const duration = Math.max(0, syllable.end_ms - syllable.start_ms);
+            const progress = duration === 0
+              ? 1
+              : Math.min(1, Math.max(0, (karaoke.position_ms - syllable.start_ms) / duration));
+            return start + Math.max(0, end - start) * progress;
+          }
+        }
+        return lineRect.width;
+      }
+
+      function updateSlot(slot, content) {
+        const karaoke = content.karaoke;
+        const text = karaoke ? karaoke.text : content.text;
+        const primary = slot.querySelector('.primary');
+        const base = primary.querySelector('.base');
+        const played = primary.querySelector('.played');
+        if (base.textContent !== text) {
+          base.textContent = text;
+          played.textContent = text;
+        }
+        primary.classList.toggle('plain', !karaoke);
+        slot.querySelector('.romanization').textContent = content.romanization;
+        slot.querySelector('.translation').textContent = content.translation;
+
+        if (karaoke) {
+          const fill = Math.min(primary.clientWidth, Math.max(0, karaokeFill(primary, karaoke)));
+          played.style.clipPath = `inset(0 ${Math.max(0, primary.clientWidth - fill)}px 0 0)`;
+        } else {
+          played.style.clipPath = 'inset(0 100% 0 0)';
+        }
+      }
+
+      function crossfadeSlots(incoming, outgoing) {
+        const incomingOpacity = Number.parseFloat(getComputedStyle(incoming).opacity) || 0;
+        const outgoingOpacity = Number.parseFloat(getComputedStyle(outgoing).opacity) || 0;
+        for (const slot of slots) {
+          for (const animation of slot.getAnimations()) animation.cancel();
+        }
+
+        incoming.classList.add('active');
+        outgoing.classList.remove('active');
+        incoming.animate(
+          [{ opacity: incomingOpacity }, { opacity: 1 }],
+          { duration: transitionMs, easing: 'ease' },
+        );
+        outgoing.animate(
+          [{ opacity: outgoingOpacity }, { opacity: 0 }],
+          { duration: transitionMs, easing: 'ease' },
+        );
+      }
+
+      window.floatLyrics = Object.freeze({
+        render(payload) {
+          applyStyle(payload.style);
+          const keyChanged = currentKey !== payload.key;
+          const isFirstValue = currentKey === null;
+          const previousSlot = activeSlot;
+          if (keyChanged && !isFirstValue) activeSlot = 1 - activeSlot;
+          currentKey = payload.key;
+          updateSlot(slots[activeSlot], payload.content);
+          if (keyChanged) {
+            if (isFirstValue) {
+              slots[activeSlot].classList.add('active');
+              slots[1 - activeSlot].classList.remove('active');
+            } else {
+              crossfadeSlots(slots[activeSlot], slots[previousSlot]);
+            }
+          }
+        },
+      });
+    })();
+  </script>
+</body>
+</html>

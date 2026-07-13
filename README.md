@@ -27,7 +27,7 @@
 ## 为什么用 FloatLyrics
 
 - 开箱即用：通过 MPRIS 自动跟踪 Spotify 的曲目、播放状态和进度。
-- 专为桌面歌词设计：基于 GTK4 与 layer-shell，浮层始终置顶，同时不拦截其他窗口的鼠标操作。
+- 专为桌面歌词设计：基于 GTK4、WebKitGTK 与 layer-shell，浮层始终置顶，同时不拦截其他窗口的鼠标操作。
 - 同步到每一个字：支持普通同步歌词、逐字歌词、翻译与罗马音显示。
 - 找不到也能自己选：自动搜索 QQ 音乐和网易云音乐，也可以为当前曲目手动选择结果。
 - 越用越省心：已匹配歌词写入本地 SQLite 缓存，之后可离线使用。
@@ -40,7 +40,7 @@
 |---|---|
 | 桌面会话 | Linux Wayland，合成器支持 layer-shell |
 | 播放器 | Spotify 官方客户端，或能暴露 Spotify MPRIS 名称的 Flatpak/Snap 客户端 |
-| 运行库 | GTK 4.12 或更高版本、gtk4-layer-shell |
+| 运行库 | GTK 4.12 或更高版本、gtk4-layer-shell、WebKitGTK 6.0 |
 
 FloatLyrics 不支持 X11。若不确定当前会话类型，可运行 `echo "$XDG_SESSION_TYPE"` 检查。
 
@@ -80,17 +80,17 @@ sudo apt install ./floatlyrics_*.deb
 
 ### 从源码构建
 
-先安装 Rust 1.93+、C 工具链以及 GTK、layer-shell、OpenSSL 的开发包：
+先安装 Rust 1.93+、C 工具链以及 GTK、layer-shell、WebKitGTK、OpenSSL 的开发包：
 
 ```bash
 # Arch Linux
-sudo pacman -S --needed base-devel git gtk4 gtk4-layer-shell openssl rust
+sudo pacman -S --needed base-devel git gtk4 gtk4-layer-shell webkitgtk-6.0 openssl rust
 
 # Fedora
-sudo dnf install gcc git gtk4-devel gtk4-layer-shell-devel openssl-devel rust cargo
+sudo dnf install gcc git gtk4-devel gtk4-layer-shell-devel webkitgtk6.0-devel openssl-devel rust cargo
 
 # Debian / Ubuntu 25.04+
-sudo apt install build-essential git libgtk-4-dev libgtk4-layer-shell-dev libssl-dev rustc cargo
+sudo apt install build-essential git libgtk-4-dev libgtk4-layer-shell-dev libwebkitgtk-6.0-dev libssl-dev rustc cargo
 ```
 
 然后构建：

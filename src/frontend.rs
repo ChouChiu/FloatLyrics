@@ -1,22 +1,20 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Relm4 application composition root.
+//! Relm4 frontend composition root.
 //!
 //! Runtime and infrastructure dependencies are created here.  Relm4 owns the
 //! top-level window and routes UI actions through `AppMsg`, while the
 //! playback controller remains independent from the concrete widget tree.
 
 mod about;
-mod controller;
 mod localization;
 mod manual_search;
-mod model;
 mod settings;
 mod style;
 mod view;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use gtk::prelude::*;
 use relm4::{
     Component, ComponentController, ComponentParts, ComponentSender, Controller, MessageBroker,
@@ -24,39 +22,39 @@ use relm4::{
 };
 use std::{cell::RefCell, ffi::OsStr, rc::Rc, sync::mpsc};
 
-use floatlyrics_core::{i18n::I18n, paths::AppPaths};
-use floatlyrics_lyrics::cache::{Cache, LyricsCache};
-
 use crate::{
-    config::{AppConfig, WindowPosition},
-    mpris::spawn_spotify_watcher_with_prefix,
+    backend::{self},
+    shared::{
+        config::{AppConfig, WindowPosition},
+        presentation::LyricSlotText,
+    },
 };
+use floatlyrics_core::{i18n::I18n, paths::AppPaths};
 
 static APP_BROKER: MessageBroker<AppMsg> = MessageBroker::new();
 
 struct AppInit {
     paths: AppPaths,
     config: AppConfig,
-    cache: Rc<dyn LyricsCache>,
-    runtime: tokio::runtime::Runtime,
+    backend: backend::Backend,
 }
 
 struct AppModel {
-    _runtime: tokio::runtime::Runtime,
+    _backend: backend::Backend,
     config: Rc<RefCell<AppConfig>>,
     i18n: I18n,
     overlay: view::OverlayView,
     settings: Controller<settings::SettingsModel>,
     manual_search: Controller<manual_search::ManualSearchModel>,
     about: Controller<about::AboutModel>,
-    controller: controller::Controller,
+    controller: backend::Controller,
     song_info: String,
     lyrics: LyricsPresentation,
 }
 
 #[derive(Debug, Clone)]
 enum LyricsPresentation {
-    Content(model::LyricSlotText, String),
+    Content(LyricSlotText, String),
     Status(floatlyrics_core::i18n::Text),
 }
 
@@ -64,7 +62,7 @@ enum LyricsPresentation {
 enum AppMsg {
     Tick,
     SetSongInfo(String),
-    ShowLyrics(model::LyricSlotText, String),
+    ShowLyrics(LyricSlotText, String),
     ShowStatus(floatlyrics_core::i18n::Text),
     OpenSettings,
     OpenManualSearch,
@@ -115,10 +113,8 @@ impl SimpleComponent for AppModel {
         let AppInit {
             paths,
             config,
-            cache,
-            runtime,
+            backend,
         } = init;
-        let runtime_handle = runtime.handle().clone();
         let config = Rc::new(RefCell::new(config));
         let i18n = I18n::new(config.borrow().general.language);
         let overlay = view::build(
@@ -128,23 +124,16 @@ impl SimpleComponent for AppModel {
             sender.input_sender().clone(),
         );
         let (spotify_sender, spotify_receiver) = mpsc::channel();
-        spawn_spotify_watcher_with_prefix(
-            &runtime_handle,
-            spotify_sender,
-            config.borrow().spotify.mpris_prefix.clone(),
-        );
-        let controller = controller::Controller::new(
+        backend.spawn_spotify_watcher(spotify_sender, config.borrow().spotify.mpris_prefix.clone());
+        let controller = backend.controller(
             spotify_receiver,
-            runtime_handle.clone(),
-            view::OverlaySender::new(sender.input_sender().clone()),
-            Rc::clone(&cache),
+            Rc::new(view::OverlaySender::new(sender.input_sender().clone())),
             Rc::clone(&config),
         );
 
         let manual_search = manual_search::ManualSearchModel::builder()
             .launch(manual_search::ManualSearchInit {
-                runtime: runtime_handle,
-                cache: Rc::clone(&cache),
+                service: backend.manual_search(),
                 controller: controller.handle(),
                 i18n: i18n.clone(),
             })
@@ -170,7 +159,7 @@ impl SimpleComponent for AppModel {
         }
 
         let model = Self {
-            _runtime: runtime,
+            _backend: backend,
             config,
             i18n,
             overlay,
@@ -255,12 +244,7 @@ fn should_reload_lyrics(current: &AppConfig, next: &AppConfig) -> bool {
 pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
     // Open the cache before GTK starts so initialization errors remain
     // recoverable through the public `Result` API.
-    let cache: Rc<dyn LyricsCache> = Rc::new(Cache::open(&paths.database_file)?);
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_name("floatlyrics-worker")
-        .build()
-        .context("creating Tokio runtime")?;
+    let backend = backend::Backend::new(&paths.database_file)?;
 
     let app = gtk::Application::builder()
         .application_id("io.github.chouchiu.floatlyrics")
@@ -280,8 +264,7 @@ pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
         .run::<AppModel>(AppInit {
             paths,
             config,
-            cache,
-            runtime,
+            backend,
         });
     Ok(())
 }

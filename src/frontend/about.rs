@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! About and acknowledgements window.
+//! Frontend about and acknowledgements window.
 
 use gtk::prelude::*;
 use relm4::{ComponentParts, ComponentSender, SimpleComponent};

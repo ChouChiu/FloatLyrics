@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Small GTK bindings for the runtime translation catalogue.
+//! Small frontend bindings for the runtime translation catalogue.
 
 use gtk::prelude::*;
 

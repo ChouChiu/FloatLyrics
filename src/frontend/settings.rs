@@ -1,16 +1,15 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Preferences window opened from the command line or the floating panel.
+//! Preferences frontend opened from the command line or floating panel.
 
 use gtk::prelude::*;
 use relm4::{ComponentParts, ComponentSender, SimpleComponent};
 use std::{cell::Cell, cell::RefCell, path::PathBuf, rc::Rc};
 
 use floatlyrics_core::i18n::{I18n, Language, Text};
-use floatlyrics_lyrics::lyrics::{ChineseRomanizationMode, LyricsProvider};
 
-use crate::config::{AppConfig, WindowPosition};
+use crate::shared::config::{AppConfig, ChineseRomanizationMode, LyricsProvider, WindowPosition};
 
 use super::localization::{
     bind_button_tooltip, bind_label, bind_stack_page_title, bind_window_title,
@@ -1037,7 +1036,7 @@ fn color_row(
     {
         let current = Rc::clone(&current);
         swatch.set_draw_func(move |_, cr, width, height| {
-            let (r, g, b, a) = crate::config::parse_hex_color(&current.borrow());
+            let (r, g, b, a) = crate::shared::config::parse_hex_color(&current.borrow());
             cr.set_source_rgba(r, g, b, a);
             cr.rectangle(1.0, 1.0, (width as f64) - 2.0, (height as f64) - 2.0);
             let _ = cr.fill();
@@ -1093,12 +1092,12 @@ fn color_row(
 }
 
 fn hex_to_gdk_rgba(hex: &str) -> gtk::gdk::RGBA {
-    let (r, g, b, a) = crate::config::parse_hex_color(hex);
+    let (r, g, b, a) = crate::shared::config::parse_hex_color(hex);
     gtk::gdk::RGBA::new(r as f32, g as f32, b as f32, a as f32)
 }
 
 fn gdk_rgba_to_hex(color: &gtk::gdk::RGBA) -> String {
-    crate::config::format_hex_color((
+    crate::shared::config::format_hex_color((
         color.red() as f64,
         color.green() as f64,
         color.blue() as f64,

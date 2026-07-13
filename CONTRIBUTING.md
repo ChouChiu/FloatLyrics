@@ -14,24 +14,24 @@
 
 项目使用 Rust 2024 edition，最低支持 Rust 1.93。`rust-toolchain.toml` 会选择 stable，并安装 `rustfmt`、Clippy、Rust 源码与 rust-analyzer。
 
-运行完整应用需要 Linux Wayland、支持 layer-shell 的合成器、会话 D-Bus、GTK 4.12+、gtk4-layer-shell 和 OpenSSL。普通单元测试不应依赖桌面会话。
+运行完整应用需要 Linux Wayland、支持 layer-shell 的合成器、会话 D-Bus、GTK 4.12+、gtk4-layer-shell、WebKitGTK 6.0 和 OpenSSL。普通单元测试不应依赖桌面会话。
 
 Arch Linux 可直接安装所需依赖：
 
 ```bash
-sudo pacman -S --needed base-devel git gtk4 gtk4-layer-shell openssl rust
+sudo pacman -S --needed base-devel git gtk4 gtk4-layer-shell webkitgtk-6.0 openssl rust
 ```
 
 Fedora：
 
 ```bash
-sudo dnf install gcc git gtk4-devel gtk4-layer-shell-devel openssl-devel rust cargo
+sudo dnf install gcc git gtk4-devel gtk4-layer-shell-devel webkitgtk6.0-devel openssl-devel rust cargo
 ```
 
 Debian / Ubuntu 25.04+：
 
 ```bash
-sudo apt install build-essential git libgtk-4-dev libgtk4-layer-shell-dev libssl-dev rustc cargo
+sudo apt install build-essential git libgtk-4-dev libgtk4-layer-shell-dev libwebkitgtk-6.0-dev libssl-dev rustc cargo
 ```
 
 获取代码并验证环境：
@@ -54,19 +54,22 @@ cargo run --locked -- --debug
 ## 理解工作区
 
 ```text
-floatlyrics (src/)              CLI、应用组装、Relm4/GTK4 UI、MPRIS
+floatlyrics (src/)              CLI 与应用层
+  ├─ frontend/                  Relm4/GTK4/WebKit 界面与 UI 适配器
+  ├─ backend/                   播放状态、歌词协调、缓存与 MPRIS
+  ├─ shared/                    配置与前后端共享数据协议
   └─ floatlyrics-lyrics/        歌词模型、LRC/QRC 解析、搜索、SQLite 缓存
        └─ floatlyrics-core/     路径、i18n、遥测、曲目指纹
 ```
 
-依赖只能沿图中方向自上而下。与 GTK、D-Bus、网络或数据库无关的领域逻辑，应放入能够承载它的最底层 crate，避免让可复用逻辑依赖应用边界。
+依赖只能沿图中方向自上而下。根 crate 内部遵循 `frontend → backend → shared`，`frontend` 也可直接读取 `shared`；后端不得依赖 GTK、Relm4、WebKit 或前端消息。与 GTK、D-Bus、网络或数据库无关的领域逻辑，应放入能够承载它的最底层 crate，避免让可复用逻辑依赖应用边界。
 
 | 路径 | 职责 |
 |---|---|
 | `src/lib.rs` | CLI 参数与应用启动流程 |
-| `src/app.rs`、`src/app/` | Relm4 应用、控制器、展示模型、视图和设置页 |
-| `src/mpris/` | Spotify MPRIS 发现、事件监听和进度同步 |
-| `src/config.rs` | 配置模型与原子写入（临时文件 + rename） |
+| `src/frontend.rs`、`src/frontend/` | Relm4 应用、GTK/WebKit 视图、设置页和 UI 适配器 |
+| `src/backend.rs`、`src/backend/` | 播放控制、歌词与搜索服务、缓存协调和 MPRIS |
+| `src/shared.rs`、`src/shared/` | 配置模型与跨层展示协议 |
 | `floatlyrics-lyrics/src/` | 歌词解析、时间轴、搜索提供方与缓存 |
 | `floatlyrics-core/src/` | 跨 crate 的基础能力与稳定领域类型 |
 | `data/locale/` | 三种语言的 JSON 文案目录 |

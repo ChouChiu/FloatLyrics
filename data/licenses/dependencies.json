@@ -681,6 +681,16 @@
       "license": "MIT OR Apache-2.0"
     },
     {
+      "name": "javascriptcore6",
+      "version": "0.6.0",
+      "license": "MIT"
+    },
+    {
+      "name": "javascriptcore6-sys",
+      "version": "0.6.0",
+      "license": "MIT"
+    },
+    {
       "name": "js-sys",
       "version": "0.3.103",
       "license": "MIT OR Apache-2.0"
@@ -887,16 +897,6 @@
     },
     {
       "name": "pango-sys",
-      "version": "0.22.0",
-      "license": "MIT"
-    },
-    {
-      "name": "pangocairo",
-      "version": "0.22.8",
-      "license": "MIT"
-    },
-    {
-      "name": "pangocairo-sys",
       "version": "0.22.0",
       "license": "MIT"
     },
@@ -1261,6 +1261,16 @@
       "license": "MIT OR Apache-2.0"
     },
     {
+      "name": "soup3",
+      "version": "0.9.0",
+      "license": "MIT"
+    },
+    {
+      "name": "soup3-sys",
+      "version": "0.9.0",
+      "license": "MIT"
+    },
+    {
       "name": "spin",
       "version": "0.9.8",
       "license": "MIT"
@@ -1569,6 +1579,16 @@
       "name": "web-sys",
       "version": "0.3.103",
       "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "webkit6",
+      "version": "0.6.1",
+      "license": "MIT"
+    },
+    {
+      "name": "webkit6-sys",
+      "version": "0.6.0",
+      "license": "MIT"
     },
     {
       "name": "webpki-roots",

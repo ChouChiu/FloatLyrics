@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Serializable user preferences and atomic file persistence.
+//! Shared serializable preferences and atomic file persistence.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use std::{
 };
 
 use floatlyrics_core::i18n::Language;
-use floatlyrics_lyrics::lyrics::{ChineseRomanizationMode, LyricsProvider};
+pub use floatlyrics_lyrics::lyrics::{ChineseRomanizationMode, LyricsProvider};
 
 /// Complete application configuration persisted as TOML.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -303,5 +303,5 @@ fn default_spotify_prefix() -> String {
 }
 
 #[cfg(test)]
-#[path = "test/config_test.rs"]
+#[path = "../test/config_test.rs"]
 mod tests;

@@ -1,4 +1,5 @@
 use super::*;
+use floatlyrics_lyrics::lyrics::TimedSyllable;
 use std::time::Duration;
 
 #[test]
@@ -39,19 +40,6 @@ fn sample_from_another_track_is_ignored() {
     ));
     assert_eq!(snapshot.state.position_ms, Some(10_000));
     assert_eq!(snapshot.received_at, received_at);
-}
-
-#[test]
-fn syllable_progress_is_clamped_to_its_time_range() {
-    let syllable = TimedSyllable {
-        start_ms: 1_000,
-        end_ms: 1_500,
-        text: "hello".to_string(),
-    };
-
-    assert_eq!(syllable_progress(&syllable, 900), 0.0);
-    assert_eq!(syllable_progress(&syllable, 1_250), 0.5);
-    assert_eq!(syllable_progress(&syllable, 1_700), 1.0);
 }
 
 #[test]

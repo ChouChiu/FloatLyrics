@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Spotify MPRIS facade.
+//! Backend Spotify MPRIS facade.
 //!
 //! D-Bus watching, metadata models, and position synchronization are isolated
 //! behind focused modules.
@@ -20,5 +20,5 @@ pub use watcher::{
 };
 
 #[cfg(test)]
-#[path = "test/mpris_test.rs"]
+#[path = "../test/mpris_test.rs"]
 mod tests;

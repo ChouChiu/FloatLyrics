@@ -1,16 +1,6 @@
 use super::*;
 
 #[test]
-fn lyric_slot_only_switches_when_key_changes() {
-    let mut state = LyricsTransitionState::default();
-
-    assert_eq!(select_lyric_slot(&mut state, "line:0"), (0, false));
-    assert_eq!(select_lyric_slot(&mut state, "line:0"), (0, false));
-    assert_eq!(select_lyric_slot(&mut state, "line:1"), (1, true));
-    assert_eq!(select_lyric_slot(&mut state, "line:2"), (0, true));
-}
-
-#[test]
 fn panel_width_is_kept_in_compact_bounds() {
     assert_eq!(compact_panel_width(200), MIN_PANEL_WIDTH);
     assert_eq!(compact_panel_width(520), 520);

@@ -15,6 +15,7 @@ pkgbase = floatlyrics
 	depends = openssl
 	depends = pango
 	depends = sqlite
+	depends = webkitgtk-6.0
 	source = floatlyrics-1.0.2.tar.gz::https://github.com/ChouChiu/FloatLyrics/archive/refs/tags/v1.0.2.tar.gz
 	sha256sums = 26d58bbf50f68133449ce9d640493ddd8d8215ace7428e875c028bf7d12850cb
 

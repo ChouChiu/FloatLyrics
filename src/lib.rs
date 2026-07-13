@@ -5,20 +5,27 @@
 
 //! FloatLyrics application library.
 //!
-//! This crate composes the GTK overlay, Spotify-compatible MPRIS watcher,
-//! configuration, lyrics services, and command-line entry point.
+//! The root crate is split into a GTK/WebKit [`frontend`], a service-oriented
+//! [`backend`], and dependency-light data contracts in [`shared`].
 
-/// GTK/Relm4 application composition.
-pub mod app;
-/// Persistent user configuration model.
-pub mod config;
-/// Spotify-compatible MPRIS metadata and watcher facade.
-pub mod mpris;
+/// Playback, lyrics-service, cache-coordination, and MPRIS backend.
+pub mod backend;
+/// GTK/Relm4 and WebKit application frontend.
+pub mod frontend;
+/// Configuration and contracts shared across application layers.
+pub mod shared;
+
+/// Compatibility re-export for the former MPRIS module path.
+pub use backend::mpris;
+/// Compatibility alias for the former application module path.
+pub use frontend as app;
+/// Compatibility re-export for the former configuration module path.
+pub use shared::config;
 
 use anyhow::Result;
 use clap::Parser;
-use config::AppConfig;
 use floatlyrics_core::paths::AppPaths;
+use shared::config::AppConfig;
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -63,7 +70,7 @@ pub fn run() -> Result<()> {
         config.save(&paths.config_file)?;
     }
 
-    app::run(paths, config)
+    frontend::run(paths, config)
 }
 
 fn configure_default_gtk_renderer() {

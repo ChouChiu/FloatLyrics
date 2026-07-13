@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Layer-shell positioning, snapping, and resize anchoring.
+//! Frontend layer-shell positioning, snapping, and resize anchoring.
 
 use gtk::prelude::*;
 use gtk4_layer_shell::{Edge, LayerShell};
 use std::{cell::RefCell, rc::Rc};
 
-use crate::config::WindowPosition;
+use crate::shared::config::WindowPosition;
 
 const SNAP_THRESHOLD_PX: i32 = 12;
 

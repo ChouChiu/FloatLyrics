@@ -13,6 +13,7 @@ pkgbase = floatlyrics-bin
 	depends = libgcc
 	depends = openssl
 	depends = pango
+	depends = webkitgtk-6.0
 	provides = floatlyrics=1.0.2
 	conflicts = floatlyrics
 	source_x86_64 = floatlyrics-bin-1.0.2.rpm::https://github.com/ChouChiu/FloatLyrics/releases/download/v1.0.2/floatlyrics-1.0.2-1.x86_64.rpm

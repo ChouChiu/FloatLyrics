@@ -19,6 +19,7 @@ depends=(
     'openssl'
     'pango'
     'sqlite'
+    'webkitgtk-6.0'
 )
 makedepends=('cargo')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
