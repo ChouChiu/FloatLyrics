@@ -5,6 +5,7 @@ pkgbase = floatlyrics
 	url = https://github.com/ChouChiu/FloatLyrics
 	arch = x86_64
 	license = GPL-3.0-or-later
+	makedepends = bun
 	makedepends = cargo
 	depends = cairo
 	depends = glib2

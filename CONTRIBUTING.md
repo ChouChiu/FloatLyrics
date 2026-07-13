@@ -12,7 +12,7 @@
 
 ## 准备开发环境
 
-项目使用 Rust 2024 edition，最低支持 Rust 1.93。`rust-toolchain.toml` 会选择 stable，并安装 `rustfmt`、Clippy、Rust 源码与 rust-analyzer。
+项目使用 Rust 2024 edition，最低支持 Rust 1.93；React 歌词前端使用 Bun 1.3.14、TypeScript 和 Biome。`rust-toolchain.toml` 会选择 stable，并安装 `rustfmt`、Clippy、Rust 源码与 rust-analyzer。Bun 请按[官方安装说明](https://bun.com/docs/installation)安装。
 
 运行完整应用需要 Linux Wayland、支持 layer-shell 的合成器、会话 D-Bus、GTK 4.12+、gtk4-layer-shell、WebKitGTK 6.0 和 OpenSSL。普通单元测试不应依赖桌面会话。
 
@@ -39,6 +39,10 @@ sudo apt install build-essential git libgtk-4-dev libgtk4-layer-shell-dev libweb
 ```bash
 git clone https://github.com/ChouChiu/FloatLyrics.git
 cd FloatLyrics
+bun install --frozen-lockfile
+bun run check
+bun run typecheck
+bun test
 cargo build --locked
 cargo test --locked --all-targets --all-features
 ```
@@ -50,6 +54,8 @@ cargo run --locked -- --debug
 ```
 
 `--debug` 会启用详细 tracing 日志，并非只表示使用 debug profile。GTK 由 Relm4 初始化，请勿额外调用 `gtk::init()`。
+
+修改 React 歌词前端后，可运行 `bun run format`，通过 `biome check --write .` 自动格式化并应用安全修复。
 
 ## 理解工作区
 
@@ -126,6 +132,11 @@ cargo test --locked mpris::
 每条 Cargo 命令都应使用 `--locked`。提交 PR 前依次运行：
 
 ```bash
+bun install --frozen-lockfile
+bun run check
+bun run typecheck
+bun test
+bun run build:lyrics
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-targets --all-features
@@ -146,6 +157,8 @@ cargo about generate --locked --all-features data/licenses/about.hbs \
 ```
 
 将更新后的 `data/licenses/dependencies.json` 与 `Cargo.lock` 一起提交。CI 会检查生成结果是否最新。
+
+JavaScript 依赖必须通过 `bun add` 或 `bun add --dev` 修改，并将 `package.json` 与 `bun.lock` 一起提交。React 歌词构建会根据实际 bundle 自动生成运行时 npm 许可证数据到 `target/lyrics-web/frontend-dependencies.json`；该文件用于检查，不应提交。
 
 ## Git 与 Pull Request
 

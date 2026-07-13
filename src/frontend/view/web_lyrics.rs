@@ -107,7 +107,7 @@ impl WebLyricsView {
             });
         }
 
-        web_view.load_html(include_str!("lyrics.html"), None);
+        web_view.load_html(include_str!(concat!(env!("OUT_DIR"), "/lyrics.html")), None);
         let renderer = Self {
             web_view,
             payload,
@@ -179,7 +179,11 @@ fn dispatch_pending(web_view: &webkit6::WebView, bridge: &Rc<RefCell<BridgeState
 }
 
 fn render_script(payload: &LyricsPayload) -> serde_json::Result<String> {
-    serde_json::to_string(payload).map(|json| format!("window.floatLyrics.render({json});"))
+    serde_json::to_string(payload).map(|json| {
+        format!(
+            "((payload) => {{ if (window.floatLyrics) {{ window.floatLyrics.render(payload); }} else {{ window.floatLyricsPendingPayload = payload; }} }})({json});"
+        )
+    })
 }
 
 pub(super) fn lyric_content_width(
@@ -273,7 +277,9 @@ mod tests {
 
         let script = render_script(&payload).unwrap();
 
-        assert!(script.starts_with("window.floatLyrics.render({"));
+        assert!(script.starts_with("((payload) => {"));
+        assert!(script.contains("window.floatLyrics.render(payload)"));
+        assert!(script.contains("window.floatLyricsPendingPayload = payload"));
         assert!(script.contains("\"key\":\"line:1\""));
         assert!(script.contains("'quoted' </script> 歌词"));
     }
@@ -284,11 +290,12 @@ mod tests {
     }
 
     #[test]
-    fn html_uses_explicit_crossfade_for_line_changes() {
-        let html = include_str!("lyrics.html");
+    fn embedded_html_contains_the_bridge_without_external_assets() {
+        let html = include_str!(concat!(env!("OUT_DIR"), "/lyrics.html"));
 
-        assert!(html.contains("function crossfadeSlots(incoming, outgoing)"));
-        assert!(html.contains("incoming.animate("));
-        assert!(html.contains("outgoing.animate("));
+        assert!(html.contains("Content-Security-Policy"));
+        assert!(html.contains("floatLyrics"));
+        assert!(!html.contains("<script src="));
+        assert!(!html.contains("<link rel=\"stylesheet\""));
     }
 }

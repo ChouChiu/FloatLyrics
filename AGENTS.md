@@ -97,8 +97,12 @@ with an established convention should retain the repository's SPDX header.
 
 `rust-toolchain.toml` selects stable Rust and the `rustfmt`, `clippy`, `rust-src`,
 and `rust-analyzer` components. CI runs in an Arch Linux container with GTK4,
-gtk4-layer-shell, OpenSSL, and packaging tools. Compiling the root crate locally
-requires the corresponding system development libraries.
+gtk4-layer-shell, OpenSSL, and packaging tools. The React lyrics frontend uses
+Bun 1.3.14, TypeScript, and Biome. Compiling the root crate locally requires Bun
+and the corresponding system development libraries; Cargo installs the locked
+frontend dependencies and generates the embedded page through `build.rs`.
+Use `bun run format` to format the React frontend and apply Biome's safe fixes;
+CI uses the non-mutating `bun run check` command.
 
 Use `--locked` on Cargo commands that resolve dependencies. Do not add it to
 `cargo fmt`, which does not accept it. Never regenerate `Cargo.lock`
@@ -107,6 +111,10 @@ accidentally.
 Start with the narrowest useful checks:
 
 ```bash
+bun install --frozen-lockfile
+bun run check
+bun run typecheck
+bun test
 cargo test --locked -p floatlyrics-core
 cargo test --locked -p floatlyrics-core i18n
 cargo test --locked -p floatlyrics-lyrics
@@ -123,6 +131,11 @@ cargo clippy --locked -p <package> --all-targets --all-features -- -D warnings
 Full pre-merge verification:
 
 ```bash
+bun install --frozen-lockfile
+bun run check
+bun run typecheck
+bun test
+bun run build:lyrics
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-targets --all-features
@@ -277,6 +290,12 @@ Review and include the generated diff. CI regenerates this file from a clean
 checkout and runs `git diff --exit-code` as its freshness check. Never hand-edit
 `data/licenses/dependencies.json`; commit it together with `Cargo.lock` when it
 changes.
+
+Add JavaScript dependencies with `bun add` or `bun add --dev`, never by typing
+versions into `package.json`; commit `bun.lock` with the manifest change. The
+lyrics build derives runtime npm license notices from Bun's bundle metafile, so
+verify `target/lyrics-web/frontend-dependencies.json` after changing production
+frontend dependencies without committing that generated file.
 
 ## Generated and release-sensitive files
 

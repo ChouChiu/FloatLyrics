@@ -80,7 +80,7 @@ sudo apt install ./floatlyrics_*.deb
 
 ### 从源码构建
 
-先安装 Rust 1.93+、C 工具链以及 GTK、layer-shell、WebKitGTK、OpenSSL 的开发包：
+先安装 Rust 1.93+、Bun 1.3.14、C 工具链以及 GTK、layer-shell、WebKitGTK、OpenSSL 的开发包。Bun 请按[官方安装说明](https://bun.com/docs/installation)安装：
 
 ```bash
 # Arch Linux
@@ -100,6 +100,8 @@ git clone https://github.com/ChouChiu/FloatLyrics.git
 cd FloatLyrics
 cargo build --locked --release
 ```
+
+Cargo 会根据 `bun.lock` 自动安装前端依赖，并将 React 歌词页构建为内嵌的单文件 HTML；Bun 不属于最终二进制的运行时依赖。
 
 生成的可执行文件位于 `target/release/floatlyrics`。如果你准备修改项目，请继续阅读 [贡献指南](CONTRIBUTING.md)。
 

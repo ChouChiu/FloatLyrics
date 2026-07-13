@@ -54,8 +54,29 @@ jobs:
           persist-credentials: false
           ref: ${{ env.RELEASE_TAG }}
 
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Cache Bun packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
       - name: Mark workspace as safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Check React lyrics frontend
+        run: |
+          bun install --frozen-lockfile
+          bun run check
+          bun run typecheck
+          bun test
+          bun run build:lyrics
 
       - name: Validate version tag
         run: |

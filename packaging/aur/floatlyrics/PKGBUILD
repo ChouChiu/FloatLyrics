@@ -21,7 +21,7 @@ depends=(
     'sqlite'
     'webkitgtk-6.0'
 )
-makedepends=('cargo')
+makedepends=('bun' 'cargo')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 # Replace SKIP with the v1.0.0 source archive checksum before publishing to AUR:
 #   updpkgsums && makepkg --printsrcinfo > .SRCINFO
