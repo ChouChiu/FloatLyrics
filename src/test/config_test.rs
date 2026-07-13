@@ -31,6 +31,19 @@ fn romanization_has_distinct_default_presentation() {
 }
 
 #[test]
+fn parses_rgb_and_rgba_hex_colors() {
+    assert_eq!(parse_hex_color("#0000FF"), (0.0, 0.0, 1.0, 1.0));
+    assert_eq!(parse_hex_color("FF000080"), (1.0, 0.0, 0.0, 128.0 / 255.0));
+}
+
+#[test]
+fn invalid_hex_color_falls_back_entirely_to_white() {
+    for invalid in ["#GG0000", "#1234567", "##123456", "#12345"] {
+        assert_eq!(parse_hex_color(invalid), (1.0, 1.0, 1.0, 1.0));
+    }
+}
+
+#[test]
 fn rejects_incomplete_config() {
     assert!(toml::from_str::<AppConfig>("[window]\nwidth = 500").is_err());
 }

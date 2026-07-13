@@ -4,7 +4,9 @@
 //! Conversion between provider payloads and display-ready timed lyrics.
 
 use anyhow::{Context, Result, anyhow};
-use lyrics_helper::{LineInfo, LyricsData, LyricsTypes, generate_string, parse_auto};
+use lyrics_helper::{
+    LineInfo, LyricsData, LyricsTypes, generate_string, parse_auto as parse_helper,
+};
 
 use super::model::{TimedLine, TimedSyllable};
 
@@ -14,11 +16,23 @@ const TRANSLATION_PREFIX: &str = "__FLOATLYRICS_TRANSLATION__:";
 const TRANSLATION_SECTION_MARKER: &str = "[floatlyrics:translation]";
 
 /// Parses a local lyrics document using the formats supported by `lyrics-helper`.
+/// XML-based formats are rejected until the transitive XML parser can be
+/// upgraded to a release that safely handles untrusted attributes.
 ///
 /// # Errors
-/// Returns an error when the format cannot be detected or parsed.
+/// Returns an error when the input is XML or the format cannot be detected or parsed.
 pub fn parse_local_lyrics(content: &str) -> Result<LyricsData> {
-    parse_auto(content).context("lyrics-helper could not detect or parse lyrics")
+    // `lyrics-parsers` 0.1.3 uses quick-xml's checked attribute iterator for
+    // TTML. Reject XML before reaching the quadratic paths described by
+    // RUSTSEC-2026-0194 and RUSTSEC-2026-0195. QQ Music and NetEase payloads
+    // use the LRC/QRC paths above this fallback.
+    if content
+        .trim_start_matches(|character: char| character.is_whitespace() || character == '\u{feff}')
+        .starts_with('<')
+    {
+        return Err(anyhow!("XML lyrics are temporarily unsupported"));
+    }
+    parse_helper(content).context("lyrics-helper could not detect or parse lyrics")
 }
 
 /// Parses raw provider lyrics into sorted, display-ready lines.

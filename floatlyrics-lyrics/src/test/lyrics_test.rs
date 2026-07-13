@@ -64,6 +64,14 @@ fn parse_and_export_lrc_through_lyrics_helper() {
 }
 
 #[test]
+fn rejects_xml_lyrics_before_the_dependency_parser() {
+    let error = parse_local_lyrics("\u{feff}  <tt><body /></tt>").unwrap_err();
+
+    assert!(error.to_string().contains("XML lyrics"));
+    assert!(parse_auto("<tt><body /></tt>").is_none());
+}
+
+#[test]
 fn maps_track_metadata_for_lyrics_helper_search() {
     let track = floatlyrics_core::track::TrackMetadata {
         title: "Song".to_string(),
