@@ -135,6 +135,9 @@ language = "zh-CN" # en | zh-CN | zh-TW
 
 [window]
 anchor = "bottom-center"
+remember_position = true
+# 开启位置记忆并拖动浮窗后由应用自动写入，取值范围为 0.0～1.0：
+# position = { horizontal = 0.5, vertical = 0.85 }
 margin = 96
 width = 350
 opacity = 0.78
@@ -149,15 +152,17 @@ chinese_romanization = "auto" # auto | mandarin-pinyin | cantonese-jyutping | ca
 font_order = ["Sans"]
 lyric_font_size = 24
 translation_font_size = 13
+romanization_font_size = 12
 played_color = "#FFFFFFFF"
 unplayed_color = "#9EA6B3FF"
 translation_color = "#FFFFFFC7"
+romanization_color = "#B8D8F0E6"
 
 [spotify]
 mpris_prefix = "org.mpris.MediaPlayer2.spotify"
 ```
 
-配置采用严格校验：顶层 section 不可缺失，未知字段会在启动时报错；section 内缺失的字段将自动回退到默认值。使用 Flatpak/Snap 版 Spotify 时，如果无法自动识别播放器，可按实际 D-Bus 名称调整 `mpris_prefix`。
+配置采用严格校验：顶层 section 不可缺失，未知字段会在启动时报错；section 内缺失的字段将自动回退到默认值。`position` 使用浮窗中心相对于屏幕宽高的比例，开启 `remember_position` 后会在拖动结束时自动保存；关闭开关会清除已保存的位置。使用 Flatpak/Snap 版 Spotify 时，如果无法自动识别播放器，可按实际 D-Bus 名称调整 `mpris_prefix`。
 
 ## 常见问题与限制
 
