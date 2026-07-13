@@ -145,6 +145,7 @@ offset_ms = 0
 provider_order = ["qq-music", "netease"]
 show_translation = true
 show_romanization = false
+chinese_romanization = "auto" # auto | mandarin-pinyin | cantonese-jyutping
 font_order = ["Sans"]
 lyric_font_size = 24
 translation_font_size = 13

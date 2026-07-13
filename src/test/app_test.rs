@@ -1,4 +1,5 @@
 use super::*;
+use floatlyrics_lyrics::lyrics::ChineseRomanizationMode;
 
 #[test]
 fn recognizes_settings_command_without_matching_substrings() {
@@ -41,4 +42,18 @@ fn enabling_romanization_reloads_current_lyrics() {
 
     assert!(should_reload_lyrics(&current, &next));
     assert!(!should_reload_lyrics(&next, &current));
+}
+
+#[test]
+fn changing_enabled_chinese_romanization_reloads_current_lyrics() {
+    let mut current = AppConfig::default();
+    current.lyrics.show_romanization = true;
+    let mut next = current.clone();
+    next.lyrics.chinese_romanization = ChineseRomanizationMode::CantoneseJyutping;
+
+    assert!(should_reload_lyrics(&current, &next));
+
+    current.lyrics.show_romanization = false;
+    next.lyrics.show_romanization = false;
+    assert!(!should_reload_lyrics(&current, &next));
 }

@@ -12,7 +12,7 @@ use std::{
 };
 
 use floatlyrics_core::i18n::Language;
-use floatlyrics_lyrics::lyrics::LyricsProvider;
+use floatlyrics_lyrics::lyrics::{ChineseRomanizationMode, LyricsProvider};
 
 /// Complete application configuration persisted as TOML.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -140,6 +140,8 @@ pub struct LyricsConfig {
     pub show_translation: bool,
     /// Whether romanized text is displayed.
     pub show_romanization: bool,
+    /// Pronunciation system used for Chinese lyrics.
+    pub chinese_romanization: ChineseRomanizationMode,
     /// Ordered font-family fallback list used to render lyrics.
     pub font_order: Vec<String>,
     /// Font size in pixels for the current lyric line.
@@ -165,6 +167,7 @@ impl Default for LyricsConfig {
             provider_order: default_provider_order(),
             show_translation: true,
             show_romanization: false,
+            chinese_romanization: ChineseRomanizationMode::Auto,
             font_order: default_font_order(),
             lyric_font_size: default_lyric_font_size(),
             translation_font_size: default_translation_font_size(),

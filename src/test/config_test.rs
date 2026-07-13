@@ -22,6 +22,7 @@ fn default_font_order_uses_generic_sans() {
 fn romanization_has_distinct_default_presentation() {
     let lyrics = AppConfig::default().lyrics;
 
+    assert_eq!(lyrics.chinese_romanization, ChineseRomanizationMode::Auto);
     assert_eq!(lyrics.romanization_font_size, 12);
     assert_eq!(lyrics.romanization_color, "#B8D8F0E6");
     assert_ne!(lyrics.romanization_color, lyrics.translation_color);
@@ -91,4 +92,20 @@ mpris_prefix = "org.mpris.MediaPlayer2.spotify"
     assert_eq!(config.lyrics.translation_color, "#FFFFFFC7");
     assert_eq!(config.lyrics.romanization_font_size, 12);
     assert_eq!(config.lyrics.romanization_color, "#B8D8F0E6");
+    assert_eq!(
+        config.lyrics.chinese_romanization,
+        ChineseRomanizationMode::Auto
+    );
+}
+
+#[test]
+fn chinese_romanization_mode_round_trips_in_config() {
+    let mut config = AppConfig::default();
+    config.lyrics.chinese_romanization = ChineseRomanizationMode::CantoneseJyutping;
+
+    let serialized = toml::to_string(&config).unwrap();
+    let restored: AppConfig = toml::from_str(&serialized).unwrap();
+
+    assert!(serialized.contains("chinese_romanization = \"cantonese-jyutping\""));
+    assert_eq!(restored, config);
 }

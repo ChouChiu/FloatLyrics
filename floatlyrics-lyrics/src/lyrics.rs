@@ -21,9 +21,12 @@ pub use parsing::{
     combine_lyrics_with_translation, export_lyrics, parse_local_lyrics, timed_lines_from_data,
     timed_lines_from_raw,
 };
-pub use romanization::generate_local_romanization;
+pub use romanization::{
+    ChineseRomanizationMode, generate_local_romanization, generate_local_romanization_with_mode,
+};
 pub use search::{
     SearchPlan, fetch_candidate_lyrics, search_best_lyrics, search_lyrics_candidates,
+    simplify_search_text,
 };
 pub use timeline::{active_line_index, line_index_at_or_before};
 

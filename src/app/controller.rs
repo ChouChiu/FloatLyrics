@@ -12,8 +12,8 @@ use floatlyrics_core::{
 use floatlyrics_lyrics::{
     cache::{CachedLyrics, LyricsCache, ProviderResultInsert},
     lyrics::{
-        FetchedLyrics, SearchPlan, TimedLine, generate_local_romanization, search_best_lyrics,
-        timed_lines_from_raw,
+        ChineseRomanizationMode, FetchedLyrics, SearchPlan, TimedLine,
+        generate_local_romanization_with_mode, search_best_lyrics, timed_lines_from_raw,
     },
 };
 
@@ -39,6 +39,7 @@ struct LyricsFetchEvent {
 #[derive(Debug)]
 struct RomanizationEvent {
     track_fingerprint: String,
+    chinese_mode: ChineseRomanizationMode,
     lines: Vec<TimedLine>,
 }
 
@@ -161,7 +162,11 @@ impl Controller {
         }
 
         for event in self.romanization_receiver.borrow().try_iter() {
-            apply_romanization_event(event, ctx.lyrics_state);
+            apply_romanization_event(
+                event,
+                ctx.lyrics_state,
+                ctx.config.lyrics.chinese_romanization,
+            );
         }
 
         if let Some(snapshot) = ctx.latest.borrow().as_ref() {
@@ -389,6 +394,7 @@ fn lyrics_state_from_cached(
             romanization_sender.clone(),
             fingerprint.clone(),
             lines.clone(),
+            config.lyrics.chinese_romanization,
         );
     }
 
@@ -521,11 +527,13 @@ fn spawn_local_romanization(
     sender: mpsc::Sender<RomanizationEvent>,
     track_fingerprint: String,
     mut lines: Vec<TimedLine>,
+    chinese_mode: ChineseRomanizationMode,
 ) {
     runtime.spawn_blocking(move || {
-        generate_local_romanization(&mut lines);
+        generate_local_romanization_with_mode(&mut lines, chinese_mode);
         let _ = sender.send(RomanizationEvent {
             track_fingerprint,
+            chinese_mode,
             lines,
         });
     });
@@ -534,9 +542,11 @@ fn spawn_local_romanization(
 fn apply_romanization_event(
     event: RomanizationEvent,
     lyrics_state: &Rc<RefCell<LyricsDisplayState>>,
+    current_chinese_mode: ChineseRomanizationMode,
 ) {
     let mut state = lyrics_state.borrow_mut();
-    if state.track_fingerprint.as_deref() == Some(event.track_fingerprint.as_str())
+    if event.chinese_mode == current_chinese_mode
+        && state.track_fingerprint.as_deref() == Some(event.track_fingerprint.as_str())
         && same_lyrics_document(&state.lines, &event.lines)
     {
         state.lines = event.lines;

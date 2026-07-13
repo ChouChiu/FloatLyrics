@@ -6,10 +6,29 @@
 use kakasi::IsJapanese;
 use korean_romanize::{convert as romanize_korean, has_korean};
 use pinyin::ToPinyin;
+use serde::{Deserialize, Serialize};
 use uroman::{Uroman, rom_format};
 use whatlang::{Lang, detect};
 
 use super::model::{RomanizationSegment, TimedLine};
+
+/// Preferred pronunciation system for Chinese lyrics.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ChineseRomanizationMode {
+    /// Detect explicit Cantonese wording and otherwise use Mandarin Pinyin.
+    #[default]
+    Auto,
+    /// Always generate Mandarin Hanyu Pinyin.
+    MandarinPinyin,
+    /// Always generate Cantonese Jyutping.
+    CantoneseJyutping,
+}
+
+impl ChineseRomanizationMode {
+    /// Modes in their stable settings-menu order.
+    pub const ALL: [Self; 3] = [Self::Auto, Self::MandarinPinyin, Self::CantoneseJyutping];
+}
 
 /// Replaces any existing pronunciation with locally generated romanization.
 ///
@@ -18,6 +37,14 @@ use super::model::{RomanizationSegment, TimedLine};
 /// `uroman` as a general transliterator. ASCII-only Spanish is detected so its
 /// unchanged Latin spelling can still be exposed as romanization.
 pub fn generate_local_romanization(lines: &mut [TimedLine]) {
+    generate_local_romanization_with_mode(lines, ChineseRomanizationMode::Auto);
+}
+
+/// Replaces pronunciation using `chinese_mode` for Chinese lyrics.
+pub fn generate_local_romanization_with_mode(
+    lines: &mut [TimedLine],
+    chinese_mode: ChineseRomanizationMode,
+) {
     let mut uroman = None;
     let has_japanese_kana = lines
         .iter()
@@ -27,6 +54,13 @@ pub fn generate_local_romanization(lines: &mut [TimedLine]) {
             && complete_japanese_romanization(&line.text).is_none()
     });
     let prefer_japanese_han = has_japanese_kana || !has_chinese_evidence;
+    let chinese_mode = match chinese_mode {
+        ChineseRomanizationMode::Auto if looks_like_cantonese(lines) => {
+            ChineseRomanizationMode::CantoneseJyutping
+        }
+        ChineseRomanizationMode::Auto => ChineseRomanizationMode::MandarinPinyin,
+        mode => mode,
+    };
 
     for line in lines {
         line.romanization = None;
@@ -48,7 +82,12 @@ pub fn generate_local_romanization(lines: &mut [TimedLine]) {
         {
             (romanization, japanese_segments(&line.text))
         } else if contains_han(&line.text) {
-            (chinese_pinyin(&line.text), chinese_segments(&line.text))
+            match chinese_mode {
+                ChineseRomanizationMode::CantoneseJyutping => cantonese_jyutping(&line.text),
+                ChineseRomanizationMode::Auto | ChineseRomanizationMode::MandarinPinyin => {
+                    (chinese_pinyin(&line.text), chinese_segments(&line.text))
+                }
+            }
         } else {
             let uroman = uroman.get_or_insert_with(Uroman::new);
             (
@@ -65,6 +104,16 @@ pub fn generate_local_romanization(lines: &mut [TimedLine]) {
             line.romanization_segments = segments;
         }
     }
+}
+
+fn looks_like_cantonese(lines: &[TimedLine]) -> bool {
+    const CANTONESE_MARKERS: &str = "佢唔嘅咗冇喺啲咁哋嚟噉咩啱攞搵嘢噃囉喎啫喐冧";
+
+    lines.iter().any(|line| {
+        line.text
+            .chars()
+            .any(|character| CANTONESE_MARKERS.contains(character))
+    })
 }
 
 fn is_unaccented_spanish(text: &str) -> bool {
@@ -135,6 +184,65 @@ fn chinese_segments(text: &str) -> Vec<RomanizationSegment> {
                 .map_or_else(String::new, |pinyin| pinyin.with_tone().to_string()),
         })
         .collect()
+}
+
+#[derive(Deserialize)]
+struct CantoneseAnnotation {
+    word: String,
+    jyutping: Option<String>,
+}
+
+fn cantonese_jyutping(text: &str) -> (String, Vec<RomanizationSegment>) {
+    let traditional = lyrics_helper::helpers::chinese_helper::to_traditional(text);
+    let annotations = serde_json::from_slice::<Vec<CantoneseAnnotation>>(&rust_canto::annotate(
+        traditional.as_bytes(),
+    ))
+    .unwrap_or_default();
+    let mut original = text.chars();
+    let mut output = String::with_capacity(text.len());
+    let mut segments = Vec::with_capacity(annotations.len());
+    let mut previous_was_jyutping = false;
+
+    for annotation in annotations {
+        let source = original
+            .by_ref()
+            .take(annotation.word.chars().count())
+            .collect::<String>();
+        let jyutping = annotation
+            .jyutping
+            .filter(|_| {
+                source
+                    .chars()
+                    .any(|character| character.to_pinyin().is_some())
+            })
+            .unwrap_or_default();
+        if jyutping.is_empty() {
+            if previous_was_jyutping && source.starts_with(char::is_alphanumeric) {
+                push_separator(&mut output);
+            }
+            output.push_str(&source);
+            previous_was_jyutping = false;
+        } else {
+            push_separator(&mut output);
+            output.push_str(&jyutping);
+            previous_was_jyutping = true;
+        }
+        segments.push(RomanizationSegment {
+            text: source,
+            romanization: jyutping,
+        });
+    }
+
+    let remainder = original.collect::<String>();
+    if !remainder.is_empty() {
+        output.push_str(&remainder);
+        segments.push(RomanizationSegment {
+            text: remainder,
+            romanization: String::new(),
+        });
+    }
+
+    (output, segments)
 }
 
 fn japanese_segments(text: &str) -> Vec<RomanizationSegment> {

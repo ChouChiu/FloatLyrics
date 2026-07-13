@@ -6,6 +6,7 @@ accepted = [
     "Apache-2.0",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "CC-BY-4.0",
     "CDLA-Permissive-2.0",
     "GPL-3.0",
     "GPL-3.0-or-later",
@@ -14,11 +15,37 @@ accepted = [
     "MPL-2.0",
     "Unicode-3.0",
     "Unicode-DFS-2016",
+    "Unlicense",
     "Zlib",
 ]
 
 ignore-build-dependencies = true
 ignore-dev-dependencies = true
+
+[rust-canto.clarify]
+license = "MIT AND CC-BY-4.0"
+
+[[rust-canto.clarify.files]]
+path = "LICENSE"
+license = "MIT"
+checksum = "ba5e1574bd7c74473134bd93ab0a291f5bcd271fec5ad15de515ef8789eddfb6"
+
+[[rust-canto.clarify.files]]
+path = "data/LICENSE.txt"
+license = "CC-BY-4.0"
+checksum = "f5b745ef98087f531e719ee8ca6a96809444573ecc7173c6fa68eaad39b3cc3f"
+
+[[rust-canto.clarify.files]]
+path = "data/README.md"
+license = "CC-BY-4.0"
+checksum = "7b8c3577437ceb3c3f391e534f1fd7f2f3a916627ae1265004afb1d6ec767892"
+
+[wasm-minimal-protocol.clarify]
+license = "Unlicense"
+
+[[wasm-minimal-protocol.clarify.files]]
+path = "LICENSE"
+checksum = "6b0382b16279f26ff69014300541967a356a666eb0b91b422f6862f6b7dad17e"
 
 [private]
 ignore = true

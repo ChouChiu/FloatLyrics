@@ -114,6 +114,28 @@ fn generates_chinese_pinyin_without_treating_it_as_japanese() {
 }
 
 #[test]
+fn generates_cantonese_jyutping_when_requested() {
+    let mut lines = vec![line(0, Some(1_000), "喜歡你"), line(1_000, None, "喜欢你")];
+
+    generate_local_romanization_with_mode(&mut lines, ChineseRomanizationMode::CantoneseJyutping);
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("hei2 fun1 nei5"));
+    assert_eq!(lines[1].romanization.as_deref(), Some("hei2 fun1 nei5"));
+}
+
+#[test]
+fn automatic_chinese_mode_uses_explicit_cantonese_markers() {
+    let mut lines = vec![line(0, None, "佢喜歡你")];
+
+    generate_local_romanization(&mut lines);
+
+    assert_eq!(
+        lines[0].romanization.as_deref(),
+        Some("keoi5 hei2 fun1 nei5")
+    );
+}
+
+#[test]
 fn generates_romanization_for_other_languages() {
     let cyrillic = romanized_lines("[00:01.00]Привет мир");
     let spanish = romanized_lines("[00:01.00]¿Cómo estás?");

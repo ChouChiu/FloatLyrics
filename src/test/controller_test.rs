@@ -26,9 +26,11 @@ fn applies_romanization_only_to_the_matching_lyrics_document() {
     apply_romanization_event(
         RomanizationEvent {
             track_fingerprint: "track".to_string(),
+            chinese_mode: ChineseRomanizationMode::Auto,
             lines: vec![generated],
         },
         &lyrics_state,
+        ChineseRomanizationMode::Auto,
     );
 
     assert_eq!(
@@ -40,12 +42,37 @@ fn applies_romanization_only_to_the_matching_lyrics_document() {
     apply_romanization_event(
         RomanizationEvent {
             track_fingerprint: "track".to_string(),
+            chinese_mode: ChineseRomanizationMode::Auto,
             lines: vec![line("こんにちは")],
         },
         &lyrics_state,
+        ChineseRomanizationMode::Auto,
     );
 
     assert_eq!(lyrics_state.borrow().lines[0].text, "新しい歌詞");
+}
+
+#[test]
+fn ignores_romanization_generated_for_an_obsolete_chinese_mode() {
+    let lyrics_state = Rc::new(RefCell::new(LyricsDisplayState {
+        track_fingerprint: Some("track".to_string()),
+        lines: vec![line("喜欢你")],
+        status_message: None,
+    }));
+    let mut generated = line("喜欢你");
+    generated.romanization = Some("xǐ huān nǐ".to_string());
+
+    apply_romanization_event(
+        RomanizationEvent {
+            track_fingerprint: "track".to_string(),
+            chinese_mode: ChineseRomanizationMode::MandarinPinyin,
+            lines: vec![generated],
+        },
+        &lyrics_state,
+        ChineseRomanizationMode::CantoneseJyutping,
+    );
+
+    assert_eq!(lyrics_state.borrow().lines[0].romanization, None);
 }
 
 #[test]

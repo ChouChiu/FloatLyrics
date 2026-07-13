@@ -8,7 +8,7 @@ use relm4::{ComponentParts, ComponentSender, SimpleComponent};
 use std::{cell::Cell, cell::RefCell, path::PathBuf, rc::Rc};
 
 use floatlyrics_core::i18n::{I18n, Language, Text};
-use floatlyrics_lyrics::lyrics::LyricsProvider;
+use floatlyrics_lyrics::lyrics::{ChineseRomanizationMode, LyricsProvider};
 
 use crate::config::AppConfig;
 
@@ -60,6 +60,7 @@ pub(super) enum SettingsMsg {
     SetOffset(i64),
     SetTranslation(bool),
     SetRomanization(bool),
+    SetChineseRomanization(ChineseRomanizationMode),
     SetWidth(i32),
     SetMargin(i32),
     SetPanelHeight(i32),
@@ -236,6 +237,9 @@ impl SimpleComponent for SettingsModel {
             SettingsMsg::SetRomanization(value) => {
                 self.draft.borrow_mut().lyrics.show_romanization = value;
             }
+            SettingsMsg::SetChineseRomanization(value) => {
+                self.draft.borrow_mut().lyrics.chinese_romanization = value;
+            }
             SettingsMsg::SetWidth(value) => self.draft.borrow_mut().window.width = value,
             SettingsMsg::SetMargin(value) => self.draft.borrow_mut().window.margin = value,
             SettingsMsg::SetPanelHeight(value) => {
@@ -361,6 +365,44 @@ fn general_page(
         });
     }
 
+    let romanization_mode_model = gtk::StringList::new(&romanization_mode_names(i18n.language()));
+    let romanization_mode = gtk::DropDown::builder()
+        .model(&romanization_mode_model)
+        .width_request(190)
+        .build();
+    romanization_mode.set_selected(chinese_romanization_index(
+        config.lyrics.chinese_romanization,
+    ));
+    let updating_romanization_mode = Rc::new(Cell::new(false));
+    {
+        let sender = sender.clone();
+        let updating = Rc::clone(&updating_romanization_mode);
+        romanization_mode.connect_selected_notify(move |input| {
+            if updating.get() {
+                return;
+            }
+            let Some(mode) = ChineseRomanizationMode::ALL
+                .get(input.selected() as usize)
+                .copied()
+            else {
+                return;
+            };
+            let _ = sender.send(SettingsMsg::SetChineseRomanization(mode));
+        });
+    }
+    {
+        let model = romanization_mode_model.clone();
+        let input = romanization_mode.clone();
+        let updating = Rc::clone(&updating_romanization_mode);
+        i18n.subscribe(move |language| {
+            updating.set(true);
+            let selected = input.selected();
+            model.splice(0, model.n_items(), &romanization_mode_names(language));
+            input.set_selected(selected);
+            updating.set(false);
+        });
+    }
+
     page(
         i18n,
         Text::GeneralTitle,
@@ -390,6 +432,12 @@ fn general_page(
                     Text::ShowRomanization,
                     Text::ShowRomanizationDescription,
                     &romanization,
+                ),
+                setting_row(
+                    i18n,
+                    Text::ChineseRomanization,
+                    Text::ChineseRomanizationDescription,
+                    &romanization_mode,
                 ),
             ]),
         ],
@@ -824,6 +872,21 @@ fn language_index(language: Language) -> u32 {
         .iter()
         .position(|candidate| *candidate == language)
         .unwrap_or_default() as u32
+}
+
+fn chinese_romanization_index(mode: ChineseRomanizationMode) -> u32 {
+    ChineseRomanizationMode::ALL
+        .iter()
+        .position(|candidate| *candidate == mode)
+        .unwrap_or_default() as u32
+}
+
+fn romanization_mode_names(language: Language) -> [&'static str; 3] {
+    [
+        language.text(Text::RomanizationAutomatic),
+        language.text(Text::MandarinPinyin),
+        language.text(Text::CantoneseJyutping),
+    ]
 }
 
 fn connect_window_i32(

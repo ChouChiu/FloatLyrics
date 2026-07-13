@@ -229,6 +229,8 @@ fn should_reload_lyrics(current: &AppConfig, next: &AppConfig) -> bool {
     current.lyrics.provider_order != next.lyrics.provider_order
         || (!current.lyrics.show_translation && next.lyrics.show_translation)
         || (!current.lyrics.show_romanization && next.lyrics.show_romanization)
+        || (next.lyrics.show_romanization
+            && current.lyrics.chinese_romanization != next.lyrics.chinese_romanization)
 }
 
 /// Starts the GTK application with resolved `paths` and loaded `config`.
