@@ -47,3 +47,40 @@ fn applies_romanization_only_to_the_matching_lyrics_document() {
 
     assert_eq!(lyrics_state.borrow().lines[0].text, "新しい歌詞");
 }
+
+#[test]
+fn background_fetch_failure_preserves_loaded_lyrics() {
+    let mut state = LyricsDisplayState {
+        track_fingerprint: Some("track".to_string()),
+        lines: vec![line("manual lyrics")],
+        status_message: None,
+    };
+
+    assert!(!apply_lyrics_fetch_failure(
+        &mut state,
+        "track".to_string(),
+        LyricsFetchFailure::NotFound,
+    ));
+    assert_eq!(state.lines[0].text, "manual lyrics");
+    assert_eq!(state.status_message, None);
+}
+
+#[test]
+fn initial_fetch_failure_replaces_searching_status() {
+    let mut state = LyricsDisplayState {
+        track_fingerprint: Some("track".to_string()),
+        status_message: Some(Message::Text(Text::SearchingLyrics)),
+        ..LyricsDisplayState::default()
+    };
+
+    assert!(apply_lyrics_fetch_failure(
+        &mut state,
+        "track".to_string(),
+        LyricsFetchFailure::NotFound,
+    ));
+    assert!(state.lines.is_empty());
+    assert_eq!(
+        state.status_message,
+        Some(Message::Text(Text::NoLyricsFound))
+    );
+}

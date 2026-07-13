@@ -415,6 +415,11 @@ fn handle_lyrics_fetch_event(event: LyricsFetchEvent, ctx: &SpotifyUiContext<'_>
     if track.fingerprint() != event.track_fingerprint {
         return;
     }
+    if ctx.lyrics_state.borrow().track_fingerprint.as_deref()
+        != Some(event.track_fingerprint.as_str())
+    {
+        return;
+    }
 
     match event.result {
         Ok(fetched) => {
@@ -446,17 +451,13 @@ fn handle_lyrics_fetch_event(event: LyricsFetchEvent, ctx: &SpotifyUiContext<'_>
             }
         }
         Err(failure) => {
-            let message = match failure {
-                LyricsFetchFailure::NotFound => Message::Text(Text::NoLyricsFound),
-                LyricsFetchFailure::Other(detail) => {
-                    Message::Detail(Text::LyricsSearchFailed, detail)
-                }
-            };
-            *ctx.lyrics_state.borrow_mut() = LyricsDisplayState {
-                track_fingerprint: Some(event.track_fingerprint),
-                status_message: Some(message),
-                ..LyricsDisplayState::default()
-            };
+            if !apply_lyrics_fetch_failure(
+                &mut ctx.lyrics_state.borrow_mut(),
+                event.track_fingerprint,
+                failure,
+            ) {
+                return;
+            }
         }
     }
 
@@ -467,6 +468,27 @@ fn handle_lyrics_fetch_event(event: LyricsFetchEvent, ctx: &SpotifyUiContext<'_>
         ctx.lyrics_state,
         effective_position_ms(&snapshot),
     );
+}
+
+fn apply_lyrics_fetch_failure(
+    state: &mut LyricsDisplayState,
+    track_fingerprint: String,
+    failure: LyricsFetchFailure,
+) -> bool {
+    if state.status_message != Some(Message::Text(Text::SearchingLyrics)) {
+        return false;
+    }
+
+    let message = match failure {
+        LyricsFetchFailure::NotFound => Message::Text(Text::NoLyricsFound),
+        LyricsFetchFailure::Other(detail) => Message::Detail(Text::LyricsSearchFailed, detail),
+    };
+    *state = LyricsDisplayState {
+        track_fingerprint: Some(track_fingerprint),
+        status_message: Some(message),
+        ..LyricsDisplayState::default()
+    };
+    true
 }
 
 fn load_cached_lyrics_after_fetch(
