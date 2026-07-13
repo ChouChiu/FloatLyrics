@@ -19,6 +19,15 @@ fn default_font_order_uses_generic_sans() {
 }
 
 #[test]
+fn romanization_has_distinct_default_presentation() {
+    let lyrics = AppConfig::default().lyrics;
+
+    assert_eq!(lyrics.romanization_font_size, 12);
+    assert_eq!(lyrics.romanization_color, "#B8D8F0E6");
+    assert_ne!(lyrics.romanization_color, lyrics.translation_color);
+}
+
+#[test]
 fn rejects_incomplete_config() {
     assert!(toml::from_str::<AppConfig>("[window]\nwidth = 500").is_err());
 }
@@ -80,4 +89,6 @@ mpris_prefix = "org.mpris.MediaPlayer2.spotify"
     assert_eq!(config.lyrics.played_color, "#FFFFFFFF");
     assert_eq!(config.lyrics.unplayed_color, "#9EA6B3FF");
     assert_eq!(config.lyrics.translation_color, "#FFFFFFC7");
+    assert_eq!(config.lyrics.romanization_font_size, 12);
+    assert_eq!(config.lyrics.romanization_color, "#B8D8F0E6");
 }

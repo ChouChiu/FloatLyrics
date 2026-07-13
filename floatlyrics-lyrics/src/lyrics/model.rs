@@ -69,8 +69,20 @@ pub struct TimedLine {
     pub translation: Option<String>,
     /// Romanized text, when available.
     pub romanization: Option<String>,
+    /// Source fragments paired with locally generated readings for interlinear display.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub romanization_segments: Vec<RomanizationSegment>,
     /// Background-vocal text, when available.
     pub background: Option<String>,
+}
+
+/// A source-text fragment and the reading displayed directly below it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RomanizationSegment {
+    /// Fragment from the original lyrics.
+    pub text: String,
+    /// Locally generated Latin-script reading, or an empty string for punctuation.
+    pub romanization: String,
 }
 
 /// Timed fragment within a [`TimedLine`].

@@ -104,15 +104,16 @@ pub(super) fn panel_css(panel_alpha: f64) -> String {
     css.replace("__PANEL_ALPHA__", &format!("{panel_alpha:.3}"))
 }
 
-/// Returns CSS that sets the lyric and translation font sizes,
+/// Returns CSS that sets the lyric and secondary-text font sizes,
 /// loaded on a higher-priority provider so it overrides `panel_css`.
-pub(super) fn font_size_css(lyric_px: i32, translation_px: i32) -> String {
+pub(super) fn font_size_css(lyric_px: i32, romanization_px: i32, translation_px: i32) -> String {
     let adjacent_lyric_px = (lyric_px * 2 / 3).max(10);
     let adjacent_translation_px = (translation_px * 5 / 6).max(8);
     format!(
         r#"
         .floating-lyric-current {{ font-size: {lyric_px}px; }}
         .floating-lyric-adjacent {{ font-size: {adjacent_lyric_px}px; }}
+        .floating-romanization-current {{ font-size: {romanization_px}px; }}
         .floating-translation-current {{ font-size: {translation_px}px; }}
         .floating-translation-adjacent {{ font-size: {adjacent_translation_px}px; }}
         "#

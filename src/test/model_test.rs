@@ -68,6 +68,26 @@ fn placeholder_translation_is_hidden() {
 }
 
 #[test]
+fn romanization_is_shown_with_translation_and_karaoke() {
+    let mut line = test_line();
+    line.translation = Some("你好".to_string());
+    line.romanization = Some("nǐ hǎo".to_string());
+    line.syllables.push(TimedSyllable {
+        start_ms: 1_000,
+        end_ms: 2_000,
+        text: "Hello".to_string(),
+    });
+    let mut config = AppConfig::default();
+    config.lyrics.show_romanization = true;
+
+    let text = current_line_text(Some(&line), &config, 1_500);
+
+    assert!(text.karaoke.is_some());
+    assert_eq!(text.romanization, "nǐ hǎo");
+    assert_eq!(text.translation, "你好");
+}
+
+#[test]
 fn lyric_frame_uses_stable_key_for_active_line() {
     let state = LyricsDisplayState {
         lines: vec![test_line()],
@@ -116,6 +136,7 @@ fn test_line() -> TimedLine {
         syllables: Vec::new(),
         translation: None,
         romanization: None,
+        romanization_segments: Vec::new(),
         background: None,
     }
 }

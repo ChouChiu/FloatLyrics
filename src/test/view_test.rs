@@ -34,3 +34,13 @@ fn bottom_panel_reservation_is_never_undercut() {
     config.window.margin = 96;
     assert_eq!(effective_bottom_margin(&config), 96);
 }
+
+#[test]
+fn viewport_reserves_separate_romanization_and_translation_rows() {
+    assert_eq!(viewport_height(24, 12, 13, true), 74);
+}
+
+#[test]
+fn viewport_does_not_reserve_romanization_when_hidden() {
+    assert_eq!(viewport_height(24, 12, 13, false), 56);
+}

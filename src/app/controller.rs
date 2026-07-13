@@ -11,7 +11,10 @@ use floatlyrics_core::{
 };
 use floatlyrics_lyrics::{
     cache::{CachedLyrics, LyricsCache, ProviderResultInsert},
-    lyrics::{FetchedLyrics, SearchPlan, search_best_lyrics, timed_lines_from_raw},
+    lyrics::{
+        FetchedLyrics, SearchPlan, TimedLine, generate_local_romanization, search_best_lyrics,
+        timed_lines_from_raw,
+    },
 };
 
 use crate::{
@@ -34,6 +37,12 @@ struct LyricsFetchEvent {
 }
 
 #[derive(Debug)]
+struct RomanizationEvent {
+    track_fingerprint: String,
+    lines: Vec<TimedLine>,
+}
+
+#[derive(Debug)]
 enum LyricsFetchFailure {
     NotFound,
     Other(String),
@@ -45,6 +54,7 @@ struct SpotifyUiContext<'a> {
     config: &'a AppConfig,
     runtime: &'a tokio::runtime::Handle,
     lyrics_sender: &'a mpsc::Sender<LyricsFetchEvent>,
+    romanization_sender: &'a mpsc::Sender<RomanizationEvent>,
     latest: &'a Rc<RefCell<Option<PlaybackSnapshot>>>,
     lyrics_state: &'a Rc<RefCell<LyricsDisplayState>>,
 }
@@ -74,6 +84,7 @@ pub(super) struct Controller {
     handle: ControllerHandle,
     receiver: Rc<RefCell<mpsc::Receiver<SpotifyWatcherEvent>>>,
     lyrics_receiver: Rc<RefCell<mpsc::Receiver<LyricsFetchEvent>>>,
+    romanization_receiver: Rc<RefCell<mpsc::Receiver<RomanizationEvent>>>,
     lyrics_state: Rc<RefCell<LyricsDisplayState>>,
     latest: Rc<RefCell<Option<PlaybackSnapshot>>>,
     floating: OverlaySender,
@@ -81,6 +92,7 @@ pub(super) struct Controller {
     config: Rc<RefCell<AppConfig>>,
     runtime: tokio::runtime::Handle,
     lyrics_sender: mpsc::Sender<LyricsFetchEvent>,
+    romanization_sender: mpsc::Sender<RomanizationEvent>,
 }
 
 impl Controller {
@@ -94,6 +106,8 @@ impl Controller {
         let receiver = Rc::new(RefCell::new(receiver));
         let (lyrics_sender, lyrics_receiver) = mpsc::channel();
         let lyrics_receiver = Rc::new(RefCell::new(lyrics_receiver));
+        let (romanization_sender, romanization_receiver) = mpsc::channel();
+        let romanization_receiver = Rc::new(RefCell::new(romanization_receiver));
         let latest = Rc::new(RefCell::new(None::<PlaybackSnapshot>));
         let lyrics_state = Rc::new(RefCell::new(LyricsDisplayState::default()));
         let handle = ControllerHandle {
@@ -105,6 +119,7 @@ impl Controller {
             handle,
             receiver,
             lyrics_receiver,
+            romanization_receiver,
             lyrics_state,
             latest,
             floating,
@@ -112,6 +127,7 @@ impl Controller {
             config,
             runtime,
             lyrics_sender,
+            romanization_sender,
         }
     }
 
@@ -131,6 +147,7 @@ impl Controller {
             config: &config,
             runtime: &self.runtime,
             lyrics_sender: &self.lyrics_sender,
+            romanization_sender: &self.romanization_sender,
             latest: &self.latest,
             lyrics_state: &self.lyrics_state,
         };
@@ -140,14 +157,11 @@ impl Controller {
         }
 
         for event in self.lyrics_receiver.borrow().try_iter() {
-            handle_lyrics_fetch_event(
-                event,
-                ctx.floating,
-                ctx.cache,
-                ctx.config,
-                ctx.latest,
-                ctx.lyrics_state,
-            );
+            handle_lyrics_fetch_event(event, &ctx);
+        }
+
+        for event in self.romanization_receiver.borrow().try_iter() {
+            apply_romanization_event(event, ctx.lyrics_state);
         }
 
         if let Some(snapshot) = ctx.latest.borrow().as_ref() {
@@ -158,6 +172,7 @@ impl Controller {
                     ctx.config,
                     ctx.runtime,
                     ctx.lyrics_sender,
+                    ctx.romanization_sender,
                     ctx.lyrics_state,
                 );
             }
@@ -216,6 +231,7 @@ fn update_spotify_state(state: &SpotifyPlayerState, ctx: &SpotifyUiContext<'_>) 
             ctx.config,
             ctx.runtime,
             ctx.lyrics_sender,
+            ctx.romanization_sender,
             ctx.lyrics_state,
         );
         update_track_display(
@@ -275,6 +291,7 @@ fn ensure_lyrics_loaded(
     config: &AppConfig,
     runtime: &tokio::runtime::Handle,
     lyrics_sender: &mpsc::Sender<LyricsFetchEvent>,
+    romanization_sender: &mpsc::Sender<RomanizationEvent>,
     lyrics_state: &Rc<RefCell<LyricsDisplayState>>,
 ) {
     let fingerprint = track.fingerprint();
@@ -282,8 +299,15 @@ fn ensure_lyrics_loaded(
         return;
     }
 
-    *lyrics_state.borrow_mut() =
-        load_lyrics_for_track(track, cache, config, runtime, lyrics_sender, fingerprint);
+    *lyrics_state.borrow_mut() = load_lyrics_for_track(
+        track,
+        cache,
+        config,
+        runtime,
+        lyrics_sender,
+        romanization_sender,
+        fingerprint,
+    );
 }
 
 fn load_lyrics_for_track(
@@ -292,6 +316,7 @@ fn load_lyrics_for_track(
     config: &AppConfig,
     runtime: &tokio::runtime::Handle,
     lyrics_sender: &mpsc::Sender<LyricsFetchEvent>,
+    romanization_sender: &mpsc::Sender<RomanizationEvent>,
     fingerprint: String,
 ) -> LyricsDisplayState {
     let provider_order = active_provider_order(config);
@@ -321,7 +346,13 @@ fn load_lyrics_for_track(
         };
     };
 
-    let state = lyrics_state_from_cached(fingerprint.clone(), cached);
+    let state = lyrics_state_from_cached(
+        fingerprint.clone(),
+        cached,
+        config,
+        runtime,
+        romanization_sender,
+    );
     if config.lyrics.show_translation && !has_cached_translation(&state) {
         spawn_lyrics_fetch(
             runtime,
@@ -334,7 +365,13 @@ fn load_lyrics_for_track(
     state
 }
 
-fn lyrics_state_from_cached(fingerprint: String, cached: CachedLyrics) -> LyricsDisplayState {
+fn lyrics_state_from_cached(
+    fingerprint: String,
+    cached: CachedLyrics,
+    config: &AppConfig,
+    runtime: &tokio::runtime::Handle,
+    romanization_sender: &mpsc::Sender<RomanizationEvent>,
+) -> LyricsDisplayState {
     let lines = match timed_lines_from_raw(&cached.raw_lyrics) {
         Ok(lines) => lines,
         Err(error) => {
@@ -345,6 +382,15 @@ fn lyrics_state_from_cached(fingerprint: String, cached: CachedLyrics) -> Lyrics
             };
         }
     };
+
+    if config.lyrics.show_romanization {
+        spawn_local_romanization(
+            runtime,
+            romanization_sender.clone(),
+            fingerprint.clone(),
+            lines.clone(),
+        );
+    }
 
     let status_message = if lines.is_empty() {
         Some(Message::Text(Text::CachedLyricsNotSynced))
@@ -359,15 +405,8 @@ fn lyrics_state_from_cached(fingerprint: String, cached: CachedLyrics) -> Lyrics
     }
 }
 
-fn handle_lyrics_fetch_event(
-    event: LyricsFetchEvent,
-    floating: &dyn LyricsView,
-    cache: &dyn LyricsCache,
-    config: &AppConfig,
-    latest: &Rc<RefCell<Option<PlaybackSnapshot>>>,
-    lyrics_state: &Rc<RefCell<LyricsDisplayState>>,
-) {
-    let Some(snapshot) = latest.borrow().as_ref().cloned() else {
+fn handle_lyrics_fetch_event(event: LyricsFetchEvent, ctx: &SpotifyUiContext<'_>) {
+    let Some(snapshot) = ctx.latest.borrow().as_ref().cloned() else {
         return;
     };
     let Some(track) = snapshot.state.track.as_ref() else {
@@ -379,7 +418,7 @@ fn handle_lyrics_fetch_event(
 
     match event.result {
         Ok(fetched) => {
-            if let Err(error) = cache.insert_provider_result(ProviderResultInsert {
+            if let Err(error) = ctx.cache.insert_provider_result(ProviderResultInsert {
                 track_fingerprint: &event.track_fingerprint,
                 provider: fetched.provider,
                 provider_track_id: fetched.provider_track_id.as_deref(),
@@ -388,7 +427,7 @@ fn handle_lyrics_fetch_event(
                 score: fetched.score,
                 raw_lyrics: Some(&fetched.raw_lyrics),
             }) {
-                *lyrics_state.borrow_mut() = LyricsDisplayState {
+                *ctx.lyrics_state.borrow_mut() = LyricsDisplayState {
                     track_fingerprint: Some(event.track_fingerprint),
                     status_message: Some(Message::Detail(
                         Text::LyricsCacheWriteError,
@@ -397,8 +436,13 @@ fn handle_lyrics_fetch_event(
                     ..LyricsDisplayState::default()
                 };
             } else {
-                *lyrics_state.borrow_mut() =
-                    load_cached_lyrics_after_fetch(cache, config, event.track_fingerprint);
+                *ctx.lyrics_state.borrow_mut() = load_cached_lyrics_after_fetch(
+                    ctx.cache,
+                    ctx.config,
+                    ctx.runtime,
+                    ctx.romanization_sender,
+                    event.track_fingerprint,
+                );
             }
         }
         Err(failure) => {
@@ -408,7 +452,7 @@ fn handle_lyrics_fetch_event(
                     Message::Detail(Text::LyricsSearchFailed, detail)
                 }
             };
-            *lyrics_state.borrow_mut() = LyricsDisplayState {
+            *ctx.lyrics_state.borrow_mut() = LyricsDisplayState {
                 track_fingerprint: Some(event.track_fingerprint),
                 status_message: Some(message),
                 ..LyricsDisplayState::default()
@@ -418,9 +462,9 @@ fn handle_lyrics_fetch_event(
 
     update_track_display(
         &snapshot.state,
-        floating,
-        config,
-        lyrics_state,
+        ctx.floating,
+        ctx.config,
+        ctx.lyrics_state,
         effective_position_ms(&snapshot),
     );
 }
@@ -428,11 +472,15 @@ fn handle_lyrics_fetch_event(
 fn load_cached_lyrics_after_fetch(
     cache: &dyn LyricsCache,
     config: &AppConfig,
+    runtime: &tokio::runtime::Handle,
+    romanization_sender: &mpsc::Sender<RomanizationEvent>,
     fingerprint: String,
 ) -> LyricsDisplayState {
     let provider_order = active_provider_order(config);
     match cache.lyrics_for_track(&fingerprint, &provider_order) {
-        Ok(Some(cached)) => lyrics_state_from_cached(fingerprint, cached),
+        Ok(Some(cached)) => {
+            lyrics_state_from_cached(fingerprint, cached, config, runtime, romanization_sender)
+        }
         Ok(None) => LyricsDisplayState {
             track_fingerprint: Some(fingerprint),
             status_message: Some(Message::Text(Text::DownloadedLyricsNotStored)),
@@ -444,6 +492,45 @@ fn load_cached_lyrics_after_fetch(
             ..LyricsDisplayState::default()
         },
     }
+}
+
+fn spawn_local_romanization(
+    runtime: &tokio::runtime::Handle,
+    sender: mpsc::Sender<RomanizationEvent>,
+    track_fingerprint: String,
+    mut lines: Vec<TimedLine>,
+) {
+    runtime.spawn_blocking(move || {
+        generate_local_romanization(&mut lines);
+        let _ = sender.send(RomanizationEvent {
+            track_fingerprint,
+            lines,
+        });
+    });
+}
+
+fn apply_romanization_event(
+    event: RomanizationEvent,
+    lyrics_state: &Rc<RefCell<LyricsDisplayState>>,
+) {
+    let mut state = lyrics_state.borrow_mut();
+    if state.track_fingerprint.as_deref() == Some(event.track_fingerprint.as_str())
+        && same_lyrics_document(&state.lines, &event.lines)
+    {
+        state.lines = event.lines;
+    }
+}
+
+fn same_lyrics_document(current: &[TimedLine], generated: &[TimedLine]) -> bool {
+    current.len() == generated.len()
+        && current.iter().zip(generated).all(|(current, generated)| {
+            current.start_ms == generated.start_ms
+                && current.end_ms == generated.end_ms
+                && current.text == generated.text
+                && current.syllables == generated.syllables
+                && current.translation == generated.translation
+                && current.background == generated.background
+        })
 }
 
 fn spawn_lyrics_fetch(
@@ -480,3 +567,7 @@ fn active_provider_order(config: &AppConfig) -> Vec<floatlyrics_lyrics::lyrics::
         .providers()
         .to_vec()
 }
+
+#[cfg(test)]
+#[path = "../test/controller_test.rs"]
+mod tests;

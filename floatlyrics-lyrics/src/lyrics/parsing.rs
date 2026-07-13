@@ -24,7 +24,8 @@ pub fn parse_local_lyrics(content: &str) -> Result<LyricsData> {
 /// Parses raw provider lyrics into sorted, display-ready lines.
 ///
 /// Translation sections are merged and known metadata or credit lines are
-/// removed.
+/// removed. Provider pronunciation is intentionally discarded; call
+/// [`super::generate_local_romanization`] when local romanization is wanted.
 ///
 /// # Errors
 /// Returns an error when no supported timed format can be parsed.
@@ -35,7 +36,6 @@ pub fn timed_lines_from_raw(content: &str) -> Result<Vec<TimedLine>> {
         let translation_lines = parse_timed_lines_block(translation)?;
         merge_translation_lines(&mut lines, translation_lines);
     }
-
     if lines.is_empty() {
         Err(anyhow!("lyrics did not include timed lines"))
     } else {
@@ -70,6 +70,9 @@ pub fn export_lyrics(data: &LyricsData, ty: LyricsTypes) -> Result<String> {
 }
 
 /// Converts already parsed lyrics to sorted, display-ready lines.
+///
+/// Provider pronunciation is intentionally discarded; call
+/// [`super::generate_local_romanization`] when local romanization is wanted.
 pub fn timed_lines_from_data(data: &LyricsData) -> Vec<TimedLine> {
     let Some(lines) = data.lines.as_deref() else {
         return Vec::new();
@@ -106,10 +109,9 @@ fn timed_line_from_info(line: &LineInfo) -> Option<TimedLine> {
     let text = line.full_text();
     let syllables = timed_syllables_from_info(line);
     let translation = preferred_translation(line);
-    let romanization = pronunciation(line);
     let background = line.sub_line().map(LineInfo::text_from_any);
 
-    if text.trim().is_empty() && translation.is_none() && romanization.is_none() {
+    if text.trim().is_empty() && translation.is_none() {
         return None;
     }
 
@@ -119,7 +121,8 @@ fn timed_line_from_info(line: &LineInfo) -> Option<TimedLine> {
         text,
         syllables,
         translation,
-        romanization,
+        romanization: None,
+        romanization_segments: Vec::new(),
         background,
     })
 }
@@ -259,19 +262,6 @@ fn preferred_translation(line: &LineInfo) -> Option<String> {
         .and_then(|value| clean_optional_text(value))
 }
 
-fn pronunciation(line: &LineInfo) -> Option<String> {
-    match line {
-        LineInfo::FullLine { pronunciation, .. } | LineInfo::FullSyllable { pronunciation, .. } => {
-            pronunciation
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-        }
-        _ => None,
-    }
-}
-
 fn timed_lines_from_lrc(content: &str) -> Vec<TimedLine> {
     let mut lines = Vec::new();
 
@@ -293,6 +283,7 @@ fn timed_lines_from_lrc(content: &str) -> Vec<TimedLine> {
                     syllables: Vec::new(),
                     translation: None,
                     romanization: None,
+                    romanization_segments: Vec::new(),
                     background: None,
                 });
             }
@@ -322,6 +313,7 @@ fn timed_lines_from_qrc(content: &str) -> Vec<TimedLine> {
             syllables,
             translation: None,
             romanization: None,
+            romanization_segments: Vec::new(),
             background: None,
         });
     }

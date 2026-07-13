@@ -146,12 +146,16 @@ pub struct LyricsConfig {
     pub lyric_font_size: i32,
     /// Font size in pixels for translation text.
     pub translation_font_size: i32,
+    /// Font size in pixels for romanized text.
+    pub romanization_font_size: i32,
     /// Color for played (filled) karaoke syllables, as `#RRGGBBAA` hex.
     pub played_color: String,
     /// Color for unplayed karaoke syllables, as `#RRGGBBAA` hex.
     pub unplayed_color: String,
     /// Color for translation text, as `#RRGGBBAA` hex.
     pub translation_color: String,
+    /// Color for romanized text, as `#RRGGBBAA` hex.
+    pub romanization_color: String,
 }
 
 impl Default for LyricsConfig {
@@ -164,9 +168,11 @@ impl Default for LyricsConfig {
             font_order: default_font_order(),
             lyric_font_size: default_lyric_font_size(),
             translation_font_size: default_translation_font_size(),
+            romanization_font_size: default_romanization_font_size(),
             played_color: default_played_color(),
             unplayed_color: default_unplayed_color(),
             translation_color: default_translation_color(),
+            romanization_color: default_romanization_color(),
         }
     }
 }
@@ -257,6 +263,10 @@ fn default_translation_font_size() -> i32 {
     13
 }
 
+fn default_romanization_font_size() -> i32 {
+    12
+}
+
 fn default_played_color() -> String {
     "#FFFFFFFF".to_string()
 }
@@ -267,6 +277,10 @@ fn default_unplayed_color() -> String {
 
 fn default_translation_color() -> String {
     "#FFFFFFC7".to_string()
+}
+
+fn default_romanization_color() -> String {
+    "#B8D8F0E6".to_string()
 }
 
 fn default_spotify_prefix() -> String {

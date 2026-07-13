@@ -8,6 +8,7 @@ fn line_at(text: &str, start_ms: u64) -> TimedLine {
         syllables: vec![],
         translation: None,
         romanization: None,
+        romanization_segments: Vec::new(),
         background: None,
     }
 }

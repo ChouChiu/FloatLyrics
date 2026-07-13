@@ -32,3 +32,13 @@ fn recognizes_multiple_commands_in_argument_order() {
         [AppCommand::OpenManualSearch, AppCommand::OpenSettings]
     );
 }
+
+#[test]
+fn enabling_romanization_reloads_current_lyrics() {
+    let current = AppConfig::default();
+    let mut next = current.clone();
+    next.lyrics.show_romanization = true;
+
+    assert!(should_reload_lyrics(&current, &next));
+    assert!(!should_reload_lyrics(&next, &current));
+}

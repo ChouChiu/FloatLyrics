@@ -9,8 +9,15 @@ fn line(start_ms: u64, end_ms: Option<u64>, text: &str) -> TimedLine {
         syllables: Vec::new(),
         translation: None,
         romanization: None,
+        romanization_segments: Vec::new(),
         background: None,
     }
+}
+
+fn romanized_lines(raw: &str) -> Vec<TimedLine> {
+    let mut lines = timed_lines_from_raw(raw).unwrap();
+    generate_local_romanization(&mut lines);
+    lines
 }
 
 #[test]
@@ -88,6 +95,95 @@ fn converts_lyrics_helper_lines_to_timed_lines() {
     assert_eq!(lines[0].text, "First");
     assert_eq!(lines[1].start_ms, 3_000);
     assert_eq!(active_line_index(&lines, 3_200, 0), Some(1));
+}
+
+#[test]
+fn generates_japanese_romanization_locally() {
+    let lines = romanized_lines("[00:01.00]こんにちは世界\n[00:03.00]音楽");
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("konnichiha sekai"));
+    assert_eq!(lines[1].romanization.as_deref(), Some("ongaku"));
+}
+
+#[test]
+fn generates_chinese_pinyin_without_treating_it_as_japanese() {
+    let lines = romanized_lines("[00:01.00]你好世界\n[00:03.00]我喜欢你");
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("nǐ hǎo shì jiè"));
+    assert_eq!(lines[1].romanization.as_deref(), Some("wǒ xǐ huān nǐ"));
+}
+
+#[test]
+fn generates_romanization_for_other_languages() {
+    let cyrillic = romanized_lines("[00:01.00]Привет мир");
+    let spanish = romanized_lines("[00:01.00]¿Cómo estás?");
+    let unchanged = romanized_lines("[00:01.00]Hello world");
+
+    assert_eq!(cyrillic[0].romanization.as_deref(), Some("Privet mir"));
+    assert_eq!(spanish[0].romanization.as_deref(), Some("Como estas?"));
+    assert_eq!(unchanged[0].romanization, None);
+}
+
+#[test]
+fn recognizes_unaccented_spanish_without_repeating_english() {
+    let spanish = romanized_lines("[00:01.00]Muchas gracias mi amor");
+    let english = romanized_lines(
+        "[00:01.00]I go in all the way\n\
+         [00:02.00]LEMONADE\n\
+         [00:03.00]Way too loud\n\
+         [00:04.00]Like a hurricane",
+    );
+
+    assert_eq!(
+        spanish[0].romanization.as_deref(),
+        Some("Muchas gracias mi amor")
+    );
+    assert!(english.iter().all(|line| line.romanization.is_none()));
+}
+
+#[test]
+fn applies_korean_pronunciation_rules() {
+    let lines = romanized_lines("[00:01.00]안녕하세요 세계\n[00:03.00]왕십리 같이");
+
+    assert_eq!(
+        lines[0].romanization.as_deref(),
+        Some("annyeonghaseyo segye")
+    );
+    assert_eq!(lines[1].romanization.as_deref(), Some("wangsimni gachi"));
+}
+
+#[test]
+fn replaces_romanization_supplied_by_the_lyrics_source() {
+    let mut lines = vec![line(1_000, None, "こんにちは")];
+    lines[0].romanization = Some("source romanization".to_string());
+
+    generate_local_romanization(&mut lines);
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("konnichiha"));
+}
+
+#[test]
+fn distinguishes_chinese_lines_in_mixed_japanese_lyrics() {
+    let lines = romanized_lines("[00:01.00]こんにちは\n[00:03.00]我喜欢你");
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("konnichiha"));
+    assert_eq!(lines[1].romanization.as_deref(), Some("wǒ xǐ huān nǐ"));
+}
+
+#[test]
+fn recognizes_japanese_lyrics_written_only_with_kanji() {
+    let lines = romanized_lines("[00:01.00]愛\n[00:03.00]音楽");
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("ai"));
+    assert_eq!(lines[1].romanization.as_deref(), Some("ongaku"));
+}
+
+#[test]
+fn parsing_does_not_generate_romanization_until_requested() {
+    let lines = timed_lines_from_raw("[00:01.00]¿Cómo estás?").unwrap();
+
+    assert_eq!(lines[0].romanization, None);
+    assert!(lines[0].romanization_segments.is_empty());
 }
 
 #[test]

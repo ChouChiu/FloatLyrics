@@ -42,6 +42,7 @@ pub(super) struct KaraokeRenderState {
 pub(super) struct LyricSlotText {
     pub(super) text: String,
     pub(super) karaoke: Option<KaraokeRenderState>,
+    pub(super) romanization: String,
     pub(super) translation: String,
 }
 
@@ -54,6 +55,7 @@ impl LyricSlotText {
         Self {
             text: message.to_string(),
             karaoke: None,
+            romanization: String::new(),
             translation: String::new(),
         }
     }
@@ -105,28 +107,29 @@ fn line_text(line: Option<&TimedLine>, config: &AppConfig) -> LyricSlotText {
     let Some(line) = line else {
         return LyricSlotText::empty();
     };
-    let mut text = line.text.trim().to_string();
-    if config.lyrics.show_translation
+    let text = line.text.trim().to_string();
+    let translation = if config.lyrics.show_translation
         && let Some(translation) = line.translation.as_deref().map(str::trim)
         && !translation.is_empty()
         && !is_placeholder_text(translation)
     {
-        return LyricSlotText {
-            text,
-            karaoke: None,
-            translation: translation.to_string(),
-        };
-    }
-    if config.lyrics.show_romanization
+        translation.to_string()
+    } else {
+        String::new()
+    };
+    let romanization = if config.lyrics.show_romanization
         && let Some(romanization) = line.romanization.as_deref().map(str::trim)
         && !romanization.is_empty()
     {
-        text = format!("{text}  /  {romanization}");
-    }
+        romanization.to_string()
+    } else {
+        String::new()
+    };
     LyricSlotText {
         text,
         karaoke: None,
-        translation: String::new(),
+        romanization,
+        translation,
     }
 }
 

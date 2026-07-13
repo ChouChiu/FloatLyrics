@@ -153,7 +153,7 @@ impl SimpleComponent for AppModel {
                 i18n: i18n.clone(),
             })
             .forward(sender.input_sender(), |output| match output {
-                settings::SettingsOutput::Saved(config) => AppMsg::ConfigChanged(config),
+                settings::SettingsOutput::Saved(config) => AppMsg::ConfigChanged(*config),
                 settings::SettingsOutput::OpenAbout => AppMsg::OpenAbout,
             });
 
@@ -202,11 +202,7 @@ impl SimpleComponent for AppModel {
                 let _ = self.about.sender().send(about::AboutMsg::Show);
             }
             AppMsg::ConfigChanged(next_config) => {
-                let reload_lyrics = {
-                    let current = self.config.borrow();
-                    current.lyrics.provider_order != next_config.lyrics.provider_order
-                        || (!current.lyrics.show_translation && next_config.lyrics.show_translation)
-                };
+                let reload_lyrics = should_reload_lyrics(&self.config.borrow(), &next_config);
                 self.overlay.apply_config(&next_config);
                 self.i18n.set_language(next_config.general.language);
                 *self.config.borrow_mut() = next_config;
@@ -227,6 +223,12 @@ impl SimpleComponent for AppModel {
             LyricsPresentation::Status(key) => self.overlay.show_status(*key),
         }
     }
+}
+
+fn should_reload_lyrics(current: &AppConfig, next: &AppConfig) -> bool {
+    current.lyrics.provider_order != next.lyrics.provider_order
+        || (!current.lyrics.show_translation && next.lyrics.show_translation)
+        || (!current.lyrics.show_romanization && next.lyrics.show_romanization)
 }
 
 /// Starts the GTK application with resolved `paths` and loaded `config`.

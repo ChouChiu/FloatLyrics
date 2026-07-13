@@ -8,18 +8,20 @@
 
 mod model;
 mod parsing;
+mod romanization;
 mod search;
 mod timeline;
 
 pub use lyrics_helper::{LineInfo, LyricsData, LyricsTypes, generate_string, parse_auto};
 pub use model::{
-    FetchedLyrics, LyricsCandidate, LyricsProvider, LyricsProviderParseError, TimedLine,
-    TimedSyllable,
+    FetchedLyrics, LyricsCandidate, LyricsProvider, LyricsProviderParseError, RomanizationSegment,
+    TimedLine, TimedSyllable,
 };
 pub use parsing::{
     combine_lyrics_with_translation, export_lyrics, parse_local_lyrics, timed_lines_from_data,
     timed_lines_from_raw,
 };
+pub use romanization::generate_local_romanization;
 pub use search::{
     SearchPlan, fetch_candidate_lyrics, search_best_lyrics, search_lyrics_candidates,
 };

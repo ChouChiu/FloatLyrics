@@ -36,6 +36,7 @@ const PANEL_HORIZONTAL_GUTTER: i32 = 32;
 const PANEL_CHROME_WIDTH: i32 = 28;
 const TEXT_HORIZONTAL_PADDING: i32 = 24;
 const MIN_KARAOKE_HEIGHT: i32 = 36;
+const MIN_ROMANIZATION_HEIGHT: i32 = 18;
 const MIN_TRANSLATION_HEIGHT: i32 = 18;
 const LYRICS_TRANSITION_DURATION_MS: u32 = 180;
 const FALLBACK_PANEL_HEIGHT: i32 = 84;
@@ -44,13 +45,24 @@ fn karaoke_line_height(lyric_font_px: i32) -> i32 {
     (lyric_font_px as f64 * 1.5).ceil() as i32
 }
 
-fn translation_line_height(translation_font_px: i32) -> i32 {
-    (translation_font_px as f64 * 1.5).ceil() as i32
+fn secondary_line_height(font_px: i32) -> i32 {
+    (font_px as f64 * 1.5).ceil() as i32
 }
 
-fn viewport_height(lyric_font_px: i32, translation_font_px: i32) -> i32 {
+fn viewport_height(
+    lyric_font_px: i32,
+    romanization_font_px: i32,
+    translation_font_px: i32,
+    show_romanization: bool,
+) -> i32 {
+    let romanization_height = if show_romanization {
+        secondary_line_height(romanization_font_px).max(MIN_ROMANIZATION_HEIGHT)
+    } else {
+        0
+    };
     karaoke_line_height(lyric_font_px).max(MIN_KARAOKE_HEIGHT)
-        + translation_line_height(translation_font_px).max(MIN_TRANSLATION_HEIGHT)
+        + romanization_height
+        + secondary_line_height(translation_font_px).max(MIN_TRANSLATION_HEIGHT)
 }
 
 struct OverlayPanelInit {
@@ -198,6 +210,7 @@ pub(super) struct OverlayView {
     i18n: I18n,
     static_status: Rc<RefCell<Option<Text>>>,
     lyric_font_size: Rc<Cell<i32>>,
+    romanization_font_size: Rc<Cell<i32>>,
     translation_font_size: Rc<Cell<i32>>,
     karaoke_played_color: Rc<Cell<(f64, f64, f64, f64)>>,
     karaoke_unplayed_color: Rc<Cell<(f64, f64, f64, f64)>>,
@@ -206,6 +219,9 @@ pub(super) struct OverlayView {
 #[derive(Clone)]
 struct LyricSlotWidgets {
     text: gtk::Label,
+    romanization_area: gtk::DrawingArea,
+    romanization_state: Rc<RefCell<TextLineRenderState>>,
+    romanization_row: gtk::Box,
     translation_area: gtk::DrawingArea,
     translation_state: Rc<RefCell<TextLineRenderState>>,
     translation_row: gtk::Box,
@@ -230,7 +246,9 @@ pub(super) fn build(
     let karaoke_height = karaoke_line_height(config.lyrics.lyric_font_size).max(MIN_KARAOKE_HEIGHT);
     let viewport_h = viewport_height(
         config.lyrics.lyric_font_size,
+        config.lyrics.romanization_font_size,
         config.lyrics.translation_font_size,
+        config.lyrics.show_romanization,
     );
     let font_family = Rc::new(RefCell::new(font_family(&config.lyrics.font_order)));
     window.set_title(Some("FloatLyrics Overlay"));
@@ -270,17 +288,20 @@ pub(super) fn build(
     bind_button_tooltip(&close_button, &i18n, Text::CloseTooltip);
 
     let lyric_font_size = Rc::new(Cell::new(config.lyrics.lyric_font_size));
+    let romanization_font_size = Rc::new(Cell::new(config.lyrics.romanization_font_size));
     let translation_font_size = Rc::new(Cell::new(config.lyrics.translation_font_size));
     let karaoke_played_color = Rc::new(Cell::new(parse_hex_color(&config.lyrics.played_color)));
     let karaoke_unplayed_color = Rc::new(Cell::new(parse_hex_color(&config.lyrics.unplayed_color)));
     let translation_color = parse_hex_color(&config.lyrics.translation_color);
+    let romanization_color = parse_hex_color(&config.lyrics.romanization_color);
 
     let primary = lyric_slot(
         ["floating-slot-current"],
         ["floating-lyric-current"],
         i18n.text(Text::OpenSpotify),
         Some((panel_width, karaoke_height)),
-        translation_style(true, config.lyrics.translation_font_size, translation_color),
+        secondary_text_style(config.lyrics.romanization_font_size, romanization_color),
+        secondary_text_style(config.lyrics.translation_font_size, translation_color),
         panel_width,
         Rc::clone(&font_family),
         Rc::clone(&lyric_font_size),
@@ -292,7 +313,8 @@ pub(super) fn build(
         ["floating-lyric-current"],
         "",
         Some((panel_width, karaoke_height)),
-        translation_style(true, config.lyrics.translation_font_size, translation_color),
+        secondary_text_style(config.lyrics.romanization_font_size, romanization_color),
+        secondary_text_style(config.lyrics.translation_font_size, translation_color),
         panel_width,
         Rc::clone(&font_family),
         Rc::clone(&lyric_font_size),
@@ -348,6 +370,7 @@ pub(super) fn build(
     load_font_size_css(
         &font_size_provider,
         config.lyrics.lyric_font_size,
+        config.lyrics.romanization_font_size,
         config.lyrics.translation_font_size,
     );
     if let Some(display) = gtk::gdk::Display::default() {
@@ -375,6 +398,7 @@ pub(super) fn build(
         i18n: i18n.clone(),
         static_status: Rc::new(RefCell::new(Some(Text::OpenSpotify))),
         lyric_font_size,
+        romanization_font_size,
         translation_font_size,
         karaoke_played_color,
         karaoke_unplayed_color,
@@ -396,6 +420,7 @@ fn lyric_slot(
     text_classes: [&str; 1],
     initial_text: &str,
     karaoke_size: Option<(i32, i32)>,
+    romanization_style: TextLineStyle,
     translation_style: TextLineStyle,
     panel_width: i32,
     font_family: Rc<RefCell<String>>,
@@ -423,11 +448,19 @@ fn lyric_slot(
     );
     let (translation_area, translation_state) = text_line_area(
         panel_width,
-        translation_line_height(translation_style.font_px).max(MIN_TRANSLATION_HEIGHT),
+        secondary_line_height(translation_style.font_px).max(MIN_TRANSLATION_HEIGHT),
         translation_style,
         &font_family.borrow(),
     );
+    let (romanization_area, romanization_state) = text_line_area(
+        panel_width,
+        secondary_line_height(romanization_style.font_px).max(MIN_ROMANIZATION_HEIGHT),
+        romanization_style,
+        &font_family.borrow(),
+    );
     let text_row = lyric_line_row(&text_widget, 0, 0);
+    let romanization_widget: gtk::Widget = romanization_area.clone().upcast();
+    let romanization_row = lyric_line_row(&romanization_widget, 0, 0);
     let translation_widget: gtk::Widget = translation_area.clone().upcast();
     let translation_row = lyric_line_row(&translation_widget, 0, 0);
 
@@ -436,10 +469,14 @@ fn lyric_slot(
     container.set_valign(gtk::Align::Center);
     container.add_css_class(container_classes[0]);
     container.append(&text_row);
+    container.append(&romanization_row);
     container.append(&translation_row);
 
     LyricSlotWidgets {
         text,
+        romanization_area,
+        romanization_state,
+        romanization_row,
         translation_area,
         translation_state,
         translation_row,
@@ -449,16 +486,7 @@ fn lyric_slot(
     }
 }
 
-fn translation_style(
-    is_current: bool,
-    translation_font_px: i32,
-    color: (f64, f64, f64, f64),
-) -> TextLineStyle {
-    let font_px = if is_current {
-        translation_font_px
-    } else {
-        (translation_font_px * 5 / 6).max(8)
-    };
+fn secondary_text_style(font_px: i32, color: (f64, f64, f64, f64)) -> TextLineStyle {
     TextLineStyle { font_px, color }
 }
 
@@ -506,8 +534,17 @@ fn load_font_css(provider: &gtk::CssProvider, family: &str) {
     ));
 }
 
-fn load_font_size_css(provider: &gtk::CssProvider, lyric_px: i32, translation_px: i32) {
-    provider.load_from_string(&css::font_size_css(lyric_px, translation_px));
+fn load_font_size_css(
+    provider: &gtk::CssProvider,
+    lyric_px: i32,
+    romanization_px: i32,
+    translation_px: i32,
+) {
+    provider.load_from_string(&css::font_size_css(
+        lyric_px,
+        romanization_px,
+        translation_px,
+    ));
 }
 
 fn expanded_panel_width(compact_width: i32, content_width: i32, maximum_width: i32) -> i32 {
@@ -529,13 +566,13 @@ fn lyric_line_row(widget: &gtk::Widget, margin_top: i32, margin_bottom: i32) -> 
 fn set_lyrics_slots(floating: &OverlayView, current: LyricSlotText, animation_key: &str) {
     let key_changed =
         floating.lyrics_transition.borrow().current_key.as_deref() != Some(animation_key);
-    if key_changed {
-        floating.resize_for_lyrics(&current);
-    }
-
     let (slot_index, should_transition) =
         select_lyric_slot(&mut floating.lyrics_transition.borrow_mut(), animation_key);
     let slot = &floating.lyric_slots[slot_index];
+    let romanization_changed = slot.romanization_state.borrow().text != current.romanization;
+    if key_changed || romanization_changed {
+        floating.resize_for_lyrics(&current);
+    }
     set_lyric_slot(slot, &current);
 
     if should_transition {
@@ -582,10 +619,17 @@ fn set_lyric_slot(slot: &LyricSlotWidgets, value: &LyricSlotText) {
             area.set_visible(false);
         }
     }
+    let has_romanization = !value.romanization.trim().is_empty();
+    slot.romanization_state.borrow_mut().text = value.romanization.clone();
+    slot.romanization_area.set_visible(has_romanization);
+    slot.romanization_area.queue_draw();
+    slot.romanization_row.set_visible(has_romanization);
+
+    let has_translation = !value.translation.trim().is_empty();
     slot.translation_state.borrow_mut().text = value.translation.clone();
-    slot.translation_area.set_visible(true);
+    slot.translation_area.set_visible(has_translation);
     slot.translation_area.queue_draw();
-    slot.translation_row.set_visible(true);
+    slot.translation_row.set_visible(has_translation);
 }
 
 impl OverlayView {
@@ -613,6 +657,7 @@ impl OverlayView {
         self.content.set_width_request(width);
         self.lyrics_stack.set_width_request(width);
         for slot in &self.lyric_slots {
+            slot.romanization_area.set_width_request(width);
             slot.translation_area.set_width_request(width);
             if let Some(area) = &slot.karaoke_area {
                 area.set_width_request(width);
@@ -639,29 +684,44 @@ impl OverlayView {
         load_font_size_css(
             &self.font_size_provider,
             config.lyrics.lyric_font_size,
+            config.lyrics.romanization_font_size,
             config.lyrics.translation_font_size,
         );
         self.lyric_font_size.set(config.lyrics.lyric_font_size);
+        self.romanization_font_size
+            .set(config.lyrics.romanization_font_size);
         self.translation_font_size
             .set(config.lyrics.translation_font_size);
         let karaoke_h = karaoke_line_height(config.lyrics.lyric_font_size).max(MIN_KARAOKE_HEIGHT);
-        let translation_h = translation_line_height(config.lyrics.translation_font_size)
-            .max(MIN_TRANSLATION_HEIGHT);
+        let romanization_h = secondary_line_height(config.lyrics.romanization_font_size)
+            .max(MIN_ROMANIZATION_HEIGHT);
+        let translation_h =
+            secondary_line_height(config.lyrics.translation_font_size).max(MIN_TRANSLATION_HEIGHT);
+        let romanization_viewport_h = if config.lyrics.show_romanization {
+            romanization_h
+        } else {
+            0
+        };
         self.lyrics_stack
-            .set_height_request(karaoke_h + translation_h);
+            .set_height_request(karaoke_h + romanization_viewport_h + translation_h);
         self.karaoke_played_color
             .set(parse_hex_color(&config.lyrics.played_color));
         self.karaoke_unplayed_color
             .set(parse_hex_color(&config.lyrics.unplayed_color));
+        let romanization_color = parse_hex_color(&config.lyrics.romanization_color);
         let translation_color = parse_hex_color(&config.lyrics.translation_color);
         let family = font_family(&config.lyrics.font_order);
         *self.font_family.borrow_mut() = family.clone();
         load_font_css(&self.font_provider, &family);
         for slot in &self.lyric_slots {
+            slot.romanization_state.borrow_mut().font_family = family.clone();
+            slot.romanization_state.borrow_mut().style =
+                secondary_text_style(config.lyrics.romanization_font_size, romanization_color);
+            slot.romanization_area.set_height_request(romanization_h);
+            slot.romanization_area.queue_draw();
             slot.translation_state.borrow_mut().font_family = family.clone();
-            let new_translation_style =
-                translation_style(true, config.lyrics.translation_font_size, translation_color);
-            slot.translation_state.borrow_mut().style = new_translation_style;
+            slot.translation_state.borrow_mut().style =
+                secondary_text_style(config.lyrics.translation_font_size, translation_color);
             slot.translation_area.set_height_request(translation_h);
             slot.translation_area.queue_draw();
             if let Some(area) = &slot.karaoke_area {
@@ -679,6 +739,7 @@ impl OverlayView {
             value,
             &self.font_family.borrow(),
             self.lyric_font_size.get(),
+            self.romanization_font_size.get(),
             self.translation_font_size.get(),
         )
         .saturating_add(TEXT_HORIZONTAL_PADDING);
@@ -694,6 +755,7 @@ impl OverlayView {
         self.content.set_width_request(width);
         self.lyrics_stack.set_width_request(width);
         for slot in &self.lyric_slots {
+            slot.romanization_area.set_width_request(width);
             slot.translation_area.set_width_request(width);
             if let Some(area) = &slot.karaoke_area {
                 area.set_width_request(width);

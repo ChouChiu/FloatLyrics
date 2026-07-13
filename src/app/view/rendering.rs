@@ -44,6 +44,7 @@ pub(super) fn lyric_content_width(
     value: &LyricSlotText,
     font_family: &str,
     lyric_font_px: i32,
+    romanization_font_px: i32,
     translation_font_px: i32,
 ) -> i32 {
     let lyric_text = value
@@ -52,6 +53,13 @@ pub(super) fn lyric_content_width(
         .map_or(value.text.as_str(), |karaoke| karaoke.text.as_str());
     let lyric_width =
         text_pixel_width(measure_widget, lyric_text, lyric_font_px, true, font_family);
+    let romanization_width = text_pixel_width(
+        measure_widget,
+        &value.romanization,
+        romanization_font_px,
+        false,
+        font_family,
+    );
     let translation_width = text_pixel_width(
         measure_widget,
         &value.translation,
@@ -60,7 +68,7 @@ pub(super) fn lyric_content_width(
         font_family,
     );
 
-    lyric_width.max(translation_width)
+    lyric_width.max(romanization_width).max(translation_width)
 }
 
 fn text_pixel_width(

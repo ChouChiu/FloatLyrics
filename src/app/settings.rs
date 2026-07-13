@@ -68,14 +68,16 @@ pub(super) enum SettingsMsg {
     SetProviderOrder(Vec<LyricsProvider>),
     SetLyricFontSize(i32),
     SetTranslationFontSize(i32),
+    SetRomanizationFontSize(i32),
     SetPlayedColor(String),
     SetUnplayedColor(String),
     SetTranslationColor(String),
+    SetRomanizationColor(String),
 }
 
 #[derive(Debug)]
 pub(super) enum SettingsOutput {
-    Saved(AppConfig),
+    Saved(Box<AppConfig>),
     OpenAbout,
 }
 
@@ -250,6 +252,9 @@ impl SimpleComponent for SettingsModel {
             SettingsMsg::SetTranslationFontSize(value) => {
                 self.draft.borrow_mut().lyrics.translation_font_size = value;
             }
+            SettingsMsg::SetRomanizationFontSize(value) => {
+                self.draft.borrow_mut().lyrics.romanization_font_size = value;
+            }
             SettingsMsg::SetPlayedColor(value) => {
                 self.draft.borrow_mut().lyrics.played_color = value;
             }
@@ -258,6 +263,9 @@ impl SimpleComponent for SettingsModel {
             }
             SettingsMsg::SetTranslationColor(value) => {
                 self.draft.borrow_mut().lyrics.translation_color = value;
+            }
+            SettingsMsg::SetRomanizationColor(value) => {
+                self.draft.borrow_mut().lyrics.romanization_color = value;
             }
         }
         if should_persist {
@@ -268,7 +276,7 @@ impl SimpleComponent for SettingsModel {
                     self.status
                         .set_label(&self.status_state.borrow().render(self.i18n.language()));
                     self.status.remove_css_class("error");
-                    let _ = sender.output(SettingsOutput::Saved(next));
+                    let _ = sender.output(SettingsOutput::Saved(Box::new(next)));
                 }
                 Err(error) => {
                     *self.status_state.borrow_mut() = SaveState::Failed(error.to_string());
@@ -463,6 +471,16 @@ fn display_page(
         SettingsMsg::SetTranslationFontSize,
     );
 
+    let romanization_font_size = gtk::SpinButton::with_range(8.0, 36.0, 1.0);
+    romanization_font_size.set_value(config.lyrics.romanization_font_size as f64);
+    romanization_font_size.set_numeric(true);
+    romanization_font_size.set_width_chars(8);
+    connect_window_i32(
+        &romanization_font_size,
+        sender,
+        SettingsMsg::SetRomanizationFontSize,
+    );
+
     page(
         i18n,
         Text::DisplayTitle,
@@ -503,6 +521,12 @@ fn display_page(
                     Text::TranslationFontSizeDescription,
                     &translation_font_size,
                 ),
+                setting_row(
+                    i18n,
+                    Text::RomanizationFontSize,
+                    Text::RomanizationFontSizeDescription,
+                    &romanization_font_size,
+                ),
             ]),
             setting_card(&[
                 color_row(
@@ -528,6 +552,14 @@ fn display_page(
                     &config.lyrics.translation_color,
                     sender.clone(),
                     SettingsMsg::SetTranslationColor,
+                ),
+                color_row(
+                    i18n,
+                    Text::RomanizationColor,
+                    Text::RomanizationColorDescription,
+                    &config.lyrics.romanization_color,
+                    sender.clone(),
+                    SettingsMsg::SetRomanizationColor,
                 ),
             ]),
         ],
