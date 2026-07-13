@@ -15,7 +15,7 @@ use floatlyrics_lyrics::{
     cache::{LyricsCache, LyricsInsert},
     lyrics::{
         FetchedLyrics, LyricsCandidate, LyricsProvider, fetch_candidate_lyrics,
-        search_lyrics_candidates,
+        search_lyrics_candidates, simplify_search_text,
     },
 };
 
@@ -575,8 +575,9 @@ impl SimpleComponent for ManualSearchModel {
         match message {
             ManualSearchMsg::Show => {
                 if let Some(track) = self.controller.current_track() {
-                    self.title.set_text(&track.title);
-                    self.artist.set_text(&track.display_artist());
+                    let (title, artist) = search_field_values(&track);
+                    self.title.set_text(&title);
+                    self.artist.set_text(&artist);
                 }
                 self.visible = true;
                 (self.start_search)();
@@ -587,6 +588,13 @@ impl SimpleComponent for ManualSearchModel {
             ManualSearchMsg::Event(event) => (self.handle_event)(event),
         }
     }
+}
+
+fn search_field_values(track: &TrackMetadata) -> (String, String) {
+    (
+        simplify_search_text(&track.title),
+        simplify_search_text(&track.display_artist()),
+    )
 }
 
 fn candidate_row(candidate: &LyricsCandidate, language: Language) -> gtk::ListBoxRow {

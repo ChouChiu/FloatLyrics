@@ -39,3 +39,23 @@ fn search_plan_removes_non_adjacent_duplicate_providers() {
         &[LyricsProvider::QqMusic, LyricsProvider::NetEase]
     );
 }
+
+#[test]
+fn provider_metadata_converts_traditional_chinese_for_search() {
+    let track = TrackMetadata {
+        title: "喜歡你".to_string(),
+        artists: vec!["G.E.M.鄧紫棋".to_string()],
+        album: Some("喜歡你".to_string()),
+        duration_ms: Some(235_000),
+        mpris_track_id: Some("spotify:track:example".to_string()),
+    };
+
+    let metadata = lyrics_helper_metadata(&track);
+
+    assert_eq!(metadata.title.as_deref(), Some("喜欢你"));
+    assert_eq!(metadata.artist.as_deref(), Some("G.E.M.邓紫棋"));
+    assert_eq!(metadata.artists, Some(vec!["G.E.M.邓紫棋".to_string()]));
+    assert_eq!(metadata.album.as_deref(), Some("喜欢你"));
+    assert_eq!(track.title, "喜歡你");
+    assert_eq!(track.artists, ["G.E.M.鄧紫棋"]);
+}
