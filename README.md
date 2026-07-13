@@ -176,6 +176,14 @@ mpris_prefix = "org.mpris.MediaPlayer2.spotify"
 
 欢迎提交 bug、功能建议、歌词解析改进、翻译和文档修正。开始编码前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)；较大的功能或行为变更建议先开 issue 讨论。
 
+## 致谢
+
+感谢 [LyricsX](https://github.com/MxIris-LyricsX-Project/LyricsX) 与 [Lyricify-App](https://github.com/WXRIW/Lyricify-App) 为 FloatLyrics 带来灵感，本项目的部分功能与交互设计参考了 LyricsX。
+
+感谢 [OpenAI](https://openai.com/) 与 [DeepSeek](https://www.deepseek.com/) 带来如此出色的 AI 模型，本项目在开发过程中使用了这些模型生成代码与文档。
+
+感谢 AUR 软件包维护者 [NihilDigit](https://github.com/NihilDigit) 与 [Integral-Tech](https://github.com/Integral-Tech) 为 FloatLyrics 提供并维护 Arch Linux 软件包。
+
 ## 许可证
 
 FloatLyrics 以 [GPL-3.0-or-later](LICENSE) 许可发布。
