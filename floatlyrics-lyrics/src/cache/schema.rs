@@ -54,3 +54,24 @@ pub(super) const MIGRATION: &str = r#"
     CREATE INDEX IF NOT EXISTS provider_results_track_provider_score
         ON provider_results(track_fingerprint, provider, score DESC, id DESC);
 "#;
+
+pub(super) const PROVIDER_RESULTS_CONTENT_UNIQUE_MIGRATION: &str = r#"
+    DELETE FROM provider_results
+    WHERE id NOT IN (
+        SELECT MAX(id)
+        FROM provider_results
+        GROUP BY
+            track_fingerprint,
+            provider,
+            COALESCE(provider_track_id, ''),
+            COALESCE(raw_lyrics, '')
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS provider_results_content_unique
+        ON provider_results (
+            track_fingerprint,
+            provider,
+            COALESCE(provider_track_id, ''),
+            COALESCE(raw_lyrics, '')
+        );
+"#;

@@ -111,3 +111,66 @@ fn initial_fetch_failure_replaces_searching_status() {
         Some(Message::Text(Text::NoLyricsFound))
     );
 }
+
+#[test]
+fn manual_lyrics_without_translation_do_not_trigger_provider_refresh() {
+    let cached = CachedLyrics {
+        manually_selected: true,
+        id: 1,
+        provider: floatlyrics_lyrics::lyrics::LyricsProvider::QqMusic,
+        provider_track_id: Some("manual".to_string()),
+        title: "Song".to_string(),
+        artists: vec!["Artist".to_string()],
+        raw_lyrics: "[00:01.00]manual lyrics".to_string(),
+    };
+    let state = LyricsDisplayState {
+        track_fingerprint: Some("track".to_string()),
+        lines: vec![line("manual lyrics")],
+        status_message: None,
+    };
+
+    assert!(!should_refresh_translation(
+        &cached,
+        &state,
+        &AppConfig::default(),
+    ));
+}
+
+#[test]
+fn background_cache_write_failure_preserves_loaded_lyrics() {
+    let mut state = LyricsDisplayState {
+        track_fingerprint: Some("track".to_string()),
+        lines: vec![line("manual lyrics")],
+        status_message: None,
+    };
+
+    assert!(!apply_lyrics_cache_write_failure(
+        &mut state,
+        "track".to_string(),
+        "database is locked".to_string(),
+    ));
+    assert_eq!(state.lines[0].text, "manual lyrics");
+    assert_eq!(state.status_message, None);
+}
+
+#[test]
+fn initial_cache_write_failure_replaces_searching_status() {
+    let mut state = LyricsDisplayState {
+        track_fingerprint: Some("track".to_string()),
+        status_message: Some(Message::Text(Text::SearchingLyrics)),
+        ..LyricsDisplayState::default()
+    };
+
+    assert!(apply_lyrics_cache_write_failure(
+        &mut state,
+        "track".to_string(),
+        "disk is read-only".to_string(),
+    ));
+    assert_eq!(
+        state.status_message,
+        Some(Message::Detail(
+            Text::LyricsCacheWriteError,
+            "disk is read-only".to_string(),
+        ))
+    );
+}

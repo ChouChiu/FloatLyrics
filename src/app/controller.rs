@@ -353,12 +353,12 @@ fn load_lyrics_for_track(
 
     let state = lyrics_state_from_cached(
         fingerprint.clone(),
-        cached,
+        &cached,
         config,
         runtime,
         romanization_sender,
     );
-    if config.lyrics.show_translation && !has_cached_translation(&state) {
+    if should_refresh_translation(&cached, &state, config) {
         spawn_lyrics_fetch(
             runtime,
             lyrics_sender.clone(),
@@ -372,7 +372,7 @@ fn load_lyrics_for_track(
 
 fn lyrics_state_from_cached(
     fingerprint: String,
-    cached: CachedLyrics,
+    cached: &CachedLyrics,
     config: &AppConfig,
     runtime: &tokio::runtime::Handle,
     romanization_sender: &mpsc::Sender<RomanizationEvent>,
@@ -438,14 +438,14 @@ fn handle_lyrics_fetch_event(event: LyricsFetchEvent, ctx: &SpotifyUiContext<'_>
                 score: fetched.score,
                 raw_lyrics: Some(&fetched.raw_lyrics),
             }) {
-                *ctx.lyrics_state.borrow_mut() = LyricsDisplayState {
-                    track_fingerprint: Some(event.track_fingerprint),
-                    status_message: Some(Message::Detail(
-                        Text::LyricsCacheWriteError,
-                        error.to_string(),
-                    )),
-                    ..LyricsDisplayState::default()
-                };
+                tracing::warn!(%error, "failed to cache fetched lyrics");
+                if !apply_lyrics_cache_write_failure(
+                    &mut ctx.lyrics_state.borrow_mut(),
+                    event.track_fingerprint,
+                    error.to_string(),
+                ) {
+                    return;
+                }
             } else {
                 *ctx.lyrics_state.borrow_mut() = load_cached_lyrics_after_fetch(
                     ctx.cache,
@@ -497,6 +497,23 @@ fn apply_lyrics_fetch_failure(
     true
 }
 
+fn apply_lyrics_cache_write_failure(
+    state: &mut LyricsDisplayState,
+    track_fingerprint: String,
+    detail: String,
+) -> bool {
+    if state.status_message != Some(Message::Text(Text::SearchingLyrics)) {
+        return false;
+    }
+
+    *state = LyricsDisplayState {
+        track_fingerprint: Some(track_fingerprint),
+        status_message: Some(Message::Detail(Text::LyricsCacheWriteError, detail)),
+        ..LyricsDisplayState::default()
+    };
+    true
+}
+
 fn load_cached_lyrics_after_fetch(
     cache: &dyn LyricsCache,
     config: &AppConfig,
@@ -507,7 +524,7 @@ fn load_cached_lyrics_after_fetch(
     let provider_order = active_provider_order(config);
     match cache.lyrics_for_track(&fingerprint, &provider_order) {
         Ok(Some(cached)) => {
-            lyrics_state_from_cached(fingerprint, cached, config, runtime, romanization_sender)
+            lyrics_state_from_cached(fingerprint, &cached, config, runtime, romanization_sender)
         }
         Ok(None) => LyricsDisplayState {
             track_fingerprint: Some(fingerprint),
@@ -592,6 +609,14 @@ fn has_cached_translation(state: &LyricsDisplayState) -> bool {
             .as_deref()
             .is_some_and(|value| !value.trim().is_empty())
     })
+}
+
+fn should_refresh_translation(
+    cached: &CachedLyrics,
+    state: &LyricsDisplayState,
+    config: &AppConfig,
+) -> bool {
+    !cached.manually_selected && config.lyrics.show_translation && !has_cached_translation(state)
 }
 
 fn active_provider_order(config: &AppConfig) -> Vec<floatlyrics_lyrics::lyrics::LyricsProvider> {

@@ -55,6 +55,8 @@ pub trait LyricsCache {
 /// Lyrics document returned by a cache lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CachedLyrics {
+    /// Whether this document was explicitly selected for the track.
+    pub manually_selected: bool,
     /// Backend-specific row identifier.
     pub id: i64,
     /// Provider that supplied the document.
@@ -106,6 +108,22 @@ impl Cache {
 
     fn migrate(&self) -> Result<()> {
         self.conn.execute_batch(schema::MIGRATION)?;
+        let has_content_unique_index: bool = self.conn.query_row(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM sqlite_master
+                WHERE type = 'index' AND name = 'provider_results_content_unique'
+            )
+            "#,
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_content_unique_index {
+            self.conn
+                .execute_batch(schema::PROVIDER_RESULTS_CONTENT_UNIQUE_MIGRATION)
+                .context("creating provider result content index")?;
+        }
         Ok(())
     }
 
@@ -211,7 +229,7 @@ impl Cache {
                 WHERE manual_matches.track_fingerprint = ?1
                 "#,
                 params_from_iter([track_fingerprint]),
-                row_to_cached_lyrics,
+                |row| row_to_cached_lyrics(row, true),
             )
             .optional()
             .context("loading manual lyrics match")
@@ -232,7 +250,7 @@ impl Cache {
                 LIMIT 1
                 "#,
                 params_from_iter([track_fingerprint, provider.as_str()]),
-                row_to_cached_lyrics,
+                |row| row_to_cached_lyrics(row, false),
             )
             .optional()
             .context("loading cached provider result")
@@ -240,11 +258,17 @@ impl Cache {
 
     fn insert_provider_result(&self, result: ProviderResultInsert<'_>) -> Result<i64> {
         let artists_json = serde_json::to_string(result.artists)?;
-        self.conn.execute(
+        self.conn.query_row(
             r#"
             INSERT INTO provider_results
                 (track_fingerprint, provider, provider_track_id, title, artists_json, score, raw_lyrics)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ON CONFLICT DO UPDATE SET
+                title = excluded.title,
+                artists_json = excluded.artists_json,
+                score = excluded.score,
+                created_at = CURRENT_TIMESTAMP
+            RETURNING id
             "#,
             params![
                 result.track_fingerprint,
@@ -255,8 +279,9 @@ impl Cache {
                 result.score,
                 result.raw_lyrics
             ],
-        )?;
-        Ok(self.conn.last_insert_rowid())
+            |row| row.get(0),
+        )
+        .context("storing provider result")
     }
 }
 
@@ -320,10 +345,14 @@ pub struct ProviderResultInsert<'a> {
     pub raw_lyrics: Option<&'a str>,
 }
 
-fn row_to_cached_lyrics(row: &rusqlite::Row<'_>) -> rusqlite::Result<CachedLyrics> {
+fn row_to_cached_lyrics(
+    row: &rusqlite::Row<'_>,
+    manually_selected: bool,
+) -> rusqlite::Result<CachedLyrics> {
     let provider_raw: String = row.get(1)?;
     let artists_json: String = row.get(4)?;
     Ok(CachedLyrics {
+        manually_selected,
         id: row.get(0)?,
         provider: LyricsProvider::from_str(&provider_raw).map_err(|err| {
             rusqlite::Error::FromSqlConversionFailure(1, rusqlite::types::Type::Text, Box::new(err))
