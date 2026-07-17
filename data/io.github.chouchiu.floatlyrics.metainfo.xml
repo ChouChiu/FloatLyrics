@@ -47,6 +47,11 @@
   </screenshots>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="1.1.0" date="2026-07-17">
+      <description>
+        <p>Adds a React-powered lyrics renderer with Apple Music-style word-by-word highlighting and smoother line transitions.</p>
+      </description>
+    </release>
     <release version="1.0.2" date="2026-07-13">
       <description>
         <p>Adds local romanization, customizable lyric styling, improved Chinese search, cache deduplication, and remembered window positions.</p>
