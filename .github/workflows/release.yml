@@ -46,6 +46,7 @@ jobs:
           openssl
           rust
           dpkg
+          unzip
 
       - name: Check out release tag
         uses: actions/checkout@v7

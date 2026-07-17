@@ -41,6 +41,7 @@ jobs:
           openssl
           rust
           dpkg
+          unzip
 
       - name: Check out repository
         uses: actions/checkout@v7
