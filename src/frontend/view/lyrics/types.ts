@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 
 export interface TimedSyllable {
   start_ms: number;
@@ -32,19 +32,42 @@ export interface LyricsStyle {
   transition_ms: number;
 }
 
-export interface LyricsPayload {
-  key: string;
-  content: LyricContent;
-  style: LyricsStyle;
+export interface PresentedLyricLine {
+  start_ms: number;
+  end_ms: number | null;
+  text: string;
+  syllables: TimedSyllable[];
+  romanization: string;
+  translation: string;
+  background: string;
 }
 
+export interface LyricsDocument {
+  revision: number;
+  duration_ms: number | null;
+  lines: PresentedLyricLine[];
+}
+
+export interface LyricsFrame {
+  key: string;
+  content: LyricContent;
+  position_ms: number | null;
+  playing: boolean;
+  seeking: boolean;
+}
+
+export type LyricsCommand =
+  | { type: "configure"; apple_music_style: boolean; style: LyricsStyle }
+  | { type: "document"; document: LyricsDocument }
+  | { type: "frame"; frame: LyricsFrame };
+
 export interface FloatLyricsBridge {
-  render(payload: LyricsPayload): void;
+  dispatch(command: LyricsCommand): void;
 }
 
 declare global {
   interface Window {
     floatLyrics?: FloatLyricsBridge;
-    floatLyricsPendingPayload?: LyricsPayload;
+    floatLyricsPendingCommands?: LyricsCommand[];
   }
 }

@@ -1,16 +1,19 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 
 //! Frontend WebKitGTK renderer for the lyrics viewport.
 
 use gtk::prelude::*;
 use serde::Serialize;
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 use webkit6::prelude::*;
 
 use crate::shared::{
     config::{AppConfig, parse_hex_color},
-    presentation::LyricSlotText,
+    presentation::{LyricSlotText, LyricsDocument, LyricsFrame},
 };
 
 const TRANSITION_DURATION_MS: u32 = 180;
@@ -44,26 +47,43 @@ impl LyricsStyle {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct LyricsPayload {
-    key: String,
-    content: LyricSlotText,
-    style: LyricsStyle,
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+enum LyricsCommand<'a> {
+    Configure {
+        apple_music_style: bool,
+        style: LyricsStyle,
+    },
+    Document {
+        document: &'a LyricsDocument,
+    },
+    Frame {
+        frame: &'a LyricsFrame,
+    },
 }
 
 #[derive(Default)]
 struct BridgeState {
     ready: bool,
     in_flight: bool,
-    pending_script: Option<String>,
+    pending_config: Option<String>,
+    pending_document: Option<String>,
+    pending_frame: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+enum CommandSlot {
+    Config,
+    Document,
+    Frame,
 }
 
 /// A transparent, non-interactive WebKit view backed by packaged HTML.
 #[derive(Clone)]
 pub(super) struct WebLyricsView {
     web_view: webkit6::WebView,
-    payload: Rc<RefCell<LyricsPayload>>,
     bridge: Rc<RefCell<BridgeState>>,
+    document_revision: Rc<Cell<Option<u64>>>,
 }
 
 impl WebLyricsView {
@@ -88,11 +108,6 @@ impl WebLyricsView {
         web_view.set_vexpand(true);
         web_view.connect_context_menu(|_, _, _| true);
 
-        let payload = Rc::new(RefCell::new(LyricsPayload {
-            key: "initial".to_string(),
-            content: LyricSlotText::message(initial_text),
-            style: LyricsStyle::from_config(config),
-        }));
         let bridge = Rc::new(RefCell::new(BridgeState::default()));
 
         {
@@ -110,10 +125,17 @@ impl WebLyricsView {
         web_view.load_html(include_str!(concat!(env!("OUT_DIR"), "/lyrics.html")), None);
         let renderer = Self {
             web_view,
-            payload,
             bridge,
+            document_revision: Rc::new(Cell::new(None)),
         };
-        renderer.submit_snapshot();
+        renderer.apply_config(config);
+        renderer.show(LyricsFrame {
+            key: "initial".to_string(),
+            content: LyricSlotText::message(initial_text),
+            position_ms: None,
+            playing: false,
+            seeking: false,
+        });
         renderer
     }
 
@@ -121,24 +143,38 @@ impl WebLyricsView {
         self.web_view.clone()
     }
 
-    pub(super) fn show(&self, content: LyricSlotText, key: &str) {
-        {
-            let mut payload = self.payload.borrow_mut();
-            payload.key = key.to_string();
-            payload.content = content;
+    pub(super) fn set_document(&self, document: &LyricsDocument) {
+        if self.document_revision.get() == Some(document.revision) {
+            return;
         }
-        self.submit_snapshot();
+        self.document_revision.set(Some(document.revision));
+        self.submit(CommandSlot::Document, &LyricsCommand::Document { document });
+    }
+
+    pub(super) fn show(&self, frame: LyricsFrame) {
+        self.submit(CommandSlot::Frame, &LyricsCommand::Frame { frame: &frame });
     }
 
     pub(super) fn apply_config(&self, config: &AppConfig) {
-        self.payload.borrow_mut().style = LyricsStyle::from_config(config);
-        self.submit_snapshot();
+        self.submit(
+            CommandSlot::Config,
+            &LyricsCommand::Configure {
+                apple_music_style: config.lyrics.apple_music_style,
+                style: LyricsStyle::from_config(config),
+            },
+        );
     }
 
-    fn submit_snapshot(&self) {
-        match render_script(&self.payload.borrow()) {
+    fn submit(&self, slot: CommandSlot, command: &impl Serialize) {
+        match render_script(command) {
             Ok(script) => {
-                self.bridge.borrow_mut().pending_script = Some(script);
+                let mut bridge = self.bridge.borrow_mut();
+                match slot {
+                    CommandSlot::Config => bridge.pending_config = Some(script),
+                    CommandSlot::Document => bridge.pending_document = Some(script),
+                    CommandSlot::Frame => bridge.pending_frame = Some(script),
+                }
+                drop(bridge);
                 dispatch_pending(&self.web_view, &self.bridge);
             }
             Err(error) => tracing::warn!(%error, "failed to serialize lyrics for WebKit"),
@@ -152,11 +188,19 @@ fn dispatch_pending(web_view: &webkit6::WebView, bridge: &Rc<RefCell<BridgeState
         if !state.ready || state.in_flight {
             return;
         }
-        let Some(script) = state.pending_script.take() else {
+        let scripts = [
+            state.pending_config.take(),
+            state.pending_document.take(),
+            state.pending_frame.take(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+        if scripts.is_empty() {
             return;
-        };
+        }
         state.in_flight = true;
-        script
+        scripts.join("\n")
     };
 
     let weak_view = web_view.downgrade();
@@ -178,10 +222,10 @@ fn dispatch_pending(web_view: &webkit6::WebView, bridge: &Rc<RefCell<BridgeState
     );
 }
 
-fn render_script(payload: &LyricsPayload) -> serde_json::Result<String> {
-    serde_json::to_string(payload).map(|json| {
+fn render_script(command: &impl Serialize) -> serde_json::Result<String> {
+    serde_json::to_string(command).map(|json| {
         format!(
-            "((payload) => {{ if (window.floatLyrics) {{ window.floatLyrics.render(payload); }} else {{ window.floatLyricsPendingPayload = payload; }} }})({json});"
+            "((command) => {{ if (window.floatLyrics) {{ window.floatLyrics.dispatch(command); }} else {{ (window.floatLyricsPendingCommands ??= []).push(command); }} }})({json});"
         )
     })
 }
@@ -194,25 +238,61 @@ pub(super) fn lyric_content_width(
     romanization_font_px: i32,
     translation_font_px: i32,
 ) -> i32 {
+    let fonts = LyricsFontMetrics {
+        family: font_family,
+        lyric_px: lyric_font_px,
+        romanization_px: romanization_font_px,
+        translation_px: translation_font_px,
+    };
     let lyric_text = value
         .karaoke
         .as_ref()
         .map_or(value.text.as_str(), |karaoke| karaoke.text.as_str());
-    text_pixel_width(measure_widget, lyric_text, lyric_font_px, true, font_family)
-        .max(text_pixel_width(
-            measure_widget,
-            &value.romanization,
-            romanization_font_px,
-            false,
-            font_family,
-        ))
-        .max(text_pixel_width(
-            measure_widget,
-            &value.translation,
-            translation_font_px,
-            false,
-            font_family,
-        ))
+    lyric_text_group_width(
+        measure_widget,
+        lyric_text,
+        &value.romanization,
+        &value.translation,
+        fonts,
+    )
+}
+
+#[derive(Clone, Copy)]
+struct LyricsFontMetrics<'a> {
+    family: &'a str,
+    lyric_px: i32,
+    romanization_px: i32,
+    translation_px: i32,
+}
+
+fn lyric_text_group_width(
+    measure_widget: &gtk::Label,
+    lyric_text: &str,
+    romanization: &str,
+    translation: &str,
+    fonts: LyricsFontMetrics<'_>,
+) -> i32 {
+    text_pixel_width(
+        measure_widget,
+        lyric_text,
+        fonts.lyric_px,
+        true,
+        fonts.family,
+    )
+    .max(text_pixel_width(
+        measure_widget,
+        romanization,
+        fonts.romanization_px,
+        false,
+        fonts.family,
+    ))
+    .max(text_pixel_width(
+        measure_widget,
+        translation,
+        fonts.translation_px,
+        false,
+        fonts.family,
+    ))
 }
 
 fn text_pixel_width(
@@ -269,17 +349,20 @@ mod tests {
 
     #[test]
     fn render_script_serializes_lyrics_as_data() {
-        let payload = LyricsPayload {
+        let frame = LyricsFrame {
             key: "line:1".to_string(),
             content: LyricSlotText::message("'quoted' </script> 歌词"),
-            style: LyricsStyle::from_config(&AppConfig::default()),
+            position_ms: Some(1_000),
+            playing: true,
+            seeking: false,
         };
 
-        let script = render_script(&payload).unwrap();
+        let script = render_script(&LyricsCommand::Frame { frame: &frame }).unwrap();
 
-        assert!(script.starts_with("((payload) => {"));
-        assert!(script.contains("window.floatLyrics.render(payload)"));
-        assert!(script.contains("window.floatLyricsPendingPayload = payload"));
+        assert!(script.starts_with("((command) => {"));
+        assert!(script.contains("window.floatLyrics.dispatch(command)"));
+        assert!(script.contains("window.floatLyricsPendingCommands"));
+        assert!(script.contains("\"type\":\"frame\""));
         assert!(script.contains("\"key\":\"line:1\""));
         assert!(script.contains("'quoted' </script> 歌词"));
     }

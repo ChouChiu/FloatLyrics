@@ -1,9 +1,10 @@
 # SPDX-FileCopyrightText: 2026 ChouChiu
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 
 # Licenses accepted for dependencies distributed with FloatLyrics.
 accepted = [
     "Apache-2.0",
+    "AGPL-3.0-only",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "CC-BY-4.0",

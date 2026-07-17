@@ -1,7 +1,13 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 
-import type { LyricContent, LyricsPayload, LyricsStyle } from "./types";
+import type {
+  LyricContent,
+  LyricsCommand,
+  LyricsDocument,
+  LyricsFrame,
+  LyricsStyle,
+} from "./types";
 
 export interface SlotSnapshot {
   key: string;
@@ -13,6 +19,9 @@ export interface LyricsViewState {
   activeSlot: 0 | 1;
   slots: readonly [SlotSnapshot | null, SlotSnapshot | null];
   style: LyricsStyle | null;
+  appleMusicStyle: boolean;
+  document: LyricsDocument | null;
+  frame: LyricsFrame | null;
   transitionRevision: number;
 }
 
@@ -21,27 +30,46 @@ export const initialLyricsViewState: LyricsViewState = Object.freeze({
   activeSlot: 0,
   slots: Object.freeze([null, null] as const),
   style: null,
+  appleMusicStyle: false,
+  document: null,
+  frame: null,
   transitionRevision: 0,
 });
 
-export function advanceLyricsViewState(
-  state: LyricsViewState,
-  payload: LyricsPayload,
-): LyricsViewState {
-  const keyChanged = state.currentKey !== payload.key;
+function applyFrame(state: LyricsViewState, frame: LyricsFrame): LyricsViewState {
+  const keyChanged = state.currentKey !== frame.key;
   const isFirstValue = state.currentKey === null;
   const activeSlot =
     keyChanged && !isFirstValue ? ((1 - state.activeSlot) as 0 | 1) : state.activeSlot;
   const slots: [SlotSnapshot | null, SlotSnapshot | null] = [...state.slots];
-  slots[activeSlot] = { key: payload.key, content: payload.content };
+  slots[activeSlot] = { key: frame.key, content: frame.content };
 
   return {
-    currentKey: payload.key,
+    ...state,
+    currentKey: frame.key,
     activeSlot,
     slots,
-    style: payload.style,
+    frame,
     transitionRevision: state.transitionRevision + (keyChanged && !isFirstValue ? 1 : 0),
   };
+}
+
+export function advanceLyricsViewState(
+  state: LyricsViewState,
+  command: LyricsCommand,
+): LyricsViewState {
+  switch (command.type) {
+    case "configure":
+      return {
+        ...state,
+        appleMusicStyle: command.apple_music_style,
+        style: command.style,
+      };
+    case "document":
+      return { ...state, document: command.document };
+    case "frame":
+      return applyFrame(state, command.frame);
+  }
 }
 
 type Listener = () => void;
@@ -57,8 +85,8 @@ class LyricsStore {
     return () => this.listeners.delete(listener);
   };
 
-  readonly render = (payload: LyricsPayload): void => {
-    this.state = advanceLyricsViewState(this.state, payload);
+  readonly dispatch = (command: LyricsCommand): void => {
+    this.state = advanceLyricsViewState(this.state, command);
     for (const listener of this.listeners) listener();
   };
 }

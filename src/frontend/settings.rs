@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 
 //! Preferences frontend opened from the command line or floating panel.
 
@@ -60,6 +60,7 @@ pub(super) enum SettingsMsg {
     SetTranslation(bool),
     SetRomanization(bool),
     SetChineseRomanization(ChineseRomanizationMode),
+    SetAppleMusicStyle(bool),
     SetWidth(i32),
     SetRememberPosition(bool),
     SetWindowPosition(WindowPosition),
@@ -240,6 +241,9 @@ impl SimpleComponent for SettingsModel {
             }
             SettingsMsg::SetChineseRomanization(value) => {
                 self.draft.borrow_mut().lyrics.chinese_romanization = value;
+            }
+            SettingsMsg::SetAppleMusicStyle(value) => {
+                self.draft.borrow_mut().lyrics.apple_music_style = value;
             }
             SettingsMsg::SetWidth(value) => self.draft.borrow_mut().window.width = value,
             SettingsMsg::SetRememberPosition(value) => {
@@ -461,6 +465,17 @@ fn display_page(
     sender: &relm4::Sender<SettingsMsg>,
     i18n: &I18n,
 ) -> gtk::ScrolledWindow {
+    let apple_music_style = gtk::Switch::builder()
+        .active(config.lyrics.apple_music_style)
+        .valign(gtk::Align::Center)
+        .build();
+    {
+        let sender = sender.clone();
+        apple_music_style.connect_active_notify(move |input| {
+            let _ = sender.send(SettingsMsg::SetAppleMusicStyle(input.is_active()));
+        });
+    }
+
     let fonts = gtk::Button::with_label("");
     fonts.set_width_request(190);
     {
@@ -551,12 +566,34 @@ fn display_page(
         SettingsMsg::SetRomanizationFontSize,
     );
 
+    let unplayed_color = color_row(
+        i18n,
+        Text::UnplayedColor,
+        Text::UnplayedColorDescription,
+        &config.lyrics.unplayed_color,
+        sender.clone(),
+        SettingsMsg::SetUnplayedColor,
+    );
+    unplayed_color.set_sensitive(unplayed_color_sensitive(config.lyrics.apple_music_style));
+    {
+        let unplayed_color = unplayed_color.clone();
+        apple_music_style.connect_active_notify(move |input| {
+            unplayed_color.set_sensitive(unplayed_color_sensitive(input.is_active()));
+        });
+    }
+
     page(
         i18n,
         Text::DisplayTitle,
         Text::DisplayDescription,
         &[
             setting_card(&[
+                setting_row(
+                    i18n,
+                    Text::AppleMusicStyle,
+                    Text::AppleMusicStyleDescription,
+                    &apple_music_style,
+                ),
                 setting_row(i18n, Text::PanelWidth, Text::PanelWidthDescription, &width),
                 setting_row(
                     i18n,
@@ -613,14 +650,7 @@ fn display_page(
                     sender.clone(),
                     SettingsMsg::SetPlayedColor,
                 ),
-                color_row(
-                    i18n,
-                    Text::UnplayedColor,
-                    Text::UnplayedColorDescription,
-                    &config.lyrics.unplayed_color,
-                    sender.clone(),
-                    SettingsMsg::SetUnplayedColor,
-                ),
+                unplayed_color,
                 color_row(
                     i18n,
                     Text::TranslationColor,
@@ -640,6 +670,10 @@ fn display_page(
             ]),
         ],
     )
+}
+
+fn unplayed_color_sensitive(apple_music_style: bool) -> bool {
+    !apple_music_style
 }
 
 fn font_window(

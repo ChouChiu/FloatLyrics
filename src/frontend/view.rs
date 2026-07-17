@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 
 //! GTK widget construction and the frontend overlay adapter.
 
@@ -15,7 +15,10 @@ use floatlyrics_core::i18n::{I18n, Text};
 
 use crate::{
     backend::LyricsView,
-    shared::{config::AppConfig, presentation::LyricSlotText},
+    shared::{
+        config::AppConfig,
+        presentation::{LyricSlotText, LyricsDocument, LyricsFrame},
+    },
 };
 mod css;
 mod positioning;
@@ -35,10 +38,16 @@ const MAX_EXPANDED_PANEL_WIDTH: i32 = 960;
 const PANEL_HORIZONTAL_GUTTER: i32 = 32;
 const PANEL_CHROME_WIDTH: i32 = 28;
 const TEXT_HORIZONTAL_PADDING: i32 = 24;
+const AMLL_NARROW_LINE_PADDING_PX: i32 = 20;
 const MIN_KARAOKE_HEIGHT: i32 = 36;
 const MIN_ROMANIZATION_HEIGHT: i32 = 18;
 const MIN_TRANSLATION_HEIGHT: i32 = 18;
-const FALLBACK_PANEL_HEIGHT: i32 = 84;
+const PANEL_CHROME_HEIGHT: i32 = 28;
+const PANEL_RESIZE_DURATION_US: i64 = 180_000;
+
+fn fallback_panel_height(viewport_height: i32) -> i32 {
+    viewport_height.saturating_add(PANEL_CHROME_HEIGHT)
+}
 
 fn karaoke_line_height(lyric_font_px: i32) -> i32 {
     (lyric_font_px as f64 * 1.5).ceil() as i32
@@ -48,12 +57,41 @@ fn secondary_line_height(font_px: i32) -> i32 {
     (font_px as f64 * 1.5).ceil() as i32
 }
 
-fn viewport_height(
+fn apple_music_line_height(
     lyric_font_px: i32,
     romanization_font_px: i32,
     translation_font_px: i32,
     show_romanization: bool,
 ) -> i32 {
+    // AMLL uses 2 em for the primary line and wrapper, a 0.3 em flex gap,
+    // and a 1.5 em line height for each configured secondary font.
+    let lyric_font_px = lyric_font_px.max(1);
+    let mut hundredths = lyric_font_px
+        .saturating_mul(230)
+        .saturating_add(translation_font_px.max(1).saturating_mul(150));
+    if show_romanization {
+        hundredths = hundredths
+            .saturating_add(lyric_font_px.saturating_mul(30))
+            .saturating_add(romanization_font_px.max(1).saturating_mul(150));
+    }
+    hundredths.saturating_add(99) / 100
+}
+
+fn viewport_height(
+    lyric_font_px: i32,
+    romanization_font_px: i32,
+    translation_font_px: i32,
+    show_romanization: bool,
+    apple_music_style: bool,
+) -> i32 {
+    if apple_music_style {
+        return apple_music_line_height(
+            lyric_font_px,
+            romanization_font_px,
+            translation_font_px,
+            show_romanization,
+        );
+    }
     let romanization_height = if show_romanization {
         secondary_line_height(romanization_font_px).max(MIN_ROMANIZATION_HEIGHT)
     } else {
@@ -169,8 +207,12 @@ impl LyricsView for OverlaySender {
         let _ = self.sender.send(AppMsg::SetSongInfo(value.to_string()));
     }
 
-    fn show_lyrics(&self, value: LyricSlotText, key: &str) {
-        let _ = self.sender.send(AppMsg::ShowLyrics(value, key.to_string()));
+    fn set_lyrics_document(&self, document: LyricsDocument) {
+        let _ = self.sender.send(AppMsg::SetLyricsDocument(document));
+    }
+
+    fn show_lyrics(&self, frame: LyricsFrame) {
+        let _ = self.sender.send(AppMsg::ShowLyrics(frame));
     }
 
     fn show_status(&self, key: Text) {
@@ -190,12 +232,14 @@ pub(super) struct OverlayView {
     song_info: gtk::Label,
     lyrics_viewport: gtk::Box,
     web_lyrics: WebLyricsView,
-    last_lyrics_layout: Rc<RefCell<Option<(String, String)>>>,
+    last_lyrics_layout: Rc<RefCell<Option<(String, String, String)>>>,
     i18n: I18n,
     static_status: Rc<RefCell<Option<Text>>>,
     lyric_font_size: Rc<Cell<i32>>,
     romanization_font_size: Rc<Cell<i32>>,
     translation_font_size: Rc<Cell<i32>>,
+    apple_music_style: Rc<Cell<bool>>,
+    width_animation_generation: Rc<Cell<u64>>,
 }
 
 pub(super) fn build(
@@ -215,7 +259,9 @@ pub(super) fn build(
         config.lyrics.romanization_font_size,
         config.lyrics.translation_font_size,
         config.lyrics.show_romanization,
+        config.lyrics.apple_music_style,
     );
+    let fallback_height = fallback_panel_height(viewport_h);
     let font_family = Rc::new(RefCell::new(font_family(&config.lyrics.font_order)));
     window.set_title(Some("FloatLyrics Overlay"));
     window.set_decorated(false);
@@ -250,7 +296,7 @@ pub(super) fn build(
                     window,
                     &placement,
                     panel_width.saturating_add(PANEL_CHROME_WIDTH),
-                    FALLBACK_PANEL_HEIGHT,
+                    fallback_height,
                 )
             })
             .unwrap_or_else(|| effective_bottom_margin(config)),
@@ -277,13 +323,14 @@ pub(super) fn build(
     let lyric_font_size = Rc::new(Cell::new(config.lyrics.lyric_font_size));
     let romanization_font_size = Rc::new(Cell::new(config.lyrics.romanization_font_size));
     let translation_font_size = Rc::new(Cell::new(config.lyrics.translation_font_size));
+    let apple_music_style = Rc::new(Cell::new(config.lyrics.apple_music_style));
     let web_lyrics = WebLyricsView::new(config, i18n.text(Text::OpenSpotify));
     lyrics_viewport.append(&web_lyrics.widget());
     let placement = attach_floating_drag(
         window,
         &content,
         panel_width.saturating_add(PANEL_CHROME_WIDTH),
-        FALLBACK_PANEL_HEIGHT,
+        fallback_height,
         initial_placement,
         move |position| {
             let _ = sender.send(AppMsg::WindowMoved(position));
@@ -341,6 +388,8 @@ pub(super) fn build(
         lyric_font_size,
         romanization_font_size,
         translation_font_size,
+        apple_music_style,
+        width_animation_generation: Rc::new(Cell::new(0)),
     };
     {
         let overlay = overlay.clone();
@@ -390,8 +439,70 @@ fn expanded_panel_width(compact_width: i32, content_width: i32, maximum_width: i
         .min(maximum_width.max(compact_width))
 }
 
+fn maximum_lyrics_width(available_width: i32, apple_music_style: bool) -> i32 {
+    if apple_music_style {
+        available_width
+    } else {
+        available_width.min(MAX_EXPANDED_PANEL_WIDTH)
+    }
+}
+
+fn lyrics_horizontal_padding(apple_music_style: bool, lyric_font_px: i32) -> i32 {
+    if apple_music_style {
+        // AMLL uses 1 em on each side, or 20 px per side in narrow viewports.
+        lyric_font_px
+            .max(AMLL_NARROW_LINE_PADDING_PX)
+            .saturating_mul(2)
+    } else {
+        TEXT_HORIZONTAL_PADDING
+    }
+}
+
+fn lyrics_resize_animation(apple_music_style: bool, layout_changed: bool) -> Option<bool> {
+    layout_changed.then_some(apple_music_style)
+}
+
+fn animated_panel_width(start: i32, target: i32, elapsed_us: i64) -> i32 {
+    if elapsed_us >= PANEL_RESIZE_DURATION_US {
+        return target;
+    }
+
+    let progress = elapsed_us.max(0) as f64 / PANEL_RESIZE_DURATION_US as f64;
+    let eased = if target >= start {
+        1.0 - (1.0 - progress).powi(3)
+    } else {
+        progress.powi(3)
+    };
+    (start as f64 + (target - start) as f64 * eased).round() as i32
+}
+
+fn apply_panel_width(
+    content: &gtk::Box,
+    lyrics_viewport: &gtk::Box,
+    window: &gtk::ApplicationWindow,
+    placement: &SharedPlacement,
+    width: i32,
+) {
+    content.set_width_request(width);
+    lyrics_viewport.set_width_request(width);
+    if let Some(left_margin) = left_margin_for_width(
+        window,
+        &placement.borrow(),
+        width.saturating_add(PANEL_CHROME_WIDTH),
+    ) {
+        window.set_margin(Edge::Left, left_margin);
+    }
+    apply_snap_css_classes(content, &placement.borrow());
+}
+
 fn set_status_lyrics(floating: &OverlayView, message: &str, key: Text) {
-    floating.render_lyrics(LyricSlotText::message(message), &format!("status:{key:?}"));
+    floating.render_lyrics(LyricsFrame {
+        key: format!("status:{key:?}"),
+        content: LyricSlotText::message(message),
+        position_ms: None,
+        playing: false,
+        seeking: false,
+    });
 }
 
 impl OverlayView {
@@ -399,9 +510,13 @@ impl OverlayView {
         self.song_info.set_label(value);
     }
 
-    pub(super) fn show_lyrics(&self, value: LyricSlotText, key: &str) {
+    pub(super) fn set_lyrics_document(&self, document: &LyricsDocument) {
+        self.web_lyrics.set_document(document);
+    }
+
+    pub(super) fn show_lyrics(&self, frame: LyricsFrame) {
         *self.static_status.borrow_mut() = None;
-        self.render_lyrics(value, key);
+        self.render_lyrics(frame);
     }
 
     pub(super) fn show_status(&self, key: Text) {
@@ -415,7 +530,17 @@ impl OverlayView {
 
     pub(super) fn apply_config(&self, config: &AppConfig) {
         let width = compact_panel_width(config.window.width);
+        let viewport_h = viewport_height(
+            config.lyrics.lyric_font_size,
+            config.lyrics.romanization_font_size,
+            config.lyrics.translation_font_size,
+            config.lyrics.show_romanization,
+            config.lyrics.apple_music_style,
+        );
+        let fallback_height = fallback_panel_height(viewport_h);
+        self.apple_music_style.set(config.lyrics.apple_music_style);
         self.compact_width.set(width);
+        self.cancel_width_animation();
         self.content.set_width_request(width);
         self.lyrics_viewport.set_width_request(width);
         self.window.set_margin(
@@ -424,7 +549,7 @@ impl OverlayView {
                 &self.window,
                 &self.placement.borrow(),
                 width.saturating_add(PANEL_CHROME_WIDTH),
-                FALLBACK_PANEL_HEIGHT,
+                fallback_height,
             )
             .unwrap_or_else(|| effective_bottom_margin(config)),
         );
@@ -441,60 +566,126 @@ impl OverlayView {
             .set(config.lyrics.romanization_font_size);
         self.translation_font_size
             .set(config.lyrics.translation_font_size);
-        let karaoke_h = karaoke_line_height(config.lyrics.lyric_font_size).max(MIN_KARAOKE_HEIGHT);
-        let romanization_h = secondary_line_height(config.lyrics.romanization_font_size)
-            .max(MIN_ROMANIZATION_HEIGHT);
-        let translation_h =
-            secondary_line_height(config.lyrics.translation_font_size).max(MIN_TRANSLATION_HEIGHT);
-        let romanization_viewport_h = if config.lyrics.show_romanization {
-            romanization_h
-        } else {
-            0
-        };
-        self.lyrics_viewport
-            .set_height_request(karaoke_h + romanization_viewport_h + translation_h);
+        self.lyrics_viewport.set_height_request(viewport_h);
         let family = font_family(&config.lyrics.font_order);
         *self.font_family.borrow_mut() = family.clone();
         load_font_css(&self.font_provider, &family);
         self.web_lyrics.apply_config(config);
         *self.last_lyrics_layout.borrow_mut() = None;
         self.sync_snap_classes();
+
+        let window = self.window.clone();
+        let placement = Rc::clone(&self.placement);
+        gtk::glib::idle_add_local_once(move || {
+            if let Some(bottom_margin) = bottom_margin_from_placement(
+                &window,
+                &placement.borrow(),
+                width.saturating_add(PANEL_CHROME_WIDTH),
+                fallback_height,
+            ) {
+                window.set_margin(Edge::Bottom, bottom_margin);
+            }
+        });
     }
 
-    fn render_lyrics(&self, value: LyricSlotText, key: &str) {
-        let layout_key = (key.to_string(), value.romanization.clone());
-        if self.last_lyrics_layout.borrow().as_ref() != Some(&layout_key) {
-            self.resize_for_lyrics(&value);
+    fn render_lyrics(&self, frame: LyricsFrame) {
+        let layout_key = (
+            frame.key.clone(),
+            frame.content.romanization.clone(),
+            frame.content.translation.clone(),
+        );
+        let layout_changed = self.last_lyrics_layout.borrow().as_ref() != Some(&layout_key);
+        if let Some(animate) = lyrics_resize_animation(self.apple_music_style.get(), layout_changed)
+        {
+            self.resize_for_lyrics(&frame.content, animate);
             *self.last_lyrics_layout.borrow_mut() = Some(layout_key);
         }
-        self.web_lyrics.show(value, key);
+        self.web_lyrics.show(frame);
     }
 
-    fn resize_for_lyrics(&self, value: &LyricSlotText) {
+    fn resize_for_lyrics(&self, value: &LyricSlotText, animate: bool) {
+        let lyric_font_px = self.lyric_font_size.get();
         let measured_width = lyric_content_width(
             &self.song_info,
             value,
             &self.font_family.borrow(),
-            self.lyric_font_size.get(),
+            lyric_font_px,
             self.romanization_font_size.get(),
             self.translation_font_size.get(),
         )
-        .saturating_add(TEXT_HORIZONTAL_PADDING);
+        .saturating_add(lyrics_horizontal_padding(
+            self.apple_music_style.get(),
+            lyric_font_px,
+        ));
+        self.resize_to_measured_width(measured_width, animate);
+    }
+
+    fn resize_to_measured_width(&self, measured_width: i32, animate: bool) {
         let available_width = available_panel_width(&self.window, PANEL_HORIZONTAL_GUTTER)
             .unwrap_or(MAX_EXPANDED_PANEL_WIDTH)
-            .saturating_sub(PANEL_CHROME_WIDTH)
-            .min(MAX_EXPANDED_PANEL_WIDTH);
+            .saturating_sub(PANEL_CHROME_WIDTH);
+        let available_width = maximum_lyrics_width(available_width, self.apple_music_style.get());
         let width = expanded_panel_width(self.compact_width.get(), measured_width, available_width);
-        let next_surface_width = width.saturating_add(PANEL_CHROME_WIDTH);
-        let next_left_margin =
-            left_margin_for_width(&self.window, &self.placement.borrow(), next_surface_width);
-
-        self.content.set_width_request(width);
-        self.lyrics_viewport.set_width_request(width);
-        if let Some(left_margin) = next_left_margin {
-            self.window.set_margin(Edge::Left, left_margin);
+        if animate {
+            self.animate_panel_width(width);
+        } else {
+            self.cancel_width_animation();
+            apply_panel_width(
+                &self.content,
+                &self.lyrics_viewport,
+                &self.window,
+                &self.placement,
+                width,
+            );
         }
-        self.sync_snap_classes();
+    }
+
+    fn animate_panel_width(&self, target_width: i32) {
+        self.cancel_width_animation();
+        let generation = self.width_animation_generation.get();
+        let start_width = self.content.width_request().max(self.compact_width.get());
+        if start_width == target_width {
+            apply_panel_width(
+                &self.content,
+                &self.lyrics_viewport,
+                &self.window,
+                &self.placement,
+                target_width,
+            );
+            return;
+        }
+
+        let content = self.content.clone();
+        let lyrics_viewport = self.lyrics_viewport.clone();
+        let window = self.window.clone();
+        let placement = Rc::clone(&self.placement);
+        let animation_generation = Rc::clone(&self.width_animation_generation);
+        let start_time_us = Cell::new(None);
+        self.content.add_tick_callback(move |_, frame_clock| {
+            if animation_generation.get() != generation {
+                return gtk::glib::ControlFlow::Break;
+            }
+
+            let now_us = frame_clock.frame_time();
+            let animation_start_us = start_time_us.get().unwrap_or_else(|| {
+                start_time_us.set(Some(now_us));
+                now_us
+            });
+            let elapsed_us = now_us.saturating_sub(animation_start_us);
+            let width = animated_panel_width(start_width, target_width, elapsed_us);
+            apply_panel_width(&content, &lyrics_viewport, &window, &placement, width);
+
+            if elapsed_us >= PANEL_RESIZE_DURATION_US {
+                gtk::glib::ControlFlow::Break
+            } else {
+                gtk::glib::ControlFlow::Continue
+            }
+        });
+    }
+
+    fn cancel_width_animation(&self) {
+        self.width_animation_generation
+            .set(self.width_animation_generation.get().wrapping_add(1));
     }
 
     fn sync_snap_classes(&self) {

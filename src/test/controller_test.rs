@@ -174,3 +174,43 @@ fn initial_cache_write_failure_replaces_searching_status() {
         ))
     );
 }
+
+#[test]
+fn seek_detection_distinguishes_clock_updates_from_jumps_and_track_changes() {
+    let previous_state = player_state("Song", 10_000);
+    let previous = PlaybackSnapshot {
+        state: previous_state.clone(),
+        received_at: Instant::now(),
+    };
+
+    assert!(!playback_jump_detected(
+        Some(&previous),
+        Some(10_500),
+        &player_state("Song", 10_500),
+    ));
+    assert!(playback_jump_detected(
+        Some(&previous),
+        Some(12_000),
+        &player_state("Song", 12_000),
+    ));
+    assert!(playback_jump_detected(
+        Some(&previous),
+        Some(10_000),
+        &player_state("Another Song", 10_000),
+    ));
+}
+
+fn player_state(title: &str, position_ms: u64) -> SpotifyPlayerState {
+    SpotifyPlayerState {
+        bus_name: "org.mpris.MediaPlayer2.spotify".to_string(),
+        playback_status: PlaybackStatus::Paused,
+        position_ms: Some(position_ms),
+        track: Some(TrackMetadata {
+            title: title.to_string(),
+            artists: vec!["Artist".to_string()],
+            album: None,
+            duration_ms: Some(60_000),
+            mpris_track_id: None,
+        }),
+    }
+}

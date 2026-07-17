@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 
 import { basename, join, resolve } from "node:path";
 
@@ -55,12 +55,18 @@ for (const packageName of [...packageNames].sort()) {
   const manifest = (await Bun.file(join(packageDir, "package.json")).json()) as PackageManifest;
   const license = manifest.license ?? "UNKNOWN";
   const licenseFile = [...new Bun.Glob("LICENSE*").scanSync(packageDir)].sort()[0];
-  if (!licenseFile) throw new Error(`missing license text for bundled package ${packageName}`);
+  const fallbackLicense = resolve(
+    "data/licenses/frontend",
+    `${packageName.replaceAll("/", "__")}.txt`,
+  );
+  if (!licenseFile && !(await Bun.file(fallbackLicense).exists())) {
+    throw new Error(`missing license text for bundled package ${packageName}`);
+  }
   licenseData.dependencies.push({ name: manifest.name, version: manifest.version, license });
   licenseData.licenses.push({
     name: manifest.name,
-    id: `${license} · ${basename(licenseFile)}`,
-    text: await Bun.file(join(packageDir, licenseFile)).text(),
+    id: `${license} · ${licenseFile ? basename(licenseFile) : "bundled notice"}`,
+    text: await Bun.file(licenseFile ? join(packageDir, licenseFile) : fallbackLicense).text(),
   });
 }
 

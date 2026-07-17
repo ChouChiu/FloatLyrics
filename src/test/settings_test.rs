@@ -13,3 +13,9 @@ fn chinese_romanization_indices_follow_the_public_mode_order() {
         assert_eq!(chinese_romanization_index(mode), index as u32);
     }
 }
+
+#[test]
+fn apple_music_style_disables_the_unplayed_color_setting() {
+    assert!(unplayed_color_sensitive(false));
+    assert!(!unplayed_color_sensitive(true));
+}

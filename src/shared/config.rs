@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 
 //! Shared serializable preferences and atomic file persistence.
 
@@ -148,6 +148,8 @@ pub enum WindowAnchor {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct LyricsConfig {
+    /// Whether the single-current-line Apple Music-like lyrics renderer is enabled.
+    pub apple_music_style: bool,
     /// Global playback offset in milliseconds.
     pub offset_ms: i64,
     /// Automatic search priority.
@@ -179,6 +181,7 @@ pub struct LyricsConfig {
 impl Default for LyricsConfig {
     fn default() -> Self {
         Self {
+            apple_music_style: false,
             offset_ms: 0,
             provider_order: default_provider_order(),
             show_translation: true,

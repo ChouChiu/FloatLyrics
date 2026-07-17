@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 
-import { type CSSProperties, useLayoutEffect, useRef, useSyncExternalStore } from "react";
+import { LyricPlayer } from "@applemusic-like-lyrics/react";
+import { type CSSProperties, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { currentAmllLines, documentToAmllLines } from "./amll";
 import { karaokeFill } from "./karaoke";
 import { type LyricsViewState, lyricsStore, type SlotSnapshot } from "./store";
 
@@ -22,42 +24,26 @@ function cssVariables(state: LyricsViewState): LyricsCssProperties | undefined {
   };
 }
 
+function appleMusicCssVariables(state: LyricsViewState): LyricsCssProperties | undefined {
+  const style = state.style;
+  if (!style) return undefined;
+  return {
+    "--amll-lp-font-family": style.font_family,
+    "--amll-lp-font-size": `${style.lyric_font_px}px`,
+    "--amll-lp-romanization-font-size": `${style.romanization_font_px}px`,
+    "--amll-lp-translation-font-size": `${style.translation_font_px}px`,
+    "--amll-lp-color": style.played_color,
+    "--amll-lp-romanization-color": style.romanization_color,
+    "--amll-lp-translation-color": style.translation_color,
+  };
+}
+
 interface LyricSlotProps {
   snapshot: SlotSnapshot | null;
   setSlotRef?(element: HTMLElement | null): void;
 }
 
-export function LyricSlot({ snapshot, setSlotRef }: LyricSlotProps) {
-  const primaryRef = useRef<HTMLDivElement>(null);
-  const content = snapshot?.content;
-  const karaoke = content?.karaoke;
-  const text = karaoke?.text ?? content?.text ?? "";
-
-  useLayoutEffect(() => {
-    const primary = primaryRef.current;
-    const played = primary?.querySelector<HTMLElement>(".played");
-    if (!primary || !played) return;
-    if (!karaoke) {
-      played.style.clipPath = "inset(0 100% 0 0)";
-      return;
-    }
-    const fill = Math.min(primary.clientWidth, Math.max(0, karaokeFill(primary, karaoke)));
-    played.style.clipPath = `inset(0 ${Math.max(0, primary.clientWidth - fill)}px 0 0)`;
-  }, [karaoke]);
-
-  return (
-    <section className="slot" ref={setSlotRef} data-lyric-key={snapshot?.key}>
-      <div className={`primary${karaoke ? "" : " plain"}`} ref={primaryRef}>
-        <span className="base">{text}</span>
-        <span className="played">{text}</span>
-      </div>
-      <div className="secondary romanization">{content?.romanization ?? ""}</div>
-      <div className="secondary translation">{content?.translation ?? ""}</div>
-    </section>
-  );
-}
-
-export function LyricsViewport({ state }: { state: LyricsViewState }) {
+function useSlotTransition(state: LyricsViewState) {
   const slotRefs = useRef<Array<HTMLElement | null>>([null, null]);
   const initialized = useRef(false);
   const transitionMs = useRef(0);
@@ -93,6 +79,42 @@ export function LyricsViewport({ state }: { state: LyricsViewState }) {
     });
   }, [state.activeSlot, state.currentKey]);
 
+  return slotRefs;
+}
+
+export function LyricSlot({ snapshot, setSlotRef }: LyricSlotProps) {
+  const primaryRef = useRef<HTMLDivElement>(null);
+  const content = snapshot?.content;
+  const karaoke = content?.karaoke;
+  const text = karaoke?.text ?? content?.text ?? "";
+
+  useLayoutEffect(() => {
+    const primary = primaryRef.current;
+    const played = primary?.querySelector<HTMLElement>(".played");
+    if (!primary || !played) return;
+    if (!karaoke) {
+      played.style.clipPath = "inset(0 100% 0 0)";
+      return;
+    }
+    const fill = Math.min(primary.clientWidth, Math.max(0, karaokeFill(primary, karaoke)));
+    played.style.clipPath = `inset(0 ${Math.max(0, primary.clientWidth - fill)}px 0 0)`;
+  }, [karaoke]);
+
+  return (
+    <section className="slot" ref={setSlotRef} data-lyric-key={snapshot?.key}>
+      <div className={`primary${karaoke ? "" : " plain"}`} ref={primaryRef}>
+        <span className="base">{text}</span>
+        <span className="played">{text}</span>
+      </div>
+      <div className="secondary romanization">{content?.romanization ?? ""}</div>
+      <div className="secondary translation">{content?.translation ?? ""}</div>
+    </section>
+  );
+}
+
+export function LyricsViewport({ state }: { state: LyricsViewState }) {
+  const slotRefs = useSlotTransition(state);
+
   return (
     <main id="viewport" aria-live="off" style={cssVariables(state)}>
       <LyricSlot
@@ -111,11 +133,98 @@ export function LyricsViewport({ state }: { state: LyricsViewState }) {
   );
 }
 
+interface AppleMusicSlotProps {
+  snapshot: SlotSnapshot | null;
+  documentLines: ReturnType<typeof documentToAmllLines>;
+  frame: LyricsViewState["frame"];
+  active: boolean;
+  setSlotRef(element: HTMLElement | null): void;
+}
+
+function AppleMusicSlot({
+  snapshot,
+  documentLines,
+  frame,
+  active,
+  setSlotRef,
+}: AppleMusicSlotProps) {
+  const lyricLines = useMemo(
+    () => currentAmllLines(documentLines, snapshot?.key ?? ""),
+    [documentLines, snapshot?.key],
+  );
+  const line = lyricLines[0];
+  const currentTime = line
+    ? Math.min(Math.max(frame?.position_ms ?? line.startTime, line.startTime), line.endTime - 1)
+    : 0;
+
+  return (
+    <section className="slot apple-music-slot" ref={setSlotRef} data-lyric-key={snapshot?.key}>
+      {line && frame ? (
+        <LyricPlayer
+          className="apple-music-player"
+          style={{ textAlign: "center", whiteSpace: "nowrap" }}
+          lyricLines={lyricLines}
+          currentTime={currentTime}
+          playing={active && frame.playing}
+          isSeeking={active && frame.seeking}
+          alignAnchor="center"
+          alignPosition={0.5}
+          enableSpring={false}
+          enableBlur={false}
+          enableScale={false}
+          hidePassedLines={false}
+          wordFadeWidth={0.5}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+export function AppleMusicLyrics({ state }: { state: LyricsViewState }) {
+  const frame = state.frame;
+  const documentLines = useMemo(() => documentToAmllLines(state.document), [state.document]);
+  const hasCurrentLine = useMemo(
+    () => currentAmllLines(documentLines, frame?.key ?? "").length > 0,
+    [documentLines, frame?.key],
+  );
+  const slotRefs = useSlotTransition(state);
+  const style = appleMusicCssVariables(state);
+  if (!frame || frame.position_ms === null || !hasCurrentLine) {
+    return <LyricsViewport state={state} />;
+  }
+  return (
+    <main id="viewport" className="apple-music-viewport" style={style}>
+      <AppleMusicSlot
+        snapshot={state.slots[0]}
+        documentLines={documentLines}
+        frame={frame}
+        active={state.activeSlot === 0}
+        setSlotRef={(element) => {
+          slotRefs.current[0] = element;
+        }}
+      />
+      <AppleMusicSlot
+        snapshot={state.slots[1]}
+        documentLines={documentLines}
+        frame={frame}
+        active={state.activeSlot === 1}
+        setSlotRef={(element) => {
+          slotRefs.current[1] = element;
+        }}
+      />
+    </main>
+  );
+}
+
 export function LyricsApp() {
   const state = useSyncExternalStore(
     lyricsStore.subscribe,
     lyricsStore.getSnapshot,
     lyricsStore.getSnapshot,
   );
-  return <LyricsViewport state={state} />;
+  return state.appleMusicStyle ? (
+    <AppleMusicLyrics state={state} />
+  ) : (
+    <LyricsViewport state={state} />
+  );
 }

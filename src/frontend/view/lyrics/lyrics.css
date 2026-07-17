@@ -1,5 +1,5 @@
 /* SPDX-FileCopyrightText: 2026 ChouChiu */
-/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* SPDX-License-Identifier: AGPL-3.0-only */
 
 :root {
   color-scheme: dark;
@@ -35,6 +35,69 @@ body,
   width: 100%;
   height: 100%;
   font-family: var(--font-family);
+}
+
+.apple-music-viewport {
+  font-family: var(--amll-lp-font-family);
+}
+
+.apple-music-player {
+  width: 100%;
+  height: 100%;
+  font-family: inherit;
+}
+
+.apple-music-player .amll-lyric-player {
+  font-family: var(--amll-lp-font-family);
+  contain: layout style;
+  overflow: visible;
+}
+
+.apple-music-player .amll-lyric-player :is([class$="_lyricMainLine"], [class*="_lyricMainLine "]),
+.apple-music-player
+  .amll-lyric-player
+  :is([class$="_lyricMainLine"], [class*="_lyricMainLine "])
+  * {
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: keep-all;
+}
+
+.apple-music-player
+  .amll-lyric-player
+  :is([class$="_lyricMainLine"], [class*="_lyricMainLine "])
+  br {
+  display: none;
+}
+
+.apple-music-player
+  .amll-lyric-player
+  :is([class$="_lyricLineWrapper"], [class*="_lyricLineWrapper "]) {
+  transition:
+    opacity 0.4s,
+    filter 0.4s,
+    background-color 0.25s;
+}
+
+.apple-music-player
+  .amll-lyric-player
+  :is([class$="_lyricMainLine"], [class*="_lyricMainLine "])
+  + div {
+  font-size: var(--amll-lp-translation-font-size);
+  color: var(--amll-lp-translation-color);
+  opacity: 1;
+  white-space: nowrap;
+}
+
+.apple-music-player
+  .amll-lyric-player
+  :is([class$="_lyricMainLine"], [class*="_lyricMainLine "])
+  + div
+  + div {
+  font-size: var(--amll-lp-romanization-font-size);
+  color: var(--amll-lp-romanization-color);
+  opacity: 1;
+  white-space: nowrap;
 }
 
 .slot {

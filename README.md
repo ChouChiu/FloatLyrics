@@ -188,4 +188,4 @@ mpris_prefix = "org.mpris.MediaPlayer2.spotify"
 
 ## 许可证
 
-FloatLyrics 以 [GPL-3.0-or-later](LICENSE) 许可发布。
+FloatLyrics 以 [AGPL-3.0-only](LICENSE) 许可发布。

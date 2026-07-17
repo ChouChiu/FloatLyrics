@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 
 //! Relm4 frontend composition root.
 //!
@@ -26,7 +26,7 @@ use crate::{
     backend::{self},
     shared::{
         config::{AppConfig, WindowPosition},
-        presentation::LyricSlotText,
+        presentation::{LyricsDocument, LyricsFrame},
     },
 };
 use floatlyrics_core::{i18n::I18n, paths::AppPaths};
@@ -50,11 +50,12 @@ struct AppModel {
     controller: backend::Controller,
     song_info: String,
     lyrics: LyricsPresentation,
+    lyrics_document: Option<LyricsDocument>,
 }
 
 #[derive(Debug, Clone)]
 enum LyricsPresentation {
-    Content(LyricSlotText, String),
+    Content(LyricsFrame),
     Status(floatlyrics_core::i18n::Text),
 }
 
@@ -62,7 +63,8 @@ enum LyricsPresentation {
 enum AppMsg {
     Tick,
     SetSongInfo(String),
-    ShowLyrics(LyricSlotText, String),
+    SetLyricsDocument(LyricsDocument),
+    ShowLyrics(LyricsFrame),
     ShowStatus(floatlyrics_core::i18n::Text),
     OpenSettings,
     OpenManualSearch,
@@ -169,6 +171,7 @@ impl SimpleComponent for AppModel {
             controller,
             song_info: "FloatLyrics".to_string(),
             lyrics: LyricsPresentation::Status(floatlyrics_core::i18n::Text::OpenSpotify),
+            lyrics_document: None,
         };
         let widgets = view_output!();
         ComponentParts { model, widgets }
@@ -178,9 +181,8 @@ impl SimpleComponent for AppModel {
         match message {
             AppMsg::Tick => self.controller.tick(),
             AppMsg::SetSongInfo(value) => self.song_info = value,
-            AppMsg::ShowLyrics(value, key) => {
-                self.lyrics = LyricsPresentation::Content(value, key);
-            }
+            AppMsg::SetLyricsDocument(document) => self.lyrics_document = Some(document),
+            AppMsg::ShowLyrics(frame) => self.lyrics = LyricsPresentation::Content(frame),
             AppMsg::ShowStatus(key) => self.lyrics = LyricsPresentation::Status(key),
             AppMsg::OpenSettings => {
                 let _ = self.settings.sender().send(settings::SettingsMsg::Show);
@@ -207,6 +209,7 @@ impl SimpleComponent for AppModel {
                 self.overlay.apply_config(&next_config);
                 self.i18n.set_language(next_config.general.language);
                 *self.config.borrow_mut() = next_config;
+                self.controller.handle().refresh_lyrics_presentation();
                 if reload_lyrics {
                     self.controller.handle().reload_lyrics();
                 }
@@ -217,9 +220,12 @@ impl SimpleComponent for AppModel {
 
     fn post_view() {
         self.overlay.set_song_info(&self.song_info);
+        if let Some(document) = &self.lyrics_document {
+            self.overlay.set_lyrics_document(document);
+        }
         match &self.lyrics {
-            LyricsPresentation::Content(value, key) => {
-                self.overlay.show_lyrics(value.clone(), key);
+            LyricsPresentation::Content(frame) => {
+                self.overlay.show_lyrics(frame.clone());
             }
             LyricsPresentation::Status(key) => self.overlay.show_status(*key),
         }

@@ -1,21 +1,21 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 
-import type { FloatLyricsBridge, LyricsPayload } from "./types";
+import type { FloatLyricsBridge, LyricsCommand } from "./types";
 
 interface BridgeHost {
   floatLyrics?: FloatLyricsBridge;
-  floatLyricsPendingPayload?: LyricsPayload;
+  floatLyricsPendingCommands?: LyricsCommand[];
 }
 
 export function installLyricsBridge(
   host: BridgeHost,
-  render: (payload: LyricsPayload) => void,
+  dispatch: (command: LyricsCommand) => void,
 ): FloatLyricsBridge {
-  const pendingPayload = host.floatLyricsPendingPayload;
-  const bridge = Object.freeze({ render });
+  const pendingCommands = host.floatLyricsPendingCommands ?? [];
+  const bridge = Object.freeze({ dispatch });
   host.floatLyrics = bridge;
-  delete host.floatLyricsPendingPayload;
-  if (pendingPayload) render(pendingPayload);
+  delete host.floatLyricsPendingCommands;
+  for (const command of pendingCommands) dispatch(command);
   return bridge;
 }

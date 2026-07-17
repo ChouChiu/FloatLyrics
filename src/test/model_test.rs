@@ -86,10 +86,40 @@ fn lyric_frame_uses_stable_key_for_active_line() {
         &state,
         &AppConfig::default(),
         Some(1_500),
+        true,
+        false,
         Language::English,
     );
     assert_eq!(frame.key, "line:0");
     assert_eq!(frame.content.text, "Hello");
+    assert_eq!(frame.position_ms, Some(1_500));
+    assert!(frame.playing);
+}
+
+#[test]
+fn lyrics_document_applies_secondary_text_preferences_and_preserves_background() {
+    let mut line = test_line();
+    line.translation = Some("你好".to_string());
+    line.romanization = Some("nǐ hǎo".to_string());
+    line.background = Some(" echo ".to_string());
+    let state = LyricsDisplayState {
+        lines: vec![line],
+        ..LyricsDisplayState::default()
+    };
+
+    let hidden = lyrics_document(&state, &AppConfig::default(), 7, Some(3_000));
+    assert_eq!(hidden.revision, 7);
+    assert_eq!(hidden.duration_ms, Some(3_000));
+    assert_eq!(hidden.lines[0].translation, "你好");
+    assert!(hidden.lines[0].romanization.is_empty());
+    assert_eq!(hidden.lines[0].background, "echo");
+
+    let mut config = AppConfig::default();
+    config.lyrics.show_translation = false;
+    config.lyrics.show_romanization = true;
+    let switched = lyrics_document(&state, &config, 8, None);
+    assert!(switched.lines[0].translation.is_empty());
+    assert_eq!(switched.lines[0].romanization, "nǐ hǎo");
 }
 
 #[test]

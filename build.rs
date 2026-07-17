@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 
 use std::{env, path::Path, process::Command};
 
@@ -9,6 +9,7 @@ fn main() {
         "bun.lock",
         "tsconfig.json",
         "src/frontend/view/lyrics",
+        "data/licenses/frontend",
     ] {
         println!("cargo:rerun-if-changed={path}");
     }

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 
 //! Backend playback state and deterministic clock calculations.
 
@@ -13,7 +13,9 @@ use floatlyrics_lyrics::lyrics::{TimedLine, active_line_index, line_index_at_or_
 
 use crate::shared::{
     config::AppConfig,
-    presentation::{KaraokeRenderState, LyricSlotText, LyricsFrame},
+    presentation::{
+        KaraokeRenderState, LyricSlotText, LyricsDocument, LyricsFrame, PresentedLyricLine,
+    },
 };
 
 use super::mpris::{PlaybackStatus, SpotifyPlayerState};
@@ -35,6 +37,8 @@ pub(super) fn lyrics_frame(
     state: &LyricsDisplayState,
     config: &AppConfig,
     position_ms: Option<u64>,
+    playing: bool,
+    seeking: bool,
     language: Language,
 ) -> LyricsFrame {
     if let Some(message) = &state.status_message {
@@ -53,11 +57,51 @@ pub(super) fn lyrics_frame(
         Some(index) => LyricsFrame {
             key: format!("line:{index}"),
             content: current_line_text(state.lines.get(index), config, position_ms),
+            position_ms: Some(adjusted_position_ms(position_ms, config.lyrics.offset_ms)),
+            playing,
+            seeking,
         },
         None => LyricsFrame {
             key: "before-first-line".to_string(),
             content: LyricSlotText::message("…"),
+            position_ms: Some(adjusted_position_ms(position_ms, config.lyrics.offset_ms)),
+            playing,
+            seeking,
         },
+    }
+}
+
+pub(super) fn lyrics_document(
+    state: &LyricsDisplayState,
+    config: &AppConfig,
+    revision: u64,
+    duration_ms: Option<u64>,
+) -> LyricsDocument {
+    LyricsDocument {
+        revision,
+        duration_ms,
+        lines: state
+            .lines
+            .iter()
+            .map(|line| {
+                let visible = line_text(Some(line), config);
+                PresentedLyricLine {
+                    start_ms: line.start_ms,
+                    end_ms: line.end_ms,
+                    text: line.text.trim().to_string(),
+                    syllables: line.syllables.clone(),
+                    romanization: visible.romanization,
+                    translation: visible.translation,
+                    background: line
+                        .background
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or_default()
+                        .to_string(),
+                }
+            })
+            .collect(),
     }
 }
 
@@ -65,6 +109,9 @@ fn status_frame(message: &Message, language: Language) -> LyricsFrame {
     LyricsFrame {
         key: format!("status:{}", message.key()),
         content: LyricSlotText::message(&message.render(language)),
+        position_ms: None,
+        playing: false,
+        seeking: false,
     }
 }
 

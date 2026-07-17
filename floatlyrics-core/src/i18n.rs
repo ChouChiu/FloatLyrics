@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 
 //! Lightweight, runtime-switchable user-interface translations.
 //!
@@ -310,6 +310,8 @@ define_text_keys!(
     CantoneseJyutpingWithoutTones,
     DisplayTitle,
     DisplayDescription,
+    AppleMusicStyle,
+    AppleMusicStyleDescription,
     PanelWidth,
     PanelWidthDescription,
     RememberWindowPosition,

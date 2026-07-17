@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 ChouChiu
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 
 [workspace]
 members = [".", "floatlyrics-core", "floatlyrics-lyrics"]
@@ -11,7 +11,7 @@ version = "1.0.2"
 edition = "2024"
 rust-version = "1.93"
 authors = ["ChouChiu"]
-license = "GPL-3.0-or-later"
+license = "AGPL-3.0-only"
 repository = "https://github.com/ChouChiu/FloatLyrics"
 
 [workspace.dependencies]
@@ -96,6 +96,7 @@ assets = [
     ["data/locale/zh-CN.json", "usr/share/floatlyrics/locale/zh-CN.json", "644"],
     ["data/locale/zh-TW.json", "usr/share/floatlyrics/locale/zh-TW.json", "644"],
     ["LICENSE", "usr/share/doc/floatlyrics/LICENSE", "644"],
+    ["LICENSES/AGPL-3.0-only.txt", "usr/share/doc/floatlyrics/LICENSES/AGPL-3.0-only.txt", "644"],
 ]
 
 [package.metadata.generate-rpm]
@@ -122,6 +123,7 @@ assets = [
     { source = "data/locale/zh-CN.json", dest = "/usr/share/floatlyrics/locale/zh-CN.json", mode = "644" },
     { source = "data/locale/zh-TW.json", dest = "/usr/share/floatlyrics/locale/zh-TW.json", mode = "644" },
     { source = "LICENSE", dest = "/usr/share/licenses/floatlyrics/LICENSE", mode = "644" },
+    { source = "LICENSES/AGPL-3.0-only.txt", dest = "/usr/share/licenses/floatlyrics/AGPL-3.0-only.txt", mode = "644" },
 ]
 
 [package.metadata.generate-rpm.requires]

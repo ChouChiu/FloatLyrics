@@ -1,9 +1,14 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 
 //! Coordinates backend playback events, lyrics retrieval, and caching.
 
-use std::{cell::RefCell, rc::Rc, sync::mpsc, time::Instant};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    sync::mpsc,
+    time::Instant,
+};
 
 use floatlyrics_core::{
     i18n::{Message, Text},
@@ -17,20 +22,24 @@ use floatlyrics_lyrics::{
     },
 };
 
-use crate::shared::{config::AppConfig, presentation::LyricSlotText};
+use crate::shared::{
+    config::AppConfig,
+    presentation::{LyricsDocument, LyricsFrame},
+};
 
 use super::{
     model::{
         LyricsDisplayState, PlaybackSnapshot, apply_position_sample, effective_position_ms,
-        lyrics_frame,
+        lyrics_document, lyrics_frame,
     },
-    mpris::{SpotifyPlayerState, SpotifyWatcherEvent},
+    mpris::{PlaybackStatus, SpotifyPlayerState, SpotifyWatcherEvent},
 };
 
 /// Output boundary implemented by the frontend overlay adapter.
 pub(crate) trait LyricsView {
     fn set_song_info(&self, value: &str);
-    fn show_lyrics(&self, value: LyricSlotText, key: &str);
+    fn set_lyrics_document(&self, document: LyricsDocument);
+    fn show_lyrics(&self, frame: LyricsFrame);
     fn show_status(&self, key: Text);
 }
 
@@ -62,17 +71,25 @@ struct SpotifyUiContext<'a> {
     romanization_sender: &'a mpsc::Sender<RomanizationEvent>,
     latest: &'a Rc<RefCell<Option<PlaybackSnapshot>>>,
     lyrics_state: &'a Rc<RefCell<LyricsDisplayState>>,
+    document_dirty: &'a Cell<bool>,
+    seek_pending: &'a Cell<bool>,
 }
 
 #[derive(Clone)]
 pub(crate) struct ControllerHandle {
     lyrics_state: Rc<RefCell<LyricsDisplayState>>,
     latest: Rc<RefCell<Option<PlaybackSnapshot>>>,
+    document_dirty: Rc<Cell<bool>>,
 }
 
 impl ControllerHandle {
     pub(crate) fn reload_lyrics(&self) {
         self.lyrics_state.borrow_mut().track_fingerprint = None;
+        self.document_dirty.set(true);
+    }
+
+    pub(crate) fn refresh_lyrics_presentation(&self) {
+        self.document_dirty.set(true);
     }
 
     pub(crate) fn current_track(&self) -> Option<TrackMetadata> {
@@ -98,6 +115,9 @@ pub(crate) struct Controller {
     runtime: tokio::runtime::Handle,
     lyrics_sender: mpsc::Sender<LyricsFetchEvent>,
     romanization_sender: mpsc::Sender<RomanizationEvent>,
+    document_dirty: Rc<Cell<bool>>,
+    document_revision: Cell<u64>,
+    seek_pending: Rc<Cell<bool>>,
 }
 
 impl Controller {
@@ -115,9 +135,12 @@ impl Controller {
         let romanization_receiver = Rc::new(RefCell::new(romanization_receiver));
         let latest = Rc::new(RefCell::new(None::<PlaybackSnapshot>));
         let lyrics_state = Rc::new(RefCell::new(LyricsDisplayState::default()));
+        let document_dirty = Rc::new(Cell::new(true));
+        let seek_pending = Rc::new(Cell::new(false));
         let handle = ControllerHandle {
             lyrics_state: Rc::clone(&lyrics_state),
             latest: Rc::clone(&latest),
+            document_dirty: Rc::clone(&document_dirty),
         };
 
         Self {
@@ -133,6 +156,9 @@ impl Controller {
             runtime,
             lyrics_sender,
             romanization_sender,
+            document_dirty,
+            document_revision: Cell::new(0),
+            seek_pending,
         }
     }
 
@@ -155,6 +181,8 @@ impl Controller {
             romanization_sender: &self.romanization_sender,
             latest: &self.latest,
             lyrics_state: &self.lyrics_state,
+            document_dirty: &self.document_dirty,
+            seek_pending: &self.seek_pending,
         };
 
         for event in self.receiver.borrow().try_iter() {
@@ -163,6 +191,7 @@ impl Controller {
 
         for event in self.lyrics_receiver.borrow().try_iter() {
             handle_lyrics_fetch_event(event, &ctx);
+            self.document_dirty.set(true);
         }
 
         for event in self.romanization_receiver.borrow().try_iter() {
@@ -171,28 +200,51 @@ impl Controller {
                 ctx.lyrics_state,
                 ctx.config.lyrics.chinese_romanization,
             );
+            self.document_dirty.set(true);
         }
 
         if let Some(snapshot) = ctx.latest.borrow().as_ref() {
             if let Some(track) = snapshot.state.track.as_ref() {
-                ensure_lyrics_loaded(
-                    track,
-                    ctx.cache,
-                    ctx.config,
-                    ctx.runtime,
-                    ctx.lyrics_sender,
-                    ctx.romanization_sender,
-                    ctx.lyrics_state,
-                );
+                ensure_lyrics_loaded(track, &ctx);
             }
-            refresh_lyrics_display(snapshot, ctx.floating, ctx.config, ctx.lyrics_state);
+            self.sync_lyrics_document(snapshot, &config);
+            refresh_lyrics_display(
+                snapshot,
+                ctx.floating,
+                ctx.config,
+                ctx.lyrics_state,
+                ctx.seek_pending.get(),
+            );
         }
+        self.seek_pending.set(false);
+    }
+
+    fn sync_lyrics_document(&self, snapshot: &PlaybackSnapshot, config: &AppConfig) {
+        if !self.document_dirty.replace(false) {
+            return;
+        }
+        let revision = self.document_revision.get().wrapping_add(1);
+        self.document_revision.set(revision);
+        let duration_ms = snapshot
+            .state
+            .track
+            .as_ref()
+            .and_then(|track| track.duration_ms);
+        self.floating.set_lyrics_document(lyrics_document(
+            &self.lyrics_state.borrow(),
+            config,
+            revision,
+            duration_ms,
+        ));
     }
 }
 
 fn handle_spotify_event(event: &SpotifyWatcherEvent, ctx: &SpotifyUiContext<'_>) {
     match event {
         SpotifyWatcherEvent::Connected(state) | SpotifyWatcherEvent::Updated(state) => {
+            if playback_jump_detected(ctx.latest.borrow().as_ref(), state.position_ms, state) {
+                ctx.seek_pending.set(true);
+            }
             *ctx.latest.borrow_mut() = Some(PlaybackSnapshot {
                 state: state.clone(),
                 received_at: Instant::now(),
@@ -205,23 +257,29 @@ fn handle_spotify_event(event: &SpotifyWatcherEvent, ctx: &SpotifyUiContext<'_>)
             sampled_at,
         } => {
             if let Some(snapshot) = ctx.latest.borrow_mut().as_mut() {
-                apply_position_sample(
+                let predicted = effective_position_ms(snapshot);
+                if apply_position_sample(
                     snapshot,
                     track_identity.as_deref(),
                     *position_ms,
                     *sampled_at,
-                );
+                ) && predicted.is_some_and(|value| value.abs_diff(*position_ms) > 750)
+                {
+                    ctx.seek_pending.set(true);
+                }
             }
         }
         SpotifyWatcherEvent::Disconnected => {
             *ctx.latest.borrow_mut() = None;
             *ctx.lyrics_state.borrow_mut() = LyricsDisplayState::default();
+            ctx.document_dirty.set(true);
             ctx.floating.set_song_info("FloatLyrics");
             ctx.floating.show_status(Text::OpenSpotify);
         }
         SpotifyWatcherEvent::Error(message) => {
             *ctx.latest.borrow_mut() = None;
             *ctx.lyrics_state.borrow_mut() = LyricsDisplayState::default();
+            ctx.document_dirty.set(true);
             tracing::warn!(%message, "Spotify listener error");
             ctx.floating.set_song_info("FloatLyrics");
             ctx.floating.show_status(Text::SpotifyAttention);
@@ -229,26 +287,41 @@ fn handle_spotify_event(event: &SpotifyWatcherEvent, ctx: &SpotifyUiContext<'_>)
     }
 }
 
+fn playback_jump_detected(
+    previous: Option<&PlaybackSnapshot>,
+    next_position_ms: Option<u64>,
+    next: &SpotifyPlayerState,
+) -> bool {
+    let Some(previous) = previous else {
+        return true;
+    };
+    let previous_identity = previous
+        .state
+        .track
+        .as_ref()
+        .map(TrackMetadata::playback_identity);
+    let next_identity = next.track.as_ref().map(TrackMetadata::playback_identity);
+    if previous_identity != next_identity {
+        return true;
+    }
+    effective_position_ms(previous)
+        .zip(next_position_ms)
+        .is_some_and(|(old, new)| old.abs_diff(new) > 750)
+}
+
 fn update_spotify_state(state: &SpotifyPlayerState, ctx: &SpotifyUiContext<'_>) {
     if let Some(track) = &state.track {
         if let Err(error) = ctx.cache.upsert_track(track) {
             tracing::warn!(%error, "failed to cache Spotify track");
         }
-        ensure_lyrics_loaded(
-            track,
-            ctx.cache,
-            ctx.config,
-            ctx.runtime,
-            ctx.lyrics_sender,
-            ctx.romanization_sender,
-            ctx.lyrics_state,
-        );
+        ensure_lyrics_loaded(track, ctx);
         update_track_display(
             state,
             ctx.floating,
             ctx.config,
             ctx.lyrics_state,
             state.position_ms,
+            ctx.seek_pending.get(),
         );
     } else {
         ctx.floating.set_song_info("FloatLyrics");
@@ -261,6 +334,7 @@ fn refresh_lyrics_display(
     floating: &dyn LyricsView,
     config: &AppConfig,
     lyrics_state: &Rc<RefCell<LyricsDisplayState>>,
+    seeking: bool,
 ) {
     if snapshot.state.track.is_some() {
         update_track_display(
@@ -269,6 +343,7 @@ fn refresh_lyrics_display(
             config,
             lyrics_state,
             effective_position_ms(snapshot),
+            seeking,
         );
     }
 }
@@ -279,6 +354,7 @@ fn update_track_display(
     config: &AppConfig,
     lyrics_state: &Rc<RefCell<LyricsDisplayState>>,
     position_ms: Option<u64>,
+    seeking: bool,
 ) {
     let Some(track) = &state.track else {
         return;
@@ -289,34 +365,29 @@ fn update_track_display(
         &lyrics_state.borrow(),
         config,
         position_ms,
+        state.playback_status == PlaybackStatus::Playing,
+        seeking,
         config.general.language,
     );
-    floating.show_lyrics(frame.content, &frame.key);
+    floating.show_lyrics(frame);
 }
 
-fn ensure_lyrics_loaded(
-    track: &TrackMetadata,
-    cache: &dyn LyricsCache,
-    config: &AppConfig,
-    runtime: &tokio::runtime::Handle,
-    lyrics_sender: &mpsc::Sender<LyricsFetchEvent>,
-    romanization_sender: &mpsc::Sender<RomanizationEvent>,
-    lyrics_state: &Rc<RefCell<LyricsDisplayState>>,
-) {
+fn ensure_lyrics_loaded(track: &TrackMetadata, ctx: &SpotifyUiContext<'_>) {
     let fingerprint = track.fingerprint();
-    if lyrics_state.borrow().track_fingerprint.as_deref() == Some(fingerprint.as_str()) {
+    if ctx.lyrics_state.borrow().track_fingerprint.as_deref() == Some(fingerprint.as_str()) {
         return;
     }
 
-    *lyrics_state.borrow_mut() = load_lyrics_for_track(
+    *ctx.lyrics_state.borrow_mut() = load_lyrics_for_track(
         track,
-        cache,
-        config,
-        runtime,
-        lyrics_sender,
-        romanization_sender,
+        ctx.cache,
+        ctx.config,
+        ctx.runtime,
+        ctx.lyrics_sender,
+        ctx.romanization_sender,
         fingerprint,
     );
+    ctx.document_dirty.set(true);
 }
 
 fn load_lyrics_for_track(
@@ -477,6 +548,7 @@ fn handle_lyrics_fetch_event(event: LyricsFetchEvent, ctx: &SpotifyUiContext<'_>
         ctx.config,
         ctx.lyrics_state,
         effective_position_ms(&snapshot),
+        ctx.seek_pending.get(),
     );
 }
 

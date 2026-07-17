@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 
 //! Frontend layer-shell positioning, snapping, and resize anchoring.
 
@@ -409,4 +409,4 @@ pub(super) fn apply_snap_css_classes(content: &gtk::Box, placement: &WindowPlace
 mod tests;
 
 // SPDX-FileCopyrightText: 2026 ChouChiu
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only

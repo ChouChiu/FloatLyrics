@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 
 //! Frontend about and acknowledgements window.
 
@@ -215,6 +215,24 @@ struct DependencyLicense {
     text: String,
 }
 
+impl LicenseData {
+    fn merge(&mut self, other: Self) {
+        self.dependencies.extend(other.dependencies);
+        self.dependencies.sort_by(|left, right| {
+            left.name
+                .cmp(&right.name)
+                .then_with(|| left.version.cmp(&right.version))
+        });
+
+        self.licenses.extend(other.licenses);
+        self.licenses.sort_by(|left, right| {
+            left.name
+                .cmp(&right.name)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+    }
+}
+
 fn dependencies_page(i18n: &I18n) -> gtk::ScrolledWindow {
     let mut license_data: LicenseData = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -226,10 +244,7 @@ fn dependencies_page(i18n: &I18n) -> gtk::ScrolledWindow {
         "/frontend-dependencies.json"
     )))
     .expect("Bun generated valid frontend dependency license data");
-    license_data
-        .dependencies
-        .extend(frontend_license_data.dependencies);
-    license_data.licenses.extend(frontend_license_data.licenses);
+    license_data.merge(frontend_license_data);
 
     let description = localized_label(i18n, Text::OpenSourceDescription, &["dim-label"]);
     description.set_wrap(true);
@@ -309,3 +324,7 @@ fn install_css() {
         "#,
     );
 }
+
+#[cfg(test)]
+#[path = "../test/about_test.rs"]
+mod tests;
