@@ -25,8 +25,6 @@ while IFS= read -r -d '' icon; do
 done < <(find data/icons -type f -print0)
 
 install -Dm644 LICENSE "$destdir$prefix/share/licenses/floatlyrics/LICENSE"
-install -Dm644 LICENSES/AGPL-3.0-only.txt \
-    "$destdir$prefix/share/licenses/floatlyrics/AGPL-3.0-only.txt"
 
 if [[ -d data/locale ]]; then
     install -d "$destdir$prefix/share/floatlyrics/locale"
