@@ -3,13 +3,14 @@
 
 //! Frontend about and acknowledgements window.
 
-use gtk::prelude::*;
-use relm4::{ComponentParts, ComponentSender, SimpleComponent};
-use serde::Deserialize;
+mod license_data;
 
 use floatlyrics_core::i18n::{I18n, Text};
+use gtk::prelude::*;
+use relm4::{ComponentParts, ComponentSender, SimpleComponent};
 
 use super::localization::{bind_label, bind_stack_page_title, bind_window_title};
+use license_data::LicenseData;
 
 const WINDOW_WIDTH: i32 = 560;
 const WINDOW_HEIGHT: i32 = 450;
@@ -195,56 +196,8 @@ fn localized_label(i18n: &I18n, key: Text, classes: &[&str]) -> gtk::Label {
     label
 }
 
-#[derive(Deserialize)]
-struct LicenseData {
-    dependencies: Vec<Dependency>,
-    licenses: Vec<DependencyLicense>,
-}
-
-#[derive(Deserialize)]
-struct Dependency {
-    name: String,
-    version: String,
-    license: String,
-}
-
-#[derive(Deserialize)]
-struct DependencyLicense {
-    name: String,
-    id: String,
-    text: String,
-}
-
-impl LicenseData {
-    fn merge(&mut self, other: Self) {
-        self.dependencies.extend(other.dependencies);
-        self.dependencies.sort_by(|left, right| {
-            left.name
-                .cmp(&right.name)
-                .then_with(|| left.version.cmp(&right.version))
-        });
-
-        self.licenses.extend(other.licenses);
-        self.licenses.sort_by(|left, right| {
-            left.name
-                .cmp(&right.name)
-                .then_with(|| left.id.cmp(&right.id))
-        });
-    }
-}
-
 fn dependencies_page(i18n: &I18n) -> gtk::ScrolledWindow {
-    let mut license_data: LicenseData = serde_json::from_str(include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/data/licenses/dependencies.json"
-    )))
-    .expect("cargo-about generated valid dependency license data");
-    let frontend_license_data: LicenseData = serde_json::from_str(include_str!(concat!(
-        env!("OUT_DIR"),
-        "/frontend-dependencies.json"
-    )))
-    .expect("Bun generated valid frontend dependency license data");
-    license_data.merge(frontend_license_data);
+    let license_data = LicenseData::embedded();
 
     let description = localized_label(i18n, Text::OpenSourceDescription, &["dim-label"]);
     description.set_wrap(true);
@@ -324,7 +277,3 @@ fn install_css() {
         "#,
     );
 }
-
-#[cfg(test)]
-#[path = "../test/about_test.rs"]
-mod tests;
