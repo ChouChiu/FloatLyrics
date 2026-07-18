@@ -190,7 +190,7 @@ impl SimpleComponent for ManualSearchModel {
 
         let results = gtk::ListBox::new();
         results.set_selection_mode(gtk::SelectionMode::Single);
-        results.add_css_class("boxed-list");
+        results.add_css_class("manual-search-results");
 
         let preview = gtk::TextView::builder()
             .editable(false)

@@ -63,6 +63,7 @@ pub(super) fn install_css() {
     crate::frontend::style::install(
         r#"
         .manual-search-bar, .manual-search-footer { padding: 12px; }
+        .manual-search-results, .manual-search-results > row { border-radius: 0; }
         .manual-result-row { padding: 10px 12px; }
         "#,
     );
