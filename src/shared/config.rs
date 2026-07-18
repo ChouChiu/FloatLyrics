@@ -9,6 +9,7 @@ use floatlyrics_core::i18n::Language;
 pub use floatlyrics_lyrics::lyrics::{ChineseRomanizationMode, LyricsProvider};
 
 mod persistence;
+mod recovery;
 mod validation;
 
 pub(crate) use validation::ConfigLimits;

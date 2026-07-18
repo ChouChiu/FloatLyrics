@@ -83,18 +83,29 @@ fn save_replaces_config_without_leaving_a_temporary_file() {
 }
 
 #[test]
-fn load_rejects_out_of_range_numeric_values() {
+fn load_recovers_out_of_range_field_and_preserves_valid_preferences() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("config.toml");
     let mut config = AppConfig::default();
     config.window.width = ConfigLimits::WINDOW_WIDTH_MAX + 1;
-    fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
+    config.window.opacity = 0.42;
+    config.lyrics.offset_ms = 275;
+    let original = toml::to_string(&config).unwrap();
+    fs::write(&path, &original).unwrap();
 
-    let error = format!("{:#}", AppConfig::load_or_default(&path).unwrap_err());
+    let recovered = AppConfig::load_or_default(&path).unwrap();
 
-    assert!(error.contains("validating config file"));
-    assert!(error.contains("config.toml"));
-    assert!(error.contains("window.width"));
+    assert_eq!(recovered.window.width, AppConfig::default().window.width);
+    assert_eq!(recovered.window.opacity, 0.42);
+    assert_eq!(recovered.lyrics.offset_ms, 275);
+    assert_eq!(
+        fs::read_to_string(incompatible_backup(&path)).unwrap(),
+        original
+    );
+    assert_eq!(
+        toml::from_str::<AppConfig>(&fs::read_to_string(&path).unwrap()).unwrap(),
+        recovered
+    );
 }
 
 #[test]
@@ -136,16 +147,110 @@ fn save_rejects_invalid_position_font_order_and_colors() {
 }
 
 #[test]
-fn load_rejects_invalid_persisted_color() {
+fn load_recovers_invalid_color_without_discarding_other_lyrics_preferences() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("config.toml");
     let mut config = AppConfig::default();
     config.lyrics.translation_color = "not-a-color".to_string();
+    config.lyrics.show_romanization = true;
     fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
 
-    let error = format!("{:#}", AppConfig::load_or_default(&path).unwrap_err());
+    let recovered = AppConfig::load_or_default(&path).unwrap();
 
-    assert!(error.contains("lyrics.translation_color"));
+    assert_eq!(
+        recovered.lyrics.translation_color,
+        AppConfig::default().lyrics.translation_color
+    );
+    assert!(recovered.lyrics.show_romanization);
+    assert!(incompatible_backup(&path).exists());
+}
+
+#[test]
+fn load_ignores_unknown_fields_and_rewrites_the_current_format() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+    let mut config = AppConfig::default();
+    config.window.width = 512;
+    let mut value = toml::Value::try_from(&config).unwrap();
+    value
+        .as_table_mut()
+        .unwrap()
+        .insert("obsolete".to_string(), toml::Table::new().into());
+    let original = toml::to_string(&value).unwrap();
+    fs::write(&path, &original).unwrap();
+
+    let recovered = AppConfig::load_or_default(&path).unwrap();
+
+    assert_eq!(recovered.window.width, 512);
+    assert_eq!(
+        fs::read_to_string(incompatible_backup(&path)).unwrap(),
+        original
+    );
+    assert!(!fs::read_to_string(&path).unwrap().contains("obsolete"));
+}
+
+#[test]
+fn load_recovers_type_and_enum_changes_field_by_field() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+    let mut value = toml::Value::try_from(AppConfig::default()).unwrap();
+    value["general"]["language"] = toml::Value::String("unsupported".to_string());
+    value["window"]["width"] = toml::Value::String("wide".to_string());
+    value["lyrics"]["offset_ms"] = toml::Value::Integer(450);
+    fs::write(&path, toml::to_string(&value).unwrap()).unwrap();
+
+    let recovered = AppConfig::load_or_default(&path).unwrap();
+
+    assert_eq!(
+        recovered.general.language,
+        AppConfig::default().general.language
+    );
+    assert_eq!(recovered.window.width, AppConfig::default().window.width);
+    assert_eq!(recovered.lyrics.offset_ms, 450);
+}
+
+#[test]
+fn malformed_or_non_utf8_config_falls_back_without_losing_original_bytes() {
+    for original in [b"[window\nwidth = 500".as_slice(), &[0xff, 0xfe, 0xfd]] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        fs::write(&path, original).unwrap();
+
+        let recovered = AppConfig::load_or_default(&path).unwrap();
+
+        assert_eq!(recovered, AppConfig::default());
+        assert_eq!(fs::read(incompatible_backup(&path)).unwrap(), original);
+        assert_eq!(AppConfig::load_or_default(&path).unwrap(), recovered);
+    }
+}
+
+#[test]
+fn recovery_never_overwrites_an_existing_incompatible_backup() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+    let first_backup = incompatible_backup(&path);
+    fs::write(&first_backup, "older backup").unwrap();
+    fs::write(&path, "not valid toml = [").unwrap();
+
+    AppConfig::load_or_default(&path).unwrap();
+
+    assert_eq!(fs::read_to_string(first_backup).unwrap(), "older backup");
+    assert_eq!(
+        fs::read_to_string(path.with_file_name("config.toml.incompatible.1")).unwrap(),
+        "not valid toml = ["
+    );
+}
+
+#[test]
+fn filesystem_read_errors_remain_fatal() {
+    let directory = tempfile::tempdir().unwrap();
+
+    let error = format!(
+        "{:#}",
+        AppConfig::load_or_default(directory.path()).unwrap_err()
+    );
+
+    assert!(error.contains("reading config file"));
 }
 
 #[test]
@@ -264,4 +369,11 @@ fn chinese_romanization_mode_round_trips_in_config() {
 
     assert!(serialized.contains("chinese_romanization = \"cantonese-jyutping-no-tones\""));
     assert_eq!(restored, config);
+}
+
+fn incompatible_backup(path: &std::path::Path) -> std::path::PathBuf {
+    path.with_file_name(format!(
+        "{}.incompatible",
+        path.file_name().unwrap().to_string_lossy()
+    ))
 }

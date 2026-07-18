@@ -9,15 +9,22 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 
-use super::AppConfig;
+use super::{AppConfig, recovery};
 
 impl AppConfig {
-    /// Loads `path`, creating and saving defaults when it does not exist.
+    /// Loads `path`, creating defaults when it does not exist and repairing
+    /// incompatible persisted data field by field when possible.
+    ///
+    /// Before replacing incompatible data, the original bytes are preserved
+    /// next to the configuration using an `.incompatible` suffix. Unknown
+    /// fields are ignored during recovery, while malformed or invalid fields
+    /// fall back to their current defaults.
     ///
     /// # Errors
-    /// Returns an error when the file cannot be read, parsed, validated, or initially saved.
+    /// Returns an error when the file cannot be read, backed up, or replaced,
+    /// or when a new default configuration cannot be saved.
     pub fn load_or_default(path: &Path) -> Result<Self> {
         if !path.exists() {
             let config = Self::default();
@@ -25,14 +32,36 @@ impl AppConfig {
             return Ok(config);
         }
 
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("reading config file {}", path.display()))?;
-        let config: Self = toml::from_str(&content)
-            .with_context(|| format!("parsing config file {}", path.display()))?;
-        config
-            .validate()
-            .with_context(|| format!("validating config file {}", path.display()))?;
-        Ok(config)
+        let bytes =
+            fs::read(path).with_context(|| format!("reading config file {}", path.display()))?;
+        let content = match std::str::from_utf8(&bytes) {
+            Ok(content) => content,
+            Err(error) => {
+                return recover_incompatible(
+                    path,
+                    &bytes,
+                    None,
+                    anyhow!(error).context("configuration is not valid UTF-8"),
+                );
+            }
+        };
+        match toml::from_str::<Self>(content) {
+            Ok(config) => match config.validate() {
+                Ok(()) => Ok(config),
+                Err(error) => recover_incompatible(
+                    path,
+                    &bytes,
+                    Some(content),
+                    error.context("validating configuration"),
+                ),
+            },
+            Err(error) => recover_incompatible(
+                path,
+                &bytes,
+                Some(content),
+                anyhow!(error).context("parsing configuration"),
+            ),
+        }
     }
 
     /// Atomically replaces the configuration at `path`.
@@ -62,6 +91,29 @@ impl AppConfig {
 
         Ok(())
     }
+}
+
+fn recover_incompatible(
+    path: &Path,
+    original: &[u8],
+    content: Option<&str>,
+    incompatibility: anyhow::Error,
+) -> Result<AppConfig> {
+    let config = content.map_or_else(AppConfig::default, recovery::recover_fields);
+    config
+        .validate()
+        .context("validating recovered configuration")?;
+    let backup = recovery::backup(path, original)?;
+    config
+        .save(path)
+        .with_context(|| format!("saving recovered config file {}", path.display()))?;
+    tracing::warn!(
+        config_path = %path.display(),
+        backup_path = %backup.display(),
+        error = %format_args!("{incompatibility:#}"),
+        "recovered incompatible configuration with current defaults"
+    );
+    Ok(config)
 }
 
 fn temporary_config_path(path: &Path) -> Result<PathBuf> {
