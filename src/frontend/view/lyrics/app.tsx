@@ -155,6 +155,7 @@ export function AppleMusicLyrics({ state }: { state: LyricsViewState }) {
         isSeeking={frame.seeking}
         alignAnchor="center"
         alignPosition={0.5}
+        hidePassedLines={true}
         wordFadeWidth={0.5}
       />
     </main>
