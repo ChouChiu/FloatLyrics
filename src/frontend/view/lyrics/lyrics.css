@@ -64,6 +64,12 @@ body,
   transform-origin: center;
 }
 
+.apple-music-player .amll-lyric-player :is([class$="_interludeDots"], [class*="_interludeDots "]) {
+  right: auto;
+  left: 50%;
+  translate: -50% 0;
+}
+
 .apple-music-player .amll-lyric-player :is([class$="_lyricMainLine"], [class*="_lyricMainLine "]),
 .apple-music-player
   .amll-lyric-player
