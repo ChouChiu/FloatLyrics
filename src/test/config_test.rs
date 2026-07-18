@@ -1,4 +1,5 @@
 use super::*;
+use std::fs;
 
 #[test]
 fn default_provider_order_matches_plan() {
@@ -69,7 +70,7 @@ fn save_replaces_config_without_leaving_a_temporary_file() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("config.toml");
     let mut config = AppConfig::default();
-    config.window.width = 720;
+    config.window.width = 520;
 
     config.save(&path).unwrap();
 
@@ -79,6 +80,109 @@ fn save_replaces_config_without_leaving_a_temporary_file() {
         .map(|entry| entry.unwrap().file_name())
         .collect::<Vec<_>>();
     assert_eq!(entries, vec!["config.toml"]);
+}
+
+#[test]
+fn load_rejects_out_of_range_numeric_values() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+    let mut config = AppConfig::default();
+    config.window.width = ConfigLimits::WINDOW_WIDTH_MAX + 1;
+    fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
+
+    let error = format!("{:#}", AppConfig::load_or_default(&path).unwrap_err());
+
+    assert!(error.contains("validating config file"));
+    assert!(error.contains("config.toml"));
+    assert!(error.contains("window.width"));
+}
+
+#[test]
+fn invalid_save_does_not_replace_existing_config() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+    let original = AppConfig::default();
+    original.save(&path).unwrap();
+    let mut invalid = original.clone();
+    invalid.window.opacity = ConfigLimits::OPACITY_MAX + 0.1;
+
+    assert!(invalid.save(&path).is_err());
+    assert_eq!(AppConfig::load_or_default(&path).unwrap(), original);
+}
+
+#[test]
+fn save_rejects_invalid_position_font_order_and_colors() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+    let mut invalid_position = AppConfig::default();
+    invalid_position.window.position = Some(WindowPosition {
+        horizontal: -0.01,
+        vertical: 0.5,
+    });
+    assert!(invalid_position.save(&path).is_err());
+
+    let mut empty_fonts = AppConfig::default();
+    empty_fonts.lyrics.font_order.clear();
+    assert!(empty_fonts.save(&path).is_err());
+
+    let mut blank_font = AppConfig::default();
+    blank_font.lyrics.font_order = vec!["Sans".to_string(), "  ".to_string()];
+    assert!(blank_font.save(&path).is_err());
+
+    let mut invalid_color = AppConfig::default();
+    invalid_color.lyrics.played_color = "#GG0000".to_string();
+    assert!(invalid_color.save(&path).is_err());
+    assert!(!path.exists());
+}
+
+#[test]
+fn load_rejects_invalid_persisted_color() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+    let mut config = AppConfig::default();
+    config.lyrics.translation_color = "not-a-color".to_string();
+    fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
+
+    let error = format!("{:#}", AppConfig::load_or_default(&path).unwrap_err());
+
+    assert!(error.contains("lyrics.translation_color"));
+}
+
+#[test]
+fn validates_every_numeric_preference_at_its_boundary() {
+    fn assert_invalid(mutate: impl FnOnce(&mut AppConfig)) {
+        let mut config = AppConfig::default();
+        mutate(&mut config);
+        assert!(config.validate().is_err());
+    }
+
+    assert_invalid(|config| config.window.width = ConfigLimits::WINDOW_WIDTH_MIN - 1);
+    assert_invalid(|config| config.window.width = ConfigLimits::WINDOW_WIDTH_MAX + 1);
+    assert_invalid(|config| config.window.margin = ConfigLimits::WINDOW_MARGIN_MIN - 1);
+    assert_invalid(|config| config.window.margin = ConfigLimits::WINDOW_MARGIN_MAX + 1);
+    assert_invalid(|config| {
+        config.window.bottom_panel_height = ConfigLimits::BOTTOM_PANEL_HEIGHT_MIN - 1;
+    });
+    assert_invalid(|config| {
+        config.window.bottom_panel_height = ConfigLimits::BOTTOM_PANEL_HEIGHT_MAX + 1;
+    });
+    assert_invalid(|config| config.window.opacity = ConfigLimits::OPACITY_MIN - 0.01);
+    assert_invalid(|config| config.window.opacity = ConfigLimits::OPACITY_MAX + 0.01);
+    assert_invalid(|config| config.window.opacity = f64::NAN);
+    assert_invalid(|config| config.lyrics.offset_ms = ConfigLimits::OFFSET_MS_MIN - 1);
+    assert_invalid(|config| config.lyrics.offset_ms = ConfigLimits::OFFSET_MS_MAX + 1);
+    assert_invalid(|config| {
+        config.lyrics.lyric_font_size = ConfigLimits::LYRIC_FONT_SIZE_MIN - 1;
+    });
+    assert_invalid(|config| {
+        config.lyrics.lyric_font_size = ConfigLimits::LYRIC_FONT_SIZE_MAX + 1;
+    });
+    assert_invalid(|config| {
+        config.lyrics.translation_font_size = ConfigLimits::SECONDARY_FONT_SIZE_MIN - 1;
+    });
+    assert_invalid(|config| {
+        config.lyrics.romanization_font_size = ConfigLimits::SECONDARY_FONT_SIZE_MAX + 1;
+    });
 }
 
 #[test]
@@ -106,7 +210,10 @@ translation_font_size = 13
 [spotify]
 mpris_prefix = "org.mpris.MediaPlayer2.spotify"
 "#;
-    let config: AppConfig = toml::from_str(old_format).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+    fs::write(&path, old_format).unwrap();
+    let config = AppConfig::load_or_default(&path).unwrap();
     assert_eq!(config.lyrics.played_color, "#FFFFFFFF");
     assert_eq!(config.lyrics.unplayed_color, "#9EA6B3FF");
     assert_eq!(config.lyrics.translation_color, "#FFFFFFC7");
