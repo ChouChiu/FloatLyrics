@@ -39,6 +39,11 @@ fn apple_music_line_changes_animate_to_the_current_line_width() {
 }
 
 #[test]
+fn panel_width_animation_matches_the_amll_transition_duration() {
+    assert_eq!(PANEL_RESIZE_DURATION_US, 500_000);
+}
+
+#[test]
 fn panel_width_animation_eases_between_both_endpoints() {
     assert_eq!(animated_panel_width(520, 900, 0), 520);
 

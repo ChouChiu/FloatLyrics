@@ -14,7 +14,7 @@ const MIN_KARAOKE_HEIGHT: i32 = 36;
 const MIN_ROMANIZATION_HEIGHT: i32 = 18;
 const MIN_TRANSLATION_HEIGHT: i32 = 18;
 const PANEL_CHROME_HEIGHT: i32 = 28;
-pub(super) const PANEL_RESIZE_DURATION_US: i64 = 180_000;
+pub(super) const PANEL_RESIZE_DURATION_US: i64 = 500_000;
 
 pub(super) fn fallback_panel_height(viewport_height: i32) -> i32 {
     viewport_height.saturating_add(PANEL_CHROME_HEIGHT)
