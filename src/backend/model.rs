@@ -12,10 +12,10 @@ use floatlyrics_core::{
 use floatlyrics_lyrics::lyrics::{TimedLine, active_line_index, line_index_at_or_before};
 
 use crate::shared::{
-    config::AppConfig,
     presentation::{
         KaraokeRenderState, LyricSlotText, LyricsDocument, LyricsFrame, PresentedLyricLine,
     },
+    runtime::LyricsRuntimeConfig,
 };
 
 use super::mpris::{PlaybackStatus, SpotifyPlayerState};
@@ -35,7 +35,7 @@ pub(super) struct PlaybackSnapshot {
 
 pub(super) fn lyrics_frame(
     state: &LyricsDisplayState,
-    config: &AppConfig,
+    config: &LyricsRuntimeConfig,
     position_ms: Option<u64>,
     playing: bool,
     seeking: bool,
@@ -51,20 +51,20 @@ pub(super) fn lyrics_frame(
         return status_frame(&Message::Text(Text::WaitingForPosition), language);
     };
 
-    let index = active_line_index(&state.lines, position_ms, config.lyrics.offset_ms)
-        .or_else(|| line_index_at_or_before(&state.lines, position_ms, config.lyrics.offset_ms));
+    let index = active_line_index(&state.lines, position_ms, config.offset_ms)
+        .or_else(|| line_index_at_or_before(&state.lines, position_ms, config.offset_ms));
     match index {
         Some(index) => LyricsFrame {
             key: format!("line:{index}"),
             content: current_line_text(state.lines.get(index), config, position_ms),
-            position_ms: Some(adjusted_position_ms(position_ms, config.lyrics.offset_ms)),
+            position_ms: Some(adjusted_position_ms(position_ms, config.offset_ms)),
             playing,
             seeking,
         },
         None => LyricsFrame {
             key: "before-first-line".to_string(),
             content: LyricSlotText::message("…"),
-            position_ms: Some(adjusted_position_ms(position_ms, config.lyrics.offset_ms)),
+            position_ms: Some(adjusted_position_ms(position_ms, config.offset_ms)),
             playing,
             seeking,
         },
@@ -73,7 +73,7 @@ pub(super) fn lyrics_frame(
 
 pub(super) fn lyrics_document(
     state: &LyricsDisplayState,
-    config: &AppConfig,
+    config: &LyricsRuntimeConfig,
     revision: u64,
     duration_ms: Option<u64>,
 ) -> LyricsDocument {
@@ -115,12 +115,12 @@ fn status_frame(message: &Message, language: Language) -> LyricsFrame {
     }
 }
 
-fn line_text(line: Option<&TimedLine>, config: &AppConfig) -> LyricSlotText {
+fn line_text(line: Option<&TimedLine>, config: &LyricsRuntimeConfig) -> LyricSlotText {
     let Some(line) = line else {
         return LyricSlotText::empty();
     };
     let text = line.text.trim().to_string();
-    let translation = if config.lyrics.show_translation
+    let translation = if config.show_translation
         && let Some(translation) = line.translation.as_deref().map(str::trim)
         && !translation.is_empty()
         && !is_placeholder_text(translation)
@@ -129,7 +129,7 @@ fn line_text(line: Option<&TimedLine>, config: &AppConfig) -> LyricSlotText {
     } else {
         String::new()
     };
-    let romanization = if config.lyrics.show_romanization
+    let romanization = if config.show_romanization
         && let Some(romanization) = line.romanization.as_deref().map(str::trim)
         && !romanization.is_empty()
     {
@@ -147,7 +147,7 @@ fn line_text(line: Option<&TimedLine>, config: &AppConfig) -> LyricSlotText {
 
 fn current_line_text(
     line: Option<&TimedLine>,
-    config: &AppConfig,
+    config: &LyricsRuntimeConfig,
     position_ms: u64,
 ) -> LyricSlotText {
     let mut value = line_text(line, config);
@@ -158,7 +158,7 @@ fn current_line_text(
         value.karaoke = Some(KaraokeRenderState {
             text: line.text.clone(),
             syllables: line.syllables.clone(),
-            position_ms: adjusted_position_ms(position_ms, config.lyrics.offset_ms),
+            position_ms: adjusted_position_ms(position_ms, config.offset_ms),
         });
     }
     value
@@ -192,6 +192,28 @@ pub(super) fn effective_position_ms(snapshot: &PlaybackSnapshot) -> Option<u64> 
             .and_then(|track| track.duration_ms)
             .map_or(position, |duration| position.min(duration)),
     )
+}
+
+pub(super) fn playback_jump_detected(
+    previous: Option<&PlaybackSnapshot>,
+    next_position_ms: Option<u64>,
+    next: &SpotifyPlayerState,
+) -> bool {
+    let Some(previous) = previous else {
+        return true;
+    };
+    let previous_identity = previous
+        .state
+        .track
+        .as_ref()
+        .map(TrackMetadata::playback_identity);
+    let next_identity = next.track.as_ref().map(TrackMetadata::playback_identity);
+    if previous_identity != next_identity {
+        return true;
+    }
+    effective_position_ms(previous)
+        .zip(next_position_ms)
+        .is_some_and(|(old, new)| old.abs_diff(new) > 750)
 }
 
 pub(super) fn apply_position_sample(

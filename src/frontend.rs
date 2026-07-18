@@ -20,13 +20,14 @@ use relm4::{
     Component, ComponentController, ComponentParts, ComponentSender, Controller, MessageBroker,
     RelmApp, SimpleComponent,
 };
-use std::{cell::RefCell, ffi::OsStr, rc::Rc, sync::mpsc};
+use std::{ffi::OsStr, rc::Rc, sync::mpsc};
 
 use crate::{
     backend::{self},
     shared::{
         config::{AppConfig, WindowPosition},
         presentation::{LyricsDocument, LyricsFrame},
+        runtime::LyricsRuntimeConfig,
     },
 };
 use floatlyrics_core::{i18n::I18n, paths::AppPaths};
@@ -34,14 +35,13 @@ use floatlyrics_core::{i18n::I18n, paths::AppPaths};
 static APP_BROKER: MessageBroker<AppMsg> = MessageBroker::new();
 
 struct AppInit {
-    paths: AppPaths,
     config: AppConfig,
     backend: backend::Backend,
+    config_saver: settings::ConfigSaveService,
 }
 
 struct AppModel {
-    _backend: backend::Backend,
-    config: Rc<RefCell<AppConfig>>,
+    config: AppConfig,
     i18n: I18n,
     overlay: view::OverlayView,
     settings: Controller<settings::SettingsModel>,
@@ -51,6 +51,7 @@ struct AppModel {
     song_info: String,
     lyrics: LyricsPresentation,
     lyrics_document: Option<LyricsDocument>,
+    _backend: backend::Backend,
 }
 
 #[derive(Debug, Clone)]
@@ -113,24 +114,19 @@ impl SimpleComponent for AppModel {
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
         let AppInit {
-            paths,
             config,
             backend,
+            config_saver,
         } = init;
-        let config = Rc::new(RefCell::new(config));
-        let i18n = I18n::new(config.borrow().general.language);
-        let overlay = view::build(
-            &root,
-            &config.borrow(),
-            i18n.clone(),
-            sender.input_sender().clone(),
-        );
+        let i18n = I18n::new(config.general.language);
+        let overlay = view::build(&root, &config, i18n.clone(), sender.input_sender().clone());
         let (spotify_sender, spotify_receiver) = mpsc::channel();
-        backend.spawn_spotify_watcher(spotify_sender, config.borrow().spotify.mpris_prefix.clone());
+        backend.spawn_spotify_watcher(spotify_sender, config.spotify.mpris_prefix.clone());
+        let controller_config = LyricsRuntimeConfig::from(&config);
         let controller = backend.controller(
             spotify_receiver,
             Rc::new(view::OverlaySender::new(sender.input_sender().clone())),
-            Rc::clone(&config),
+            controller_config,
         );
 
         let manual_search = manual_search::ManualSearchModel::builder()
@@ -143,8 +139,8 @@ impl SimpleComponent for AppModel {
         let about = about::AboutModel::builder().launch(i18n.clone()).detach();
         let settings = settings::SettingsModel::builder()
             .launch(settings::SettingsInit {
-                initial: config.borrow().clone(),
-                config_file: paths.config_file,
+                initial: config.clone(),
+                config_saver,
                 i18n: i18n.clone(),
             })
             .forward(sender.input_sender(), |output| match output {
@@ -161,7 +157,6 @@ impl SimpleComponent for AppModel {
         }
 
         let model = Self {
-            _backend: backend,
             config,
             i18n,
             overlay,
@@ -172,6 +167,7 @@ impl SimpleComponent for AppModel {
             song_info: "FloatLyrics".to_string(),
             lyrics: LyricsPresentation::Status(floatlyrics_core::i18n::Text::OpenSpotify),
             lyrics_document: None,
+            _backend: backend,
         };
         let widgets = view_output!();
         ComponentParts { model, widgets }
@@ -197,21 +193,22 @@ impl SimpleComponent for AppModel {
                 let _ = self.about.sender().send(about::AboutMsg::Show);
             }
             AppMsg::WindowMoved(position) => {
-                if self.config.borrow().window.remember_position {
-                    let _ = self
-                        .settings
-                        .sender()
-                        .send(settings::SettingsMsg::SetWindowPosition(position));
+                if self.config.window.remember_position {
+                    let _ = self.settings.sender().send(settings::SettingsMsg::Change(
+                        settings::ConfigChange::WindowPosition(position),
+                    ));
                 }
             }
             AppMsg::ConfigChanged(next_config) => {
-                let reload_lyrics = should_reload_lyrics(&self.config.borrow(), &next_config);
+                let reload_lyrics = should_reload_lyrics(&self.config, &next_config);
                 self.overlay.apply_config(&next_config);
                 self.i18n.set_language(next_config.general.language);
-                *self.config.borrow_mut() = next_config;
-                self.controller.handle().refresh_lyrics_presentation();
+                self.controller
+                    .update_config(LyricsRuntimeConfig::from(&next_config));
+                self.config = next_config;
+                self.controller.refresh_lyrics_presentation();
                 if reload_lyrics {
-                    self.controller.handle().reload_lyrics();
+                    self.controller.reload_lyrics();
                 }
             }
             AppMsg::Quit => relm4::main_application().quit(),
@@ -246,11 +243,13 @@ fn should_reload_lyrics(current: &AppConfig, next: &AppConfig) -> bool {
 ///
 /// # Errors
 ///
-/// Returns an error when the lyrics cache or Tokio runtime cannot initialize.
+/// Returns an error when the lyrics cache, Tokio runtime, or configuration
+/// save worker cannot initialize.
 pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
     // Open the cache before GTK starts so initialization errors remain
     // recoverable through the public `Result` API.
     let backend = backend::Backend::new(&paths.database_file)?;
+    let config_saver = settings::ConfigSaveService::new(paths.config_file)?;
 
     let app = gtk::Application::builder()
         .application_id("io.github.chouchiu.floatlyrics")
@@ -268,9 +267,9 @@ pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
     RelmApp::from_app(app)
         .with_broker(&APP_BROKER)
         .run::<AppModel>(AppInit {
-            paths,
             config,
             backend,
+            config_saver,
         });
     Ok(())
 }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::shared::config::AppConfig;
 use floatlyrics_lyrics::lyrics::TimedSyllable;
 use std::time::Duration;
 
@@ -43,15 +44,36 @@ fn sample_from_another_track_is_ignored() {
 }
 
 #[test]
+fn seek_detection_distinguishes_clock_updates_from_jumps_and_track_changes() {
+    let previous = snapshot(PlaybackStatus::Paused, Duration::ZERO);
+
+    assert!(!playback_jump_detected(
+        Some(&previous),
+        Some(10_500),
+        &player_state("Song", 10_500),
+    ));
+    assert!(playback_jump_detected(
+        Some(&previous),
+        Some(12_000),
+        &player_state("Song", 12_000),
+    ));
+    assert!(playback_jump_detected(
+        Some(&previous),
+        Some(10_000),
+        &player_state("Another Song", 10_000),
+    ));
+}
+
+#[test]
 fn placeholder_translation_is_hidden() {
     let mut line = test_line();
     line.translation = Some("//".to_string());
-    let text = line_text(Some(&line), &AppConfig::default());
+    let text = line_text(Some(&line), &runtime_config());
     assert_eq!(text.text, "Hello");
     assert!(text.translation.is_empty());
 
     line.translation = Some("你好".to_string());
-    let text = line_text(Some(&line), &AppConfig::default());
+    let text = line_text(Some(&line), &runtime_config());
     assert_eq!(text.translation, "你好");
 }
 
@@ -65,8 +87,8 @@ fn romanization_is_shown_with_translation_and_karaoke() {
         end_ms: 2_000,
         text: "Hello".to_string(),
     });
-    let mut config = AppConfig::default();
-    config.lyrics.show_romanization = true;
+    let mut config = runtime_config();
+    config.show_romanization = true;
 
     let text = current_line_text(Some(&line), &config, 1_500);
 
@@ -84,7 +106,7 @@ fn lyric_frame_uses_stable_key_for_active_line() {
 
     let frame = lyrics_frame(
         &state,
-        &AppConfig::default(),
+        &runtime_config(),
         Some(1_500),
         true,
         false,
@@ -107,16 +129,16 @@ fn lyrics_document_applies_secondary_text_preferences_and_preserves_background()
         ..LyricsDisplayState::default()
     };
 
-    let hidden = lyrics_document(&state, &AppConfig::default(), 7, Some(3_000));
+    let hidden = lyrics_document(&state, &runtime_config(), 7, Some(3_000));
     assert_eq!(hidden.revision, 7);
     assert_eq!(hidden.duration_ms, Some(3_000));
     assert_eq!(hidden.lines[0].translation, "你好");
     assert!(hidden.lines[0].romanization.is_empty());
     assert_eq!(hidden.lines[0].background, "echo");
 
-    let mut config = AppConfig::default();
-    config.lyrics.show_translation = false;
-    config.lyrics.show_romanization = true;
+    let mut config = runtime_config();
+    config.show_translation = false;
+    config.show_romanization = true;
     let switched = lyrics_document(&state, &config, 8, None);
     assert!(switched.lines[0].translation.is_empty());
     assert_eq!(switched.lines[0].romanization, "nǐ hǎo");
@@ -130,20 +152,36 @@ fn adjusted_position_is_saturated_at_both_bounds() {
 
 fn snapshot(status: PlaybackStatus, elapsed: Duration) -> PlaybackSnapshot {
     PlaybackSnapshot {
-        state: SpotifyPlayerState {
-            bus_name: "org.mpris.MediaPlayer2.spotify".to_string(),
-            playback_status: status,
-            position_ms: Some(10_000),
-            track: Some(TrackMetadata {
-                title: "Song".to_string(),
-                artists: vec!["Artist".to_string()],
-                album: None,
-                duration_ms: Some(20_000),
-                mpris_track_id: None,
-            }),
-        },
+        state: player_state_with_status("Song", 10_000, status),
         received_at: Instant::now() - elapsed,
     }
+}
+
+fn player_state(title: &str, position_ms: u64) -> SpotifyPlayerState {
+    player_state_with_status(title, position_ms, PlaybackStatus::Paused)
+}
+
+fn player_state_with_status(
+    title: &str,
+    position_ms: u64,
+    playback_status: PlaybackStatus,
+) -> SpotifyPlayerState {
+    SpotifyPlayerState {
+        bus_name: "org.mpris.MediaPlayer2.spotify".to_string(),
+        playback_status,
+        position_ms: Some(position_ms),
+        track: Some(TrackMetadata {
+            title: title.to_string(),
+            artists: vec!["Artist".to_string()],
+            album: None,
+            duration_ms: Some(20_000),
+            mpris_track_id: None,
+        }),
+    }
+}
+
+fn runtime_config() -> LyricsRuntimeConfig {
+    LyricsRuntimeConfig::from(&AppConfig::default())
 }
 
 fn test_line() -> TimedLine {
