@@ -133,53 +133,6 @@ export function LyricsViewport({ state }: { state: LyricsViewState }) {
   );
 }
 
-interface AppleMusicSlotProps {
-  snapshot: SlotSnapshot | null;
-  documentLines: ReturnType<typeof documentToAmllLines>;
-  frame: LyricsViewState["frame"];
-  active: boolean;
-  setSlotRef(element: HTMLElement | null): void;
-}
-
-function AppleMusicSlot({
-  snapshot,
-  documentLines,
-  frame,
-  active,
-  setSlotRef,
-}: AppleMusicSlotProps) {
-  const lyricLines = useMemo(
-    () => currentAmllLines(documentLines, snapshot?.key ?? ""),
-    [documentLines, snapshot?.key],
-  );
-  const line = lyricLines[0];
-  const currentTime = line
-    ? Math.min(Math.max(frame?.position_ms ?? line.startTime, line.startTime), line.endTime - 1)
-    : 0;
-
-  return (
-    <section className="slot apple-music-slot" ref={setSlotRef} data-lyric-key={snapshot?.key}>
-      {line && frame ? (
-        <LyricPlayer
-          className="apple-music-player"
-          style={{ textAlign: "center", whiteSpace: "nowrap" }}
-          lyricLines={lyricLines}
-          currentTime={currentTime}
-          playing={active && frame.playing}
-          isSeeking={active && frame.seeking}
-          alignAnchor="center"
-          alignPosition={0.5}
-          enableSpring={false}
-          enableBlur={false}
-          enableScale={false}
-          hidePassedLines={false}
-          wordFadeWidth={0.5}
-        />
-      ) : null}
-    </section>
-  );
-}
-
 export function AppleMusicLyrics({ state }: { state: LyricsViewState }) {
   const frame = state.frame;
   const documentLines = useMemo(() => documentToAmllLines(state.document), [state.document]);
@@ -187,30 +140,23 @@ export function AppleMusicLyrics({ state }: { state: LyricsViewState }) {
     () => currentAmllLines(documentLines, frame?.key ?? "").length > 0,
     [documentLines, frame?.key],
   );
-  const slotRefs = useSlotTransition(state);
   const style = appleMusicCssVariables(state);
   if (!frame || frame.position_ms === null || !hasCurrentLine) {
     return <LyricsViewport state={state} />;
   }
   return (
     <main id="viewport" className="apple-music-viewport" style={style}>
-      <AppleMusicSlot
-        snapshot={state.slots[0]}
-        documentLines={documentLines}
-        frame={frame}
-        active={state.activeSlot === 0}
-        setSlotRef={(element) => {
-          slotRefs.current[0] = element;
-        }}
-      />
-      <AppleMusicSlot
-        snapshot={state.slots[1]}
-        documentLines={documentLines}
-        frame={frame}
-        active={state.activeSlot === 1}
-        setSlotRef={(element) => {
-          slotRefs.current[1] = element;
-        }}
+      <LyricPlayer
+        className="apple-music-player"
+        style={{ textAlign: "center", whiteSpace: "nowrap" }}
+        lyricLines={documentLines}
+        currentTime={Math.round(frame.position_ms)}
+        playing={frame.playing}
+        isSeeking={frame.seeking}
+        alignAnchor="center"
+        alignPosition={0.5}
+        hidePassedLines={true}
+        wordFadeWidth={0.5}
       />
     </main>
   );

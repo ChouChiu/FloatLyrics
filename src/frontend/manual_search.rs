@@ -3,13 +3,16 @@
 
 //! Track-specific manual lyrics search and selection frontend.
 
+mod session;
+mod state;
+mod view;
+
 use gtk::prelude::*;
 use relm4::{ComponentParts, ComponentSender, SimpleComponent};
-use std::{cell::Cell, cell::RefCell, rc::Rc};
 
 use crate::{
     backend::{ControllerHandle, ManualSearchService},
-    shared::manual_search::{FetchedLyrics, LyricsCandidate, LyricsProvider},
+    shared::manual_search::{FetchedLyrics, LyricsCandidate},
 };
 use floatlyrics_core::{
     i18n::{I18n, Language, Text},
@@ -19,6 +22,8 @@ use floatlyrics_core::{
 use super::localization::{
     bind_button_label, bind_entry_placeholder, bind_label, bind_window_title,
 };
+use session::{ManualSearchSession, SearchWidgets};
+use view::install_css;
 
 const WINDOW_WIDTH: i32 = 820;
 const WINDOW_HEIGHT: i32 = 560;
@@ -34,47 +39,11 @@ pub(super) enum SearchEvent {
         index: usize,
         result: Result<Option<FetchedLyrics>, String>,
     },
-}
-
-#[derive(Default)]
-struct SearchState {
-    generation: u64,
-    target_track: Option<TrackMetadata>,
-    candidates: Vec<LyricsCandidate>,
-    preview_index: Option<usize>,
-    selected: Option<(usize, FetchedLyrics)>,
-}
-
-#[derive(Debug, Clone)]
-enum ManualStatus {
-    Text(Text),
-    Detail(Text, String),
-    CandidatesFound(usize),
-}
-
-impl ManualStatus {
-    fn render(&self, language: Language) -> String {
-        match self {
-            Self::Text(key) => language.text(*key).to_string(),
-            Self::Detail(key, detail) => language.detail(*key, detail),
-            Self::CandidatesFound(count) => language.candidates_found(*count),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-enum PreviewState {
-    Text(Text),
-    Lyrics(String),
-}
-
-impl PreviewState {
-    fn render(&self, language: Language) -> String {
-        match self {
-            Self::Text(key) => language.text(*key).to_string(),
-            Self::Lyrics(lyrics) => lyrics.clone(),
-        }
-    }
+    Applied {
+        generation: u64,
+        target_fingerprint: String,
+        result: Result<(), String>,
+    },
 }
 
 pub(super) struct ManualSearchInit {
@@ -85,12 +54,7 @@ pub(super) struct ManualSearchInit {
 
 pub(super) struct ManualSearchModel {
     visible: bool,
-    title: gtk::Entry,
-    artist: gtk::Entry,
-    start_search: Rc<dyn Fn()>,
-    apply_selected: Rc<dyn Fn()>,
-    handle_event: Rc<dyn Fn(SearchEvent)>,
-    controller: ControllerHandle,
+    session: ManualSearchSession,
 }
 
 #[derive(Debug)]
@@ -99,6 +63,8 @@ pub(super) enum ManualSearchMsg {
     Hide,
     Search,
     Apply,
+    SelectRow(Option<usize>),
+    LanguageChanged(Language),
     Event(SearchEvent),
 }
 
@@ -224,7 +190,7 @@ impl SimpleComponent for ManualSearchModel {
 
         let results = gtk::ListBox::new();
         results.set_selection_mode(gtk::SelectionMode::Single);
-        results.add_css_class("boxed-list");
+        results.add_css_class("manual-search-results");
 
         let preview = gtk::TextView::builder()
             .editable(false)
@@ -248,287 +214,26 @@ impl SimpleComponent for ManualSearchModel {
             .css_classes(["suggested-action"])
             .build();
         bind_button_label(&apply, &i18n, Text::ApplySelectedLyrics);
-        let state = Rc::new(RefCell::new(SearchState::default()));
-        let status_state = Rc::new(RefCell::new(ManualStatus::Text(Text::SearchAfterPlayback)));
-        let preview_state = Rc::new(RefCell::new(PreviewState::Text(
-            Text::SelectCandidatePreview,
-        )));
-        let set_status: Rc<dyn Fn(ManualStatus)> = {
-            let status = status.clone();
-            let status_state = Rc::clone(&status_state);
-            let i18n = i18n.clone();
-            Rc::new(move |next| {
-                *status_state.borrow_mut() = next;
-                status.set_label(&status_state.borrow().render(i18n.language()));
-            })
-        };
-        let set_preview: Rc<dyn Fn(PreviewState)> = {
-            let preview = preview.clone();
-            let preview_state = Rc::clone(&preview_state);
-            let i18n = i18n.clone();
-            Rc::new(move |next| {
-                *preview_state.borrow_mut() = next;
-                preview
-                    .buffer()
-                    .set_text(&preview_state.borrow().render(i18n.language()));
-            })
-        };
-        {
-            let status = status.clone();
-            let preview = preview.clone();
-            let status_state = Rc::clone(&status_state);
-            let preview_state = Rc::clone(&preview_state);
-            i18n.subscribe(move |language| {
-                status.set_label(&status_state.borrow().render(language));
-                preview
-                    .buffer()
-                    .set_text(&preview_state.borrow().render(language));
-            });
-        }
-        let event_sender = sender.input_sender().clone();
-        let rebuilding_results = Rc::new(Cell::new(false));
-
-        {
-            let state = Rc::clone(&state);
-            let service = service.clone();
-            let event_sender = event_sender.clone();
-            let apply = apply.clone();
-            let set_status = Rc::clone(&set_status);
-            let set_preview = Rc::clone(&set_preview);
-            let rebuilding_results = Rc::clone(&rebuilding_results);
-            results.connect_row_selected(move |_, row| {
-                if rebuilding_results.get() {
-                    return;
-                }
-                let Some(index) = row.and_then(|row| usize::try_from(row.index()).ok()) else {
-                    return;
-                };
-                let (generation, candidate) = {
-                    let mut state = state.borrow_mut();
-                    state.selected = None;
-                    state.preview_index = Some(index);
-                    let Some(candidate) = state.candidates.get(index).cloned() else {
-                        return;
-                    };
-                    (state.generation, candidate)
-                };
-                apply.set_sensitive(false);
-                set_status(ManualStatus::Text(Text::LoadingPreview));
-                set_preview(PreviewState::Text(Text::LoadingPreview));
-                let event_sender = event_sender.clone();
-                service.preview(candidate, move |result| {
-                    let _ = event_sender.send(ManualSearchMsg::Event(SearchEvent::Preview {
-                        generation,
-                        index,
-                        result,
-                    }));
-                });
-            });
-        }
-
-        let start_search: Rc<dyn Fn()> = {
-            let state = Rc::clone(&state);
-            let service = service.clone();
-            let event_sender = event_sender.clone();
-            let title = title.clone();
-            let artist = artist.clone();
-            let controller = controller.clone();
-            let results = results.clone();
-            let apply = apply.clone();
-            let spinner = spinner.clone();
-            let search_button = search_button.clone();
-            let set_status = Rc::clone(&set_status);
-            let set_preview = Rc::clone(&set_preview);
-            Rc::new(move || {
-                let Some(target_track) = controller.current_track() else {
-                    set_status(ManualStatus::Text(Text::NoTrackPlaying));
-                    return;
-                };
-                let search_title = title.text().trim().to_string();
-                if search_title.is_empty() {
-                    set_status(ManualStatus::Text(Text::EnterSongTitle));
-                    return;
-                }
-                let artists = artist
-                    .text()
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(str::to_string)
-                    .collect::<Vec<_>>();
-                let search_track = TrackMetadata {
-                    title: search_title,
-                    artists,
-                    album: None,
-                    duration_ms: target_track.duration_ms,
-                    mpris_track_id: None,
-                };
-                let generation = {
-                    let mut state = state.borrow_mut();
-                    state.generation = state.generation.wrapping_add(1);
-                    state.target_track = Some(target_track);
-                    state.candidates.clear();
-                    state.preview_index = None;
-                    state.selected = None;
-                    state.generation
-                };
-                while let Some(child) = results.first_child() {
-                    results.remove(&child);
-                }
-                apply.set_sensitive(false);
-                set_preview(PreviewState::Text(Text::SearchingCandidates));
-                set_status(ManualStatus::Text(Text::SearchingProviders));
-                search_button.set_sensitive(false);
-                spinner.start();
-                let event_sender = event_sender.clone();
-                service.search(search_track, move |result| {
-                    let _ = event_sender.send(ManualSearchMsg::Event(SearchEvent::Candidates {
-                        generation,
-                        result,
-                    }));
-                });
-            })
-        };
-
-        let apply_selected: Rc<dyn Fn()> = {
-            let state = Rc::clone(&state);
-            let service = service.clone();
-            let controller = controller.clone();
-            let set_status = Rc::clone(&set_status);
-            Rc::new(move || {
-                let state = state.borrow();
-                let Some(target) = state.target_track.as_ref() else {
-                    return;
-                };
-                let Some((_, fetched)) = state.selected.as_ref() else {
-                    return;
-                };
-                if controller
-                    .current_track()
-                    .as_ref()
-                    .map(TrackMetadata::fingerprint)
-                    != Some(target.fingerprint())
-                {
-                    set_status(ManualStatus::Text(Text::TrackChanged));
-                    return;
-                }
-                match service.apply(target, fetched) {
-                    Ok(()) => {
-                        controller.reload_lyrics();
-                        set_status(ManualStatus::Text(Text::LyricsApplied));
-                    }
-                    Err(error) => {
-                        set_status(ManualStatus::Detail(Text::ApplyFailed, error.to_string()))
-                    }
-                }
-            })
-        };
-
-        let handle_event: Rc<dyn Fn(SearchEvent)> = {
-            let state = Rc::clone(&state);
-            let results = results.clone();
-            let spinner = spinner.clone();
-            let apply = apply.clone();
-            let search_button = search_button.clone();
-            let i18n = i18n.clone();
-            let set_status = Rc::clone(&set_status);
-            let set_preview = Rc::clone(&set_preview);
-            Rc::new(move |event| match event {
-                SearchEvent::Candidates { generation, result } => {
-                    if state.borrow().generation != generation {
-                        return;
-                    }
-                    spinner.stop();
-                    search_button.set_sensitive(true);
-                    match result {
-                        Ok(candidates) => {
-                            let count = candidates.len();
-                            state.borrow_mut().candidates = candidates.clone();
-                            for candidate in &candidates {
-                                results.append(&candidate_row(candidate, i18n.language()));
-                            }
-                            if count == 0 {
-                                set_status(ManualStatus::Text(Text::NoCandidates));
-                                set_preview(PreviewState::Text(Text::NoCandidates));
-                            } else {
-                                set_status(ManualStatus::CandidatesFound(count));
-                                if let Some(row) = results.row_at_index(0) {
-                                    results.select_row(Some(&row));
-                                }
-                            }
-                        }
-                        Err(error) => {
-                            set_status(ManualStatus::Detail(Text::SearchFailed, error));
-                            set_preview(PreviewState::Text(Text::LyricsSearchPreviewFailed));
-                        }
-                    }
-                }
-                SearchEvent::Preview {
-                    generation,
-                    index,
-                    result,
-                } => {
-                    let is_current = {
-                        let state = state.borrow();
-                        state.generation == generation && state.preview_index == Some(index)
-                    };
-                    if !is_current {
-                        return;
-                    }
-                    match result {
-                        Ok(Some(fetched)) => {
-                            set_preview(PreviewState::Lyrics(fetched.raw_lyrics.clone()));
-                            state.borrow_mut().selected = Some((index, fetched));
-                            apply.set_sensitive(true);
-                            set_status(ManualStatus::Text(Text::PreviewReady));
-                        }
-                        Ok(None) => {
-                            set_preview(PreviewState::Text(Text::CandidateUnavailable));
-                            set_status(ManualStatus::Text(Text::CandidateUnavailable));
-                        }
-                        Err(error) => {
-                            set_preview(PreviewState::Text(Text::PreviewLoadFailed));
-                            set_status(ManualStatus::Detail(Text::LoadingFailed, error));
-                        }
-                    }
-                }
-            })
-        };
-
-        {
-            let state = Rc::clone(&state);
-            let results = results.clone();
-            let rebuilding_results = Rc::clone(&rebuilding_results);
-            i18n.subscribe(move |language| {
-                let (candidates, selected) = {
-                    let state = state.borrow();
-                    (state.candidates.clone(), state.preview_index)
-                };
-                rebuilding_results.set(true);
-                while let Some(child) = results.first_child() {
-                    results.remove(&child);
-                }
-                for candidate in &candidates {
-                    results.append(&candidate_row(candidate, language));
-                }
-                if let Some(index) = selected.and_then(|index| i32::try_from(index).ok())
-                    && let Some(row) = results.row_at_index(index)
-                {
-                    results.select_row(Some(&row));
-                }
-                rebuilding_results.set(false);
-            });
-        }
-
         install_css();
+        let session = ManualSearchSession::new(
+            service,
+            controller,
+            &i18n,
+            sender.input_sender().clone(),
+            SearchWidgets {
+                title: title.clone(),
+                artist: artist.clone(),
+                results: results.clone(),
+                preview: preview.clone(),
+                status: status.clone(),
+                apply: apply.clone(),
+                spinner: spinner.clone(),
+                search_button: search_button.clone(),
+            },
+        );
         let model = Self {
             visible: false,
-            title: title.clone(),
-            artist: artist.clone(),
-            start_search,
-            apply_selected,
-            handle_event,
-            controller,
+            session,
         };
         let title_widget = &title;
         let artist_widget = &artist;
@@ -550,84 +255,22 @@ impl SimpleComponent for ManualSearchModel {
     fn update(&mut self, message: Self::Input, _sender: ComponentSender<Self>) {
         match message {
             ManualSearchMsg::Show => {
-                if let Some(track) = self.controller.current_track() {
-                    let (title, artist) = search_field_values(&track);
-                    self.title.set_text(&title);
-                    self.artist.set_text(&artist);
-                }
+                self.session.prepare_for_show();
                 self.visible = true;
-                (self.start_search)();
+                self.session.start_search();
             }
             ManualSearchMsg::Hide => self.visible = false,
-            ManualSearchMsg::Search => (self.start_search)(),
-            ManualSearchMsg::Apply => (self.apply_selected)(),
-            ManualSearchMsg::Event(event) => (self.handle_event)(event),
+            ManualSearchMsg::Search => self.session.start_search(),
+            ManualSearchMsg::Apply => self.session.apply_selected(),
+            ManualSearchMsg::SelectRow(index) => self.session.select_row(index),
+            ManualSearchMsg::LanguageChanged(language) => self.session.relocalize(language),
+            ManualSearchMsg::Event(event) => self.session.handle_event(event),
         }
     }
 }
 
 fn search_field_values(track: &TrackMetadata) -> (String, String) {
     ManualSearchService::search_field_values(track)
-}
-
-fn candidate_row(candidate: &LyricsCandidate, language: Language) -> gtk::ListBoxRow {
-    let title = gtk::Label::builder()
-        .label(&candidate.title)
-        .halign(gtk::Align::Start)
-        .ellipsize(gtk::pango::EllipsizeMode::End)
-        .css_classes(["heading"])
-        .build();
-    let detail = gtk::Label::builder()
-        .label(format!(
-            "{}  ·  {}  ·  {}",
-            candidate.artists.join(", "),
-            provider_name(candidate.provider, language),
-            duration_text(candidate.duration_ms)
-        ))
-        .halign(gtk::Align::Start)
-        .ellipsize(gtk::pango::EllipsizeMode::End)
-        .css_classes(["dim-label"])
-        .build();
-    let labels = gtk::Box::new(gtk::Orientation::Vertical, 3);
-    labels.set_hexpand(true);
-    labels.append(&title);
-    labels.append(&detail);
-    let raw_score = candidate.match_score;
-    if raw_score < 0 {
-        tracing::warn!(raw_score, "negative match score clamped to 0");
-    }
-    let score = gtk::Label::builder()
-        .label(format!("{}%", raw_score.max(0)))
-        .valign(gtk::Align::Center)
-        .css_classes(["dim-label"])
-        .build();
-    score.set_tooltip_text(Some(language.text(Text::MatchScore)));
-    let row_content = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    row_content.add_css_class("manual-result-row");
-    row_content.append(&labels);
-    row_content.append(&score);
-    gtk::ListBoxRow::builder().child(&row_content).build()
-}
-
-fn provider_name(provider: LyricsProvider, language: Language) -> &'static str {
-    match provider {
-        LyricsProvider::QqMusic => language.text(Text::ProviderNameQqMusic),
-        LyricsProvider::NetEase => language.text(Text::ProviderNameNetEase),
-    }
-}
-
-fn duration_text(duration_ms: Option<i32>) -> String {
-    let seconds = duration_ms.unwrap_or_default().max(0) / 1_000;
-    format!("{}:{:02}", seconds / 60, seconds % 60)
-}
-
-fn install_css() {
-    super::style::install(
-        r#"
-        .manual-search-bar, .manual-search-footer { padding: 12px; }
-        .manual-result-row { padding: 10px 12px; }
-        "#,
-    );
 }
 
 #[cfg(test)]

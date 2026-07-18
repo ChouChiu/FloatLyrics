@@ -3,24 +3,23 @@
 
 //! Asynchronous manual-search and cache operations exposed to the frontend.
 
-use std::rc::Rc;
-
 use floatlyrics_core::track::TrackMetadata;
-use floatlyrics_lyrics::{
-    cache::{LyricsCache, LyricsInsert},
-    lyrics::{fetch_candidate_lyrics, search_lyrics_candidates, simplify_search_text},
+use floatlyrics_lyrics::lyrics::{
+    fetch_candidate_lyrics, search_lyrics_candidates, simplify_search_text,
 };
 
 use crate::shared::manual_search::{FetchedLyrics, LyricsCandidate, LyricsProvider};
 
+use super::cache::CacheService;
+
 #[derive(Clone)]
 pub(crate) struct ManualSearchService {
     runtime: tokio::runtime::Handle,
-    cache: Rc<dyn LyricsCache>,
+    cache: CacheService,
 }
 
 impl ManualSearchService {
-    pub(super) fn new(runtime: tokio::runtime::Handle, cache: Rc<dyn LyricsCache>) -> Self {
+    pub(super) fn new(runtime: tokio::runtime::Handle, cache: CacheService) -> Self {
         Self { runtime, cache }
     }
 
@@ -55,22 +54,11 @@ impl ManualSearchService {
 
     pub(crate) fn apply(
         &self,
-        track: &TrackMetadata,
-        lyrics: &FetchedLyrics,
-    ) -> Result<(), String> {
-        self.cache
-            .insert_lyrics(LyricsInsert {
-                provider: lyrics.provider,
-                provider_track_id: lyrics.provider_track_id.as_deref(),
-                title: &lyrics.title,
-                artists: &lyrics.artists,
-                raw_lyrics: &lyrics.raw_lyrics,
-            })
-            .and_then(|lyrics_id| {
-                self.cache
-                    .bind_manual_match(&track.fingerprint(), lyrics_id)
-            })
-            .map_err(|error| error.to_string())
+        track: TrackMetadata,
+        lyrics: FetchedLyrics,
+        complete: impl FnOnce(Result<(), String>) + Send + 'static,
+    ) {
+        self.cache.apply_manual(track, lyrics, complete);
     }
 
     pub(crate) fn search_field_values(track: &TrackMetadata) -> (String, String) {

@@ -164,7 +164,7 @@ romanization_color = "#B8D8F0E6"
 mpris_prefix = "org.mpris.MediaPlayer2.spotify"
 ```
 
-配置采用严格校验：顶层 section 不可缺失，未知字段会在启动时报错；section 内缺失的字段将自动回退到默认值。`position` 使用浮窗中心相对于屏幕宽高的比例，开启 `remember_position` 后会在拖动结束时自动保存；关闭开关会清除已保存的位置。使用 Flatpak/Snap 版 Spotify 时，如果无法自动识别播放器，可按实际 D-Bus 名称调整 `mpris_prefix`。
+配置保存仍采用严格校验，但启动读取会自动恢复不兼容的旧配置：能够识别且有效的字段会继续保留，未知字段会被忽略，类型错误、非法枚举和越界值只会让对应字段回退默认值；整份 TOML 无法解析时才会整体使用默认配置。恢复前的原始内容会保存为同目录下的 `config.toml.incompatible`（已有备份时追加数字后缀），随后写回当前规范格式。文件读取、备份或写入失败仍会阻止启动，避免静默丢失配置。
 
 ## 常见问题与限制
 

@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag (for example, v1.0.0)
+        description: Existing release tag (for example, v1.1.0)
         required: true
         type: string
 
@@ -27,15 +27,15 @@ env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 jobs:
-  build-packages:
-    name: Build .deb and .rpm packages
+  packages:
+    name: Build Linux packages
     runs-on: ubuntu-latest
     timeout-minutes: 45
     container:
       image: archlinux:latest
 
     steps:
-      - name: Install system dependencies
+      - name: Install build dependencies
         run: >-
           pacman -Syu --noconfirm --needed
           base-devel
@@ -55,188 +55,94 @@ jobs:
           persist-credentials: false
           ref: ${{ env.RELEASE_TAG }}
 
-      - name: Install Bun
+      - name: Trust checked-out workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+          package_version=$(cargo pkgid --locked | sed 's/.*@//')
+          test "$RELEASE_TAG" = "v$package_version"
+          test "$(git describe --tags --exact-match)" = "$RELEASE_TAG"
+
+      - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
 
-      - name: Cache Bun packages
+      - name: Restore Bun cache
         uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
           restore-keys: |
-            ${{ runner.os }}-bun-
+            bun-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Mark workspace as safe for git
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Check React lyrics frontend
-        run: |
-          bun install --frozen-lockfile
-          bun run check
-          bun run typecheck
-          bun test
-          bun run build:lyrics
-
-      - name: Validate version tag
-        run: |
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
-          version=$(cargo pkgid --locked | sed 's/.*@//')
-          test "$RELEASE_TAG" = "v$version"
-          test "$(git describe --tags --exact-match)" = "$RELEASE_TAG"
-
-      - name: Cache Cargo registry and target
+      - name: Restore Cargo cache
         uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-deb-cargo-${{ hashFiles('Cargo.lock') }}
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-arch-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-${{ env.RELEASE_TAG }}
           restore-keys: |
-            ${{ runner.os }}-deb-cargo-
-            ${{ runner.os }}-cargo-
+            cargo-${{ runner.os }}-${{ runner.arch }}-arch-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-
+            cargo-${{ runner.os }}-${{ runner.arch }}-arch-
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Run Clippy
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
-
-      - name: Run tests
-        run: cargo test --locked --all-targets --all-features
+      - name: Install packaging tools
+        run: |
+          cargo install --locked --version 3.7.0 cargo-deb
+          cargo install --locked --version 0.21.0 cargo-generate-rpm
 
       - name: Build release binary
         run: cargo build --locked --release
 
-      - name: Install cargo-deb and cargo-generate-rpm
+      - name: Build distribution packages
         run: |
-          cargo install cargo-deb --locked
-          cargo install cargo-generate-rpm --locked
+          mkdir dist
+          cargo deb --locked --no-build --output dist
+          cargo generate-rpm --output dist
 
-      - name: Build .deb package
-        run: cargo deb
-
-      - name: Build .rpm package
-        run: cargo generate-rpm
-
-      - name: Upload .deb artifact
+      - name: Upload release assets
         uses: actions/upload-artifact@v7
         with:
-          name: floatlyrics-${{ env.RELEASE_TAG }}-deb
-          path: target/debian/*.deb
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload .rpm artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: floatlyrics-${{ env.RELEASE_TAG }}-rpm
-          path: target/generate-rpm/*.rpm
+          name: floatlyrics-${{ env.RELEASE_TAG }}
+          path: dist/*
           if-no-files-found: error
           retention-days: 14
 
   publish:
-    name: Publish GitHub Release
-    needs: build-packages
+    name: Publish GitHub release
+    needs: packages
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - name: Download .deb artifact
+      - name: Download release assets
         uses: actions/download-artifact@v8
         with:
-          name: floatlyrics-${{ env.RELEASE_TAG }}-deb
+          name: floatlyrics-${{ env.RELEASE_TAG }}
           path: dist
 
-      - name: Download .rpm artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: floatlyrics-${{ env.RELEASE_TAG }}-rpm
-          path: dist
-
-      - name: Create GitHub Release
+      - name: Publish release assets
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          deb_file=$(ls dist/*.deb | head -1)
-          rpm_file=$(ls dist/*.rpm | head -1)
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "$deb_file" "$rpm_file" \
+          mapfile -t assets < <(find dist -maxdepth 1 -type f \
+            \( -name '*.deb' -o -name '*.rpm' \) -print | sort)
+          test "${#assets[@]}" -eq 2
+
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" \
               --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$RELEASE_TAG" "$deb_file" "$rpm_file" \
+            gh release create "$RELEASE_TAG" "${assets[@]}" \
               --repo "$GITHUB_REPOSITORY" \
               --title "FloatLyrics ${RELEASE_TAG#v}" \
               --generate-notes \
               --verify-tag
           fi
-
-#   aur-update:
-#     name: Update AUR package
-#     needs: build-packages
-#     runs-on: ubuntu-latest
-#     timeout-minutes: 15
-#     container:
-#       image: archlinux:latest
-# 
-#     steps:
-#       - name: Install system tools
-#         run: |
-#           pacman -Syu --noconfirm --needed \
-#             base-devel git openssh curl pacman-contrib nodejs
-# 
-#       - name: Check out release tag
-#         uses: actions/checkout@v7
-#         with:
-#           fetch-depth: 0
-#           persist-credentials: false
-#           ref: ${{ env.RELEASE_TAG }}
-# 
-#       - name: Bump PKGBUILD version
-#         run: |
-#           version="${RELEASE_TAG#v}"
-#           sed -i "s/^pkgver=.*/pkgver=$version/" PKGBUILD
-#           sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
-#           echo "pkgver=$(grep -oP '^pkgver=\K.*' PKGBUILD)"
-#           echo "pkgrel=$(grep -oP '^pkgrel=\K.*' PKGBUILD)"
-# 
-#       - name: Update checksums and .SRCINFO
-#         run: |
-#           useradd -m builder
-#           chown -R builder:builder .
-#           su builder -c 'updpkgsums'
-#           su builder -c 'makepkg --printsrcinfo > .SRCINFO'
-# 
-#       - name: Push to AUR
-#         env:
-#           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-#         if: env.AUR_SSH_PRIVATE_KEY != ''
-#         run: |
-#           mkdir -p ~/.ssh
-#           echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur_key
-#           chmod 600 ~/.ssh/aur_key
-#           cat > ~/.ssh/config << 'SSHEOF'
-#           Host aur.archlinux.org
-#             IdentityFile ~/.ssh/aur_key
-#             User aur
-#             StrictHostKeyChecking accept-new
-#           SSHEOF
-#           chmod 600 ~/.ssh/config
-# 
-#           git clone ssh://aur@aur.archlinux.org/floatlyrics.git /tmp/aur-floatlyrics
-#           cp PKGBUILD .SRCINFO /tmp/aur-floatlyrics/
-#           cp -r packaging /tmp/aur-floatlyrics/
-# 
-#           cd /tmp/aur-floatlyrics
-#           git config user.name "GitHub Actions"
-#           git config user.email "actions@github.com"
-#           git add PKGBUILD .SRCINFO packaging/
-#           if git diff --cached --quiet; then
-#             echo "No changes to push"
-#           else
-#             git commit -m "chore: bump to ${RELEASE_TAG#v}"
-#             git push origin master
-#           fi

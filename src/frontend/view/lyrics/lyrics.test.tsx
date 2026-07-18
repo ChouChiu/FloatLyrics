@@ -201,7 +201,7 @@ describe("React markup", () => {
     expect(html.match(/karaoke/g)).toHaveLength(2);
   });
 
-  test("uses two FloatLyrics transition slots for AMLL lines", () => {
+  test("uses one AMLL player for the complete lyrics document", () => {
     const document: LyricsDocument = {
       revision: 1,
       duration_ms: 4_000,
@@ -236,12 +236,11 @@ describe("React markup", () => {
     state = advanceLyricsViewState(state, frameCommand("line:1", "second"));
 
     const html = renderToStaticMarkup(<AppleMusicLyrics state={state} />);
-    expect(html.match(/class="slot apple-music-slot"/g)).toHaveLength(2);
     expect(
       html.match(/class="apple-music-player" style="text-align:center;white-space:nowrap"/g),
-    ).toHaveLength(2);
-    expect(html).toContain('data-lyric-key="line:0"');
-    expect(html).toContain('data-lyric-key="line:1"');
+    ).toHaveLength(1);
+    expect(html).not.toContain('class="slot');
+    expect(html).not.toContain("data-lyric-key");
   });
 
   test("passes configured AMLL styles without overriding its unplayed color", () => {
