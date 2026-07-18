@@ -22,7 +22,7 @@ fn apple_music_style_disables_the_unplayed_color_setting() {
 }
 
 #[test]
-fn disabling_position_memory_clears_the_saved_position() {
+fn disabling_position_memory_clears_and_rejects_saved_positions() {
     let mut config = AppConfig::default();
     config.window.position = Some(crate::shared::config::WindowPosition {
         horizontal: 0.25,
@@ -30,6 +30,11 @@ fn disabling_position_memory_clears_the_saved_position() {
     });
 
     ConfigChange::RememberPosition(false).apply(&mut config);
+    ConfigChange::WindowPosition(crate::shared::config::WindowPosition {
+        horizontal: 0.5,
+        vertical: 0.5,
+    })
+    .apply(&mut config);
 
     assert!(!config.window.remember_position);
     assert_eq!(config.window.position, None);

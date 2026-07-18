@@ -4,12 +4,12 @@ use crate::shared::manual_search::LyricsProvider;
 #[test]
 fn starting_a_new_search_invalidates_old_candidates_and_preview() {
     let mut state = ManualSearchState::default();
-    let first_generation = state.begin_search(track("First"));
+    let first_generation = state.begin_search(track("First")).unwrap();
     let candidates = vec![candidate("first")];
     assert!(state.accept_candidates(first_generation, Ok(candidates.clone())));
     assert!(state.begin_preview(0).is_some());
 
-    let next_generation = state.begin_search(track("Second"));
+    let next_generation = state.begin_search(track("Second")).unwrap();
 
     assert_ne!(next_generation, first_generation);
     assert!(!state.accept_candidates(first_generation, Ok(candidates)));
@@ -20,7 +20,7 @@ fn starting_a_new_search_invalidates_old_candidates_and_preview() {
 #[test]
 fn preview_result_must_match_generation_and_selected_index() {
     let mut state = ManualSearchState::default();
-    let generation = state.begin_search(track("Song"));
+    let generation = state.begin_search(track("Song")).unwrap();
     assert!(state.accept_candidates(generation, Ok(vec![candidate("candidate")])));
     assert!(state.begin_preview(0).is_some());
 
@@ -56,7 +56,7 @@ fn search_input_is_normalized_without_copying_playback_identity() {
 #[test]
 fn lifecycle_state_drives_busy_preview_and_apply_presentation() {
     let mut state = ManualSearchState::default();
-    let generation = state.begin_search(track("Song"));
+    let generation = state.begin_search(track("Song")).unwrap();
     assert!(state.is_searching());
     assert!(!state.can_apply());
     assert_eq!(
@@ -85,7 +85,7 @@ fn lifecycle_state_drives_busy_preview_and_apply_presentation() {
 #[test]
 fn failed_search_finishes_busy_state_and_keeps_diagnostic_detail() {
     let mut state = ManualSearchState::default();
-    let generation = state.begin_search(track("Song"));
+    let generation = state.begin_search(track("Song")).unwrap();
 
     assert!(state.accept_candidates(generation, Err("provider offline".to_string())));
 
@@ -103,26 +103,30 @@ fn failed_search_finishes_busy_state_and_keeps_diagnostic_detail() {
 }
 
 #[test]
-fn apply_completion_must_match_the_active_search_generation() {
+fn in_flight_apply_blocks_search_and_preview_changes_until_completion() {
     let mut state = ManualSearchState::default();
-    let generation = state.begin_search(track("First"));
+    let generation = state.begin_search(track("First")).unwrap();
     assert!(state.accept_candidates(generation, Ok(vec![candidate("candidate")])));
     assert!(state.begin_preview(0).is_some());
     assert!(state.accept_preview(generation, 0, Ok(Some(fetched("lyrics")))));
     let (apply_generation, _, _) = state.begin_apply().unwrap();
     assert!(!state.can_apply());
     assert!(state.begin_apply().is_none());
+    assert!(state.is_applying());
 
-    state.begin_search(track("Second"));
+    assert!(state.begin_search(track("Second")).is_none());
+    assert!(state.begin_preview(0).is_none());
+    assert!(state.is_current_apply(apply_generation));
 
-    assert!(!state.finish_apply(apply_generation, Ok(())));
-    assert!(state.is_searching());
+    assert!(state.finish_apply(apply_generation, Ok(())));
+    assert!(!state.is_applying());
+    assert!(state.begin_search(track("Second")).is_some());
 }
 
 #[test]
 fn successful_apply_consumes_the_selection_while_failure_allows_retry() {
     let mut state = ManualSearchState::default();
-    let generation = state.begin_search(track("Song"));
+    let generation = state.begin_search(track("Song")).unwrap();
     assert!(state.accept_candidates(generation, Ok(vec![candidate("candidate")])));
     assert!(state.begin_preview(0).is_some());
     assert!(state.accept_preview(generation, 0, Ok(Some(fetched("lyrics")))));

@@ -86,6 +86,9 @@ impl ManualSearchSession {
     }
 
     pub(super) fn start_search(&mut self) {
+        if self.state.is_applying() {
+            return;
+        }
         let Some(target_track) = self.controller.current_track() else {
             self.state.reject_no_track();
             self.render_state();
@@ -101,7 +104,9 @@ impl ManualSearchSession {
                 return;
             }
         };
-        let generation = self.state.begin_search(target_track);
+        let Some(generation) = self.state.begin_search(target_track) else {
+            return;
+        };
         self.clear_results();
         self.render_state();
 
@@ -272,8 +277,11 @@ impl ManualSearchSession {
             .set_text(&self.state.preview_text(self.language));
         self.widgets.apply.set_sensitive(self.state.can_apply());
         self.widgets
+            .results
+            .set_sensitive(!self.state.is_applying());
+        self.widgets
             .search_button
-            .set_sensitive(!self.state.is_searching());
+            .set_sensitive(!self.state.is_searching() && !self.state.is_applying());
         if self.state.is_searching() {
             self.widgets.spinner.start();
         } else {

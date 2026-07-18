@@ -107,7 +107,11 @@ impl ConfigChange {
                     config.window.position = None;
                 }
             }
-            Self::WindowPosition(value) => config.window.position = Some(value),
+            Self::WindowPosition(value) => {
+                if config.window.remember_position {
+                    config.window.position = Some(value);
+                }
+            }
             Self::Margin(value) => config.window.margin = value,
             Self::PanelHeight(value) => config.window.bottom_panel_height = value,
             Self::Opacity(value) => config.window.opacity = value,

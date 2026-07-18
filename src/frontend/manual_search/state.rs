@@ -100,17 +100,19 @@ impl Default for ManualSearchState {
 }
 
 impl ManualSearchState {
-    pub(super) fn begin_search(&mut self, target_track: TrackMetadata) -> u64 {
+    pub(super) fn begin_search(&mut self, target_track: TrackMetadata) -> Option<u64> {
+        if self.applying_generation.is_some() {
+            return None;
+        }
         self.generation = self.generation.wrapping_add(1);
         self.target_track = Some(target_track);
         self.candidates.clear();
         self.preview_index = None;
         self.selected = None;
-        self.applying_generation = None;
         self.status = ManualStatus::Text(Text::SearchingProviders);
         self.preview = PreviewState::Text(Text::SearchingCandidates);
         self.searching = true;
-        self.generation
+        Some(self.generation)
     }
 
     pub(super) fn reject_no_track(&mut self) {
@@ -154,9 +156,11 @@ impl ManualSearchState {
     }
 
     pub(super) fn begin_preview(&mut self, index: usize) -> Option<(u64, LyricsCandidate)> {
+        if self.applying_generation.is_some() {
+            return None;
+        }
         let candidate = self.candidates.get(index)?.clone();
         self.selected = None;
-        self.applying_generation = None;
         self.preview_index = Some(index);
         self.status = ManualStatus::Text(Text::LoadingPreview);
         self.preview = PreviewState::Text(Text::LoadingPreview);
@@ -247,6 +251,10 @@ impl ManualSearchState {
 
     pub(super) fn is_searching(&self) -> bool {
         self.searching
+    }
+
+    pub(super) fn is_applying(&self) -> bool {
+        self.applying_generation.is_some()
     }
 
     pub(super) fn can_apply(&self) -> bool {
