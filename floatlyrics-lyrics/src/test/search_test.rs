@@ -13,6 +13,25 @@ fn manual_candidates_are_ranked_and_deduplicated() {
     assert_eq!(candidates[1].match_score, 95);
 }
 
+#[test]
+fn manual_candidates_are_limited_after_ranking() {
+    let candidates = (0..13)
+        .map(|score| candidate(LyricsProvider::QqMusic, &format!("id-{score}"), score))
+        .collect();
+
+    let candidates = finalize_candidates(candidates);
+
+    assert_eq!(candidates.len(), 12);
+    assert_eq!(
+        candidates.first().map(|candidate| candidate.match_score),
+        Some(12)
+    );
+    assert_eq!(
+        candidates.last().map(|candidate| candidate.match_score),
+        Some(1)
+    );
+}
+
 fn candidate(provider: LyricsProvider, id: &str, score: i32) -> LyricsCandidate {
     LyricsCandidate {
         provider,
