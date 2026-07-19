@@ -636,6 +636,7 @@ name = "floatlyrics"
 version = "1.1.1"
 dependencies = [
  "anyhow",
+ "cairo-rs",
  "clap",
  "floatlyrics-core",
  "floatlyrics-lyrics",

@@ -3,6 +3,7 @@
 
 //! GTK widget construction and the frontend overlay adapter.
 
+use cairo::RectangleInt;
 use gtk::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::cell::Cell;
@@ -39,6 +40,51 @@ use web_lyrics::{WebLyricsView, font_family, lyric_content_width};
 
 const PANEL_HORIZONTAL_GUTTER: i32 = 32;
 const PANEL_CHROME_WIDTH: i32 = 28;
+
+/// Restricts the surface input region to the interactive header area
+/// (song-info label, action buttons, and separator) so that clicks on the
+/// lyrics viewport pass through to windows below.
+fn setup_input_region(window: &gtk::ApplicationWindow) {
+    let Some(surface) = window.surface() else {
+        return;
+    };
+    let Some(display) = gtk::gdk::Display::default() else {
+        return;
+    };
+    if !display.supports_input_shapes() {
+        return;
+    }
+
+    let Some(content) = window.child() else {
+        return;
+    };
+    let Some(header) = content.first_child() else {
+        return;
+    };
+
+    let Some(header_bounds) = header.compute_bounds(window) else {
+        return;
+    };
+
+    let separator_bottom = header
+        .next_sibling()
+        .and_then(|sep| sep.compute_bounds(window))
+        .map(|b| b.y() + b.height())
+        .unwrap_or_else(|| header_bounds.y() + header_bounds.height());
+
+    let x = header_bounds.x() as i32;
+    let y = header_bounds.y() as i32;
+    let width = header_bounds.width() as i32;
+    let height = (separator_bottom - header_bounds.y()) as i32;
+
+    if width <= 0 || height <= 0 {
+        surface.set_input_region(None::<&cairo::Region>);
+        return;
+    }
+
+    let region = cairo::Region::create_rectangle(&RectangleInt::new(x, y, width, height));
+    surface.set_input_region(Some(&region));
+}
 
 #[derive(Clone)]
 pub(super) struct OverlayView {
@@ -143,6 +189,9 @@ pub(super) fn build(
     let style = OverlayStyle::install(config.window.opacity, initial_font_family);
 
     window.set_child(Some(&content));
+    window.connect_map(|window| {
+        setup_input_region(window);
+    });
     let overlay = OverlayView {
         window: window.clone(),
         content,
@@ -183,6 +232,7 @@ fn apply_panel_width(
         window.set_margin(Edge::Left, left_margin);
     }
     apply_snap_css_classes(content, &placement.current());
+    setup_input_region(window);
 }
 
 fn set_status_lyrics(floating: &OverlayView, message: &str, key: Text) {
@@ -265,6 +315,7 @@ impl OverlayView {
             ) {
                 window.set_margin(Edge::Bottom, bottom_margin);
             }
+            setup_input_region(&window);
         });
     }
 
