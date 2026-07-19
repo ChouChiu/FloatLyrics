@@ -9,14 +9,7 @@ import { type LyricsViewState, lyricsStore, type SlotSnapshot } from "./store";
 
 type LyricsCssProperties = CSSProperties & Record<`--${string}`, string>;
 
-// AMLL's native word effects intentionally begin just ahead of their word timestamps.
-// Keep that visual anticipation from making the whole lyrics timeline feel early.
-const AMLL_VISUAL_LEAD_MS = 100;
 export const AMLL_WORD_FADE_WIDTH = 0;
-
-export function amllTimelineTime(positionMs: number): number {
-  return Math.max(0, Math.round(positionMs) - AMLL_VISUAL_LEAD_MS);
-}
 
 function cssVariables(state: LyricsViewState): LyricsCssProperties | undefined {
   const style = state.style;
@@ -142,10 +135,7 @@ function AppleMusicSlot({
   );
   const line = lyricLines[0];
   const currentTime = line
-    ? Math.min(
-        Math.max(amllTimelineTime(frame?.position_ms ?? 0), line.startTime),
-        line.endTime - 1,
-      )
+    ? Math.min(Math.max(Math.round(frame?.position_ms ?? 0), line.startTime), line.endTime - 1)
     : 0;
 
   return (

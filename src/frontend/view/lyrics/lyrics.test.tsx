@@ -18,8 +18,7 @@ import type {
 if (!("MouseEvent" in globalThis)) {
   Object.assign(globalThis, { MouseEvent: class MouseEvent extends Event {} });
 }
-const { AMLL_WORD_FADE_WIDTH, AppleMusicLyrics, LyricSlot, LyricsViewport, amllTimelineTime } =
-  await import("./app");
+const { AppleMusicLyrics, LyricSlot, LyricsViewport } = await import("./app");
 
 const style = {
   font_family: "Sans",
@@ -148,12 +147,6 @@ describe("AMLL conversion", () => {
     expect(current[0]?.words[0]?.word).toBe("World");
     expect(current[1]).toMatchObject({ isBG: true, words: [{ word: "reply" }] });
     expect(currentAmllLines(lines, "before-first-line")).toEqual([]);
-  });
-
-  test("compensates AMLL's visual lead without underflowing the timeline", () => {
-    expect(amllTimelineTime(1_000)).toBe(900);
-    expect(amllTimelineTime(50)).toBe(0);
-    expect(AMLL_WORD_FADE_WIDTH).toBe(0);
   });
 });
 
