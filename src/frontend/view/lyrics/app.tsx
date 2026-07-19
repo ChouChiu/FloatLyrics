@@ -9,6 +9,15 @@ import { type LyricsViewState, lyricsStore, type SlotSnapshot } from "./store";
 
 type LyricsCssProperties = CSSProperties & Record<`--${string}`, string>;
 
+// AMLL's native word effects intentionally begin just ahead of their word timestamps.
+// Keep that visual anticipation from making the whole lyrics timeline feel early.
+const AMLL_VISUAL_LEAD_MS = 100;
+export const AMLL_WORD_FADE_WIDTH = 0;
+
+export function amllTimelineTime(positionMs: number): number {
+  return Math.max(0, Math.round(positionMs) - AMLL_VISUAL_LEAD_MS);
+}
+
 function cssVariables(state: LyricsViewState): LyricsCssProperties | undefined {
   const style = state.style;
   if (!style) return undefined;
@@ -150,13 +159,13 @@ export function AppleMusicLyrics({ state }: { state: LyricsViewState }) {
         className="apple-music-player"
         style={{ textAlign: "center", whiteSpace: "nowrap" }}
         lyricLines={documentLines}
-        currentTime={Math.round(frame.position_ms)}
+        currentTime={amllTimelineTime(frame.position_ms)}
         playing={frame.playing}
         isSeeking={frame.seeking}
         alignAnchor="center"
         alignPosition={0.5}
         hidePassedLines={true}
-        wordFadeWidth={0.5}
+        wordFadeWidth={AMLL_WORD_FADE_WIDTH}
       />
     </main>
   );
