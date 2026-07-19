@@ -57,11 +57,17 @@ body,
   .amll-lyric-player
   :is([class$="_lyricLineWrapper"], [class*="_lyricLineWrapper "]) {
   align-items: center;
+  transition: none;
 }
 
 .apple-music-player .amll-lyric-player :is([class$="_lyricLine"], [class*="_lyricLine "]) {
   text-align: center;
   transform-origin: center;
+  transition: none;
+}
+
+.apple-music-player .amll-lyric-player :is([class$="_lyricMainLine"], [class*="_lyricMainLine "]) {
+  transition: none;
 }
 
 .apple-music-player .amll-lyric-player :is([class$="_interludeDots"], [class*="_interludeDots "]) {
