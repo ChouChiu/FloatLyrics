@@ -14,7 +14,7 @@
 
 项目使用 Rust 2024 edition，最低支持 Rust 1.93；React 歌词前端使用 Bun 1.3.14、TypeScript 和 Biome。`rust-toolchain.toml` 会选择 stable，并安装 `rustfmt`、Clippy、Rust 源码与 rust-analyzer。Bun 请按[官方安装说明](https://bun.com/docs/installation)安装。
 
-运行完整应用需要 Linux Wayland、支持 layer-shell 的合成器、会话 D-Bus、GTK 4.12+、gtk4-layer-shell、WebKitGTK 6.0 和 OpenSSL。普通单元测试不应依赖桌面会话。
+运行完整应用需要 Linux Wayland、支持 layer-shell 的合成器、会话 D-Bus、GTK 4.12+、gtk4-layer-shell、WebKitGTK 6.0 和 OpenSSL。运行单元测试则不需要桌面会话。
 
 Arch Linux 可直接安装所需依赖：
 
@@ -57,6 +57,16 @@ cargo run --locked -- --debug
 
 修改 React 歌词前端后，可运行 `bun run format`，通过 `biome check --write .` 自动格式化并应用安全修复。
 
+### 构建流水线
+
+`build.rs` 在 Cargo 编译前自动执行以下步骤：
+
+1. 安装前端依赖：`bun install --frozen-lockfile`，根据 `bun.lock` 还原精确版本。
+2. 构建 React 歌词页：`bun run build:lyrics`，入口为 `src/frontend/view/lyrics/lyrics.html`，输出为内嵌所有 JS/CSS 的单个 HTML 文件到 Cargo 的 `OUT_DIR`。同时生成 `frontend-dependencies.json` 用于开源许可页面。
+3. 编译时嵌入：Rust 代码通过 `include_str!(concat!(env!("OUT_DIR"), "/lyrics.html"))` 将构建产物嵌入二进制。
+
+因此只需运行 `cargo build --locked`，无需手动执行 Bun 命令——`build.rs` 自动处理一切。但如果只修改了 React 前端，在 Wayland 会话外也可单独执行 `bun run build:lyrics` 来验证前端构建是否成功。
+
 ## 理解工作区
 
 ```text
@@ -81,9 +91,20 @@ floatlyrics (src/)              CLI 与应用层
 | `data/locale/` | 三种语言的 JSON 文案目录 |
 | `packaging/` | 打包安装脚本、AUR 元数据与发布自动化 |
 
+### React 歌词前端架构
+
+前端位于 `src/frontend/view/lyrics/`，渲染引擎基于 `@applemusic-like-lyrics/react`（AMLL）和 PixiJS：
+
+- `bridge.ts`：在 `window.floatLyrics` 上挂载 JS bridge，接收 Rust 侧通过 WebKit `evaluate_script` 推送的 `LyricsCommand`。
+- `store.ts`：`LyricsViewState` 维护双槽位（slot 0/1）的 ping-pong 状态机。切歌时切换 slot 实现交叉淡入淡出。
+- `app.tsx`：React 组件，通过 `useSyncExternalStore` 订阅 store，将 `LyricsDocument` 转换为 AMLL lines 格式驱动 `LyricPlayer`。
+- `types.ts`：定义 Rust ↔ JS 共享的数据类型（`TimedSyllable`、`LyricsFrame`、`LyricsCommand` 等）。
+
+修改前端后务必运行 `bun run typecheck` 和 `bun test` 验证 TypeScript 类型和组件逻辑。
+
 ## 实现约定
 
-- 使用 `rustfmt` 默认格式；模块、函数和变量使用 `snake_case`，类型与 trait 使用 `PascalCase`，常量使用 `SCREAMING_SNAKE_CASE`。
+- 使用 `rustfmt` 默认格式和标准 Rust 命名规范。
 - 保持 `main.rs` 最小化，将可测试、可复用逻辑放入库或领域模块。
 - 错误应携带足够上下文，但不要在底层库中直接决定 UI 呈现。
 - 不要在业务逻辑或测试中硬编码开发者本机路径、账户、网络服务或桌面会话状态。
@@ -120,11 +141,17 @@ data/locale/zh-TW.json
 cargo test --locked --all-targets --all-features
 ```
 
-开发时可按模块筛选，例如：
+开发时可按模块筛选，常用命令：
 
 ```bash
-cargo test --locked lyrics::
-cargo test --locked mpris::
+cargo test --locked -p floatlyrics-core i18n            # 本地化
+cargo test --locked -p floatlyrics-lyrics parsing::     # 歌词解析
+cargo test --locked -p floatlyrics-lyrics timeline::    # 时间轴
+cargo test --locked -p floatlyrics-lyrics cache::       # 缓存与 schema
+cargo test --locked -p floatlyrics controller::         # 播放控制
+cargo test --locked -p floatlyrics manual_search::      # 手动搜索
+cargo test --locked -p floatlyrics mpris::              # MPRIS
+cargo test --locked -p floatlyrics config::             # 配置
 ```
 
 ## 提交前检查
@@ -159,6 +186,29 @@ cargo about generate --locked --all-features data/licenses/about.hbs \
 将更新后的 `data/licenses/dependencies.json` 与 `Cargo.lock` 一起提交。CI 会检查生成结果是否最新。
 
 JavaScript 依赖必须通过 `bun add` 或 `bun add --dev` 修改，并将 `package.json` 与 `bun.lock` 一起提交。React 歌词构建会根据实际 bundle 自动生成运行时 npm 许可证数据到 `target/lyrics-web/frontend-dependencies.json`；该文件用于检查，不应提交。
+
+## 调试技巧
+
+运行带 tracing 日志的开发版本：
+
+```bash
+cargo run --locked -- --debug
+```
+
+`--debug` 启用详细日志。可通过 `RUST_LOG` 环境变量进一步控制日志级别：
+
+```bash
+RUST_LOG=floatlyrics=debug cargo run --locked -- --debug
+RUST_LOG=floatlyrics_lyrics=trace cargo run --locked -- --debug
+```
+
+i18n 测试可使用 `FLOATLYRICS_LOCALE_DIR` 指向自定义目录，避免污染系统数据：
+
+```bash
+FLOATLYRICS_LOCALE_DIR=./data/locale cargo test --locked -p floatlyrics-core i18n
+```
+
+使用 `--config` 参数可指定独立配置文件进行功能测试，不影响默认配置。
 
 ## Git 与 Pull Request
 

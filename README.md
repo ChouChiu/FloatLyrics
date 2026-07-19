@@ -17,21 +17,15 @@
   </tbody>
 </table>
 
-> [!TIP]
-> 私心安利：认识一下 XLOV
->
-> XLOV 是韩国 257 Entertainment 于 2025 年推出的四人跨国籍组合，以「无性别概念」为核心。团名把代表未知与否定的 X 和代表未完成爱情的 LOV 组合在一起，也呼应成员各自鲜明、难以被单一定义的魅力。
->
-> 想快速入坑，可以从 [维基百科](https://zh.wikipedia.org/zh-cn/XLOV)、[认人视频 1（哔哩哔哩）](https://www.bilibili.com/video/BV1YPKS6LEDR/)、[认人视频 2（哔哩哔哩）](https://www.bilibili.com/video/BV15ofmYjEKF/) 和 [XLOV 官方 YouTube](https://www.youtube.com/@XLOV_official) 开始。打开 Spotify，再让 FloatLyrics 陪你一起听。
-
 ## 为什么用 FloatLyrics
 
 - 开箱即用：通过 MPRIS 自动跟踪 Spotify 的曲目、播放状态和进度。
 - 专为桌面歌词设计：基于 GTK4、WebKitGTK 与 layer-shell，浮层始终置顶，同时不拦截其他窗口的鼠标操作。
-- 同步到每一个字：支持普通同步歌词、逐字歌词、翻译与罗马音显示。
+- 逐字卡拉 OK 效果：支持 Apple Music 风格的逐字高亮动画，以及平滑的行间过渡切换。
+- 完整的歌词生态：支持翻译显示、中文罗马音（拼音/粤拼）、韩语罗马音与日语音读；可自由调整文字颜色、字号和字体。
 - 找不到也能自己选：自动搜索 QQ 音乐和网易云音乐，也可以为当前曲目手动选择结果。
 - 越用越省心：已匹配歌词写入本地 SQLite 缓存，之后可离线使用。
-- 适应你的桌面：浮窗可自由拖放，靠近屏幕边缘时自动吸附；还可调整透明度、字体、字号、偏移量、文字颜色和底部面板预留。
+- 适应你的桌面：浮窗可自由拖放，靠近屏幕边缘时自动吸附；透明度、字体、字号、偏移量和底部面板预留均可自定义。
 - 三种界面语言：English、简体中文与繁體中文可在运行时切换。
 
 ## 运行要求
@@ -42,7 +36,9 @@
 | 播放器 | Spotify 官方客户端，或能暴露 Spotify MPRIS 名称的 Flatpak/Snap 客户端 |
 | 运行库 | GTK 4.12 或更高版本、gtk4-layer-shell、WebKitGTK 6.0 |
 
-FloatLyrics 不支持 X11。若不确定当前会话类型，可运行 `echo "$XDG_SESSION_TYPE"` 检查。
+FloatLyrics 依赖 wlr-layer-shell 协议，目前不支持 X11。若不确定当前会话类型，可运行 `echo "$XDG_SESSION_TYPE"` 检查。
+
+已知兼容的合成器包括 GNOME（Mutter）、KDE（KWin）、Hyprland 和 Sway；其他支持 layer-shell 的合成器也可能正常工作。
 
 ## 安装
 
@@ -133,13 +129,12 @@ FloatLyrics 会自动等待并跟踪 Spotify。浮窗默认位于屏幕底部中
 
 ```toml
 [general]
-language = "zh-CN" # en | zh-CN | zh-TW
+language = "zh-CN"                               # en | zh-CN | zh-TW
 
 [window]
 anchor = "bottom-center"
 remember_position = true
-# 开启位置记忆并拖动浮窗后由应用自动写入，取值范围为 0.0～1.0：
-# position = { horizontal = 0.5, vertical = 0.85 }
+# position = { horizontal = 0.5, vertical = 0.85 }  # 拖动后自动写入，范围 0.0-1.0
 margin = 96
 width = 350
 opacity = 0.78
@@ -147,10 +142,11 @@ bottom_panel_height = 36
 
 [lyrics]
 offset_ms = 0
+apple_music_style = false
 provider_order = ["qq-music", "netease"]
 show_translation = true
 show_romanization = false
-chinese_romanization = "auto" # auto | mandarin-pinyin | cantonese-jyutping | cantonese-jyutping-no-tones
+chinese_romanization = "auto"                    # auto | mandarin-pinyin | cantonese-jyutping | cantonese-jyutping-no-tones
 font_order = ["Sans"]
 lyric_font_size = 24
 translation_font_size = 13
@@ -170,7 +166,9 @@ mpris_prefix = "org.mpris.MediaPlayer2.spotify"
 
 - 浮窗没有出现：确认正在使用 Wayland、合成器支持 layer-shell，并且 Spotify 已启动播放。
 - Flatpak/Snap Spotify 无法识别：检查播放器暴露的 MPRIS 名称，并修改 `spotify.mpris_prefix`。
-- 歌词进度偶尔偏移：可在设置中调整全局偏移量；切歌后若短暂失准，暂停再继续可重新校准。
+- 歌词进度偶尔偏移：可在设置中调整全局偏移量（`lyrics.offset_ms`）；切歌后若短暂失准，暂停再继续可重新校准。
+- 歌词显示方框或乱码：在设置中调整字体优先级（`lyrics.font_order`），添加已安装的中文/日韩字体。
+- 如何彻底重置配置：删除 `~/.config/floatlyrics/config.toml`，下次启动会自动生成默认配置；或使用 `--reset-window` 只恢复窗口位置。
 - 自动跟踪目前仅针对 Spotify。
 - QQ 音乐与网易云音乐接口可能因服务端变更暂时不可用；已经缓存的歌词不受影响。
 

@@ -48,6 +48,11 @@ application-layer concern from a higher crate.
 | Lyrics models, parsing, filtering, romanization, timeline, provider search, cache | `floatlyrics-lyrics` | No application UI, configuration, or MPRIS concerns |
 | CLI, startup, persisted configuration, MPRIS, GTK/Relm4 UI | root crate | May compose both lower crates |
 
+`floatlyrics-lyrics` depends on the external [`lyrics-helper`]
+crate and re-exports its `LineInfo`, `LyricsData`, and `LyricsTypes` types as
+part of the public API. Application code should import these through
+`floatlyrics_lyrics::lyrics` rather than depending on `lyrics-helper` directly.
+
 Inside the root crate, dependencies flow from `frontend` to `backend` to
 `shared`; `frontend` may also consume `shared` contracts directly. Backend
 modules must not import GTK, Relm4, WebKit, or frontend messages. Shared modules
@@ -67,17 +72,44 @@ behavior belongs in `src/lib.rs` or a focused module.
 | `src/frontend.rs`, `src/frontend/` | Relm4 composition, GTK/WebKit views, settings, and UI adapters |
 | `src/backend.rs`, `src/backend/` | playback controller, lyrics/search services, cache coordination, and MPRIS |
 | `src/shared.rs`, `src/shared/` | persisted TOML model and cross-layer presentation contracts |
+| `src/shared/config/` | config persistence, recovery, and validation submodules |
+| `floatlyrics-lyrics/src/lyrics.rs` | lyrics domain facade; re-exports lyrics-helper types (`LineInfo`, `LyricsData`, `LyricsTypes`) |
 | `floatlyrics-lyrics/src/lyrics/` | provider-neutral models, parsing, filtering, romanization, timeline, search |
-| `floatlyrics-lyrics/src/cache.rs`, `cache/` | cache boundary, SQLite access, and schema |
+| `floatlyrics-lyrics/src/cache.rs`, `src/cache/` | cache boundary, SQLite access, and schema |
 | `floatlyrics-core/src/i18n.rs` | locale selection, typed text keys, catalogue validation |
+| `src/frontend/view/lyrics/` | React + PixiJS embedded lyrics view (TypeScript, built by Bun) |
 | `data/locale/` | runtime catalogues for every supported locale |
-| `data/licenses/` | cargo-about template and generated dependency notices |
+| `data/licenses/` | cargo-about template, generated Rust dependency notices, and frontend license data |
 | `.github/workflows/` | CI and release automation; use it as the source of truth for CI commands |
 | `packaging/` | install scripts, AUR metadata, and packaging automation |
 
 When adding a module, follow the existing facade-plus-submodule layout rather
 than creating a parallel architecture. First-party Rust files and other files
 with an established convention should retain the repository's SPDX header.
+
+## Frontend architecture
+
+The lyrics display is a WebKit `WebView` hosting a single-page React application
+in `src/frontend/view/lyrics/`:
+
+- Bridge (`bridge.ts`) — installs `window.floatLyrics` with a `dispatch`
+  method. Rust calls `web_view.evaluate_script()` to push serialized
+  `LyricsCommand` objects. Commands sent before JS loads are buffered in
+  `window.floatLyricsPendingCommands` and replayed on bridge install.
+- Command types (`types.ts`) — three commands: `configure` (style +
+  Apple Music mode), `document` (full lyrics timeline), `frame` (per-frame
+  playback snapshot with position and slot-switching signals).
+- Store (`store.ts`) — `LyricsViewState` manages a dual-slot ping-pong
+  renderer. On track change, `key` changes and `activeSlot` toggles (0↔1),
+  triggering a CSS cross-fade between the outgoing and incoming lyric lines.
+- Renderer (`app.tsx`, `amll.ts`) — React component subscribes to the
+  store via `useSyncExternalStore`, converts `LyricsDocument` to AMLL line
+  format, and drives `@applemusic-like-lyrics/react`'s `LyricPlayer` (backed
+  by PixiJS). Karaoke word-fill is handled in `karaoke.ts`.
+
+When modifying the frontend, run `bun run typecheck` and `bun test` before
+committing. The bridge API (`LyricsCommand`, `LyricsFrame`) is the contract
+between Rust and JS — changing it requires coordinated updates on both sides.
 
 ## Change discipline
 
@@ -143,7 +175,9 @@ cargo build --locked --release
 cargo docs
 ```
 
-The first four commands mirror the Rust quality steps in CI. `cargo docs` and
+The first four commands (Bun install, check, typecheck, test) match the
+frontend quality steps in CI. `bun run build:lyrics` generates the embedded
+lyrics view and is verified by the later `cargo build` step. `cargo docs` and
 `cargo docs-open` are repository aliases in `.cargo/config.toml`; they already
 use `--locked`, cover the workspace, and deny rustdoc warnings. Documentation
 validation is an additional repository requirement.
@@ -174,6 +208,24 @@ cargo run --locked -- --debug
 ```
 
 `--debug` enables verbose tracing; it does not select Cargo's debug profile.
+
+## Build pipeline
+
+`build.rs` runs automatically before every Cargo compilation:
+
+1. `bun install --frozen-lockfile` — installs locked frontend dependencies.
+2. `bun run build:lyrics` — bundles the React lyrics view from
+   `src/frontend/view/lyrics/lyrics.html` into a single self-contained HTML
+   file in Cargo's `OUT_DIR`, and generates `frontend-dependencies.json` for
+   license attribution.
+3. Rust embeds the bundled HTML at compile time via
+   `include_str!(concat!(env!("OUT_DIR"), "/lyrics.html"))` in
+   `src/frontend/view/web_lyrics.rs`.
+
+When changing the React frontend, `bun run build:lyrics` can be run standalone
+without a full Cargo rebuild. `build.rs` monitors `package.json`, `bun.lock`,
+`tsconfig.json`, `src/frontend/view/lyrics/`, and `data/licenses/frontend/` for
+changes via `cargo:rerun-if-changed`.
 
 ## Rust and public API conventions
 
@@ -246,6 +298,44 @@ discovery and is the preferred way to isolate catalogue tests.
   X11 or without compositor layer-shell support.
 - Before GTK initialization, `src/lib.rs` supplies default `GSK_RENDERER=gl` and
   `GTK_A11Y=none` values when unset. Preserve caller-provided values.
+
+### MPRIS module layout
+
+The `mpris` module in `src/backend/mpris.rs` has three submodules:
+
+| Submodule | File | Responsibility |
+|---|---|---|
+| `model` | `src/backend/mpris/model.rs` | `PlaybackStatus`, `SpotifyMetadata`, `SpotifyPlayerState`, `SpotifyWatcherEvent`, D-Bus → domain conversion |
+| `position` | `src/backend/mpris/position.rs` | playback position synchronization and timing |
+| `watcher` | `src/backend/mpris/watcher.rs` | D-Bus name watching; `spawn_spotify_watcher`, `spotify_mpris_names`, `SPOTIFY_MPRIS_PREFIX` constant |
+
+The watcher spawns an async Tokio task that listens for Spotify D-Bus name
+appearance/disappearance and pushes `SpotifyWatcherEvent` variants into the
+Controller's MPSC receiver.
+
+## Controller and async topology
+
+The `Controller` in `src/backend/controller.rs` is the central orchestrator
+between MPRIS events, lyrics fetching, caching, and presentation:
+
+- MPRIS events arrive via `mpsc::Receiver<SpotifyWatcherEvent>` and are
+  processed in `tick()`, which the GTK main loop calls repeatedly.
+- Three MPSC channels offload blocking/async work to the Tokio runtime:
+  `lyrics_sender` (HTTP search), `cache_sender` (SQLite read/write),
+  `romanization_sender` (CPU-heavy CJK romanization). Results feed back
+  through `Receiver` channels and are re-integrated in `tick()`.
+- Generation tokens (`lyrics_generation: u64`) are incremented on every
+  lyrics reload or track change. Async results carry a generation; stale
+  results (from a previous track) are silently discarded.
+- `ControllerHandle` is a cloneable handle exposed to the frontend. It
+  exposes `reload_lyrics()` and `current_track()` (via `PlaybackProjection`,
+  an `Rc<RefCell<Option<TrackMetadata>>>`) without locking the controller.
+- Presentation (`presentation.rs`, `loading.rs`) converts internal state
+  into `LyricsFrame` structs pushed into the `LyricsView` trait (implemented
+  by `WebLyricsView`) which serializes them as `LyricsCommand` JS calls.
+
+The `CacheWorker` in `src/backend/cache.rs` wraps `floatlyrics_lyrics::cache::Cache`
+behind an `mpsc` channel to keep blocking SQLite operations off the GTK thread.
 
 ## Tests
 
