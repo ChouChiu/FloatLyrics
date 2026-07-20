@@ -47,6 +47,11 @@
   </screenshots>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="1.1.2" date="2026-07-21">
+      <description>
+        <p>Adds click-through lyrics, improves Apple Music-style line transitions, and updates dependencies.</p>
+      </description>
+    </release>
     <release version="1.1.1" date="2026-07-19">
       <description>
         <p>Improves playback-synchronized lyric effects, configuration recovery, asynchronous reliability, and release automation.</p>

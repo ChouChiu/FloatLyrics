@@ -633,7 +633,7 @@ dependencies = [
 
 [[package]]
 name = "floatlyrics"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "anyhow",
  "cairo-rs",
@@ -659,7 +659,7 @@ dependencies = [
 
 [[package]]
 name = "floatlyrics-core"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "anyhow",
  "directories",
@@ -673,7 +673,7 @@ dependencies = [
 
 [[package]]
 name = "floatlyrics-lyrics"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "anyhow",
  "floatlyrics-core",
