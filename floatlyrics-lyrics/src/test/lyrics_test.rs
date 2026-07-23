@@ -156,31 +156,15 @@ fn automatic_chinese_mode_uses_explicit_cantonese_markers() {
 }
 
 #[test]
-fn generates_romanization_for_other_languages() {
-    let cyrillic = romanized_lines("[00:01.00]Привет мир");
-    let spanish = romanized_lines("[00:01.00]¿Cómo estás?");
-    let unchanged = romanized_lines("[00:01.00]Hello world");
-
-    assert_eq!(cyrillic[0].romanization.as_deref(), Some("Privet mir"));
-    assert_eq!(spanish[0].romanization.as_deref(), Some("Como estas?"));
-    assert_eq!(unchanged[0].romanization, None);
-}
-
-#[test]
-fn recognizes_unaccented_spanish_without_repeating_english() {
-    let spanish = romanized_lines("[00:01.00]Muchas gracias mi amor");
-    let english = romanized_lines(
-        "[00:01.00]I go in all the way\n\
-         [00:02.00]LEMONADE\n\
-         [00:03.00]Way too loud\n\
-         [00:04.00]Like a hurricane",
+fn does_not_generate_romanization_for_non_cjk_text() {
+    let lines = romanized_lines(
+        "[00:01.00]Привет мир\n\
+         [00:02.00]¿Cómo estás?\n\
+         [00:03.00]Muchas gracias mi amor\n\
+         [00:04.00]Hello world",
     );
 
-    assert_eq!(
-        spanish[0].romanization.as_deref(),
-        Some("Muchas gracias mi amor")
-    );
-    assert!(english.iter().all(|line| line.romanization.is_none()));
+    assert!(lines.iter().all(|line| line.romanization.is_none()));
 }
 
 #[test]
