@@ -23,8 +23,6 @@ korean-romanize = "0.2.0"
 pinyin = { version = "0.11.0", default-features = false, features = ["with_tone"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 rust-canto = "0.3.4"
-uroman = "0.6.6"
-whatlang = "0.18.0"
 
 [dev-dependencies]
 tempfile = "3"

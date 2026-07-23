@@ -6,10 +6,8 @@
 use kakasi::IsJapanese;
 use korean_romanize::has_korean;
 use serde::{Deserialize, Serialize};
-use uroman::{Uroman, rom_format};
-use whatlang::{Lang, detect};
 
-use super::model::{RomanizationSegment, TimedLine};
+use super::model::TimedLine;
 
 mod chinese;
 mod japanese;
@@ -43,9 +41,8 @@ impl ChineseRomanizationMode {
 /// Replaces any existing pronunciation with locally generated romanization.
 ///
 /// Japanese and Chinese are distinguished using document-level evidence, with
-/// per-line fallback for multilingual lyrics. Other supported scripts use
-/// `uroman` as a general transliterator. ASCII-only Spanish is detected so its
-/// unchanged Latin spelling can still be exposed as romanization.
+/// per-line fallback for multilingual lyrics. Only Chinese, Japanese, and
+/// Korean text is romanized.
 pub fn generate_local_romanization(lines: &mut [TimedLine]) {
     generate_local_romanization_with_mode(lines, ChineseRomanizationMode::Auto);
 }
@@ -55,7 +52,6 @@ pub fn generate_local_romanization_with_mode(
     lines: &mut [TimedLine],
     chinese_mode: ChineseRomanizationMode,
 ) {
-    let mut uroman = None;
     let has_japanese_kana = lines
         .iter()
         .any(|line| kakasi::is_japanese(&line.text) == IsJapanese::True);
@@ -75,14 +71,8 @@ pub fn generate_local_romanization_with_mode(
     for line in lines {
         line.romanization = None;
         line.romanization_segments.clear();
-        let is_ascii_spanish = is_unaccented_spanish(&line.text);
-        if line.text.is_ascii() && !is_ascii_spanish {
-            continue;
-        }
 
-        let (romanization, segments) = if is_ascii_spanish {
-            latin_script_romanization(&line.text)
-        } else if has_korean(&line.text) {
+        let (romanization, segments) = if has_korean(&line.text) {
             korean::romanize(&line.text)
         } else if kakasi::is_japanese(&line.text) == IsJapanese::True {
             japanese::romanize(&line.text)
@@ -94,69 +84,15 @@ pub fn generate_local_romanization_with_mode(
         } else if chinese::contains_han(&line.text) {
             chinese::romanize(&line.text, chinese_mode)
         } else {
-            let uroman = uroman.get_or_insert_with(Uroman::new);
-            (
-                uroman
-                    .romanize_string::<rom_format::Str>(&line.text, None)
-                    .to_string(),
-                uroman_segments(uroman, &line.text),
-            )
+            continue;
         };
 
         let romanization = romanization.trim();
-        if !romanization.is_empty() && (romanization != line.text.trim() || is_ascii_spanish) {
+        if !romanization.is_empty() && romanization != line.text.trim() {
             line.romanization = Some(romanization.to_string());
             line.romanization_segments = segments;
         }
     }
-}
-
-fn is_unaccented_spanish(text: &str) -> bool {
-    // Short lyric lines do not reach whatlang's prose-oriented reliability
-    // threshold, so use a conservative floor covered by cache-derived English
-    // regression cases.
-    const MINIMUM_SHORT_LINE_CONFIDENCE: f64 = 0.05;
-
-    text.is_ascii()
-        && text
-            .chars()
-            .any(|character| character.is_ascii_alphabetic())
-        && detect(text).is_some_and(|info| {
-            info.lang() == Lang::Spa && info.confidence() >= MINIMUM_SHORT_LINE_CONFIDENCE
-        })
-}
-
-fn latin_script_romanization(text: &str) -> (String, Vec<RomanizationSegment>) {
-    let text = text.trim().to_string();
-    let segment = RomanizationSegment {
-        romanization: text.clone(),
-        text: text.clone(),
-    };
-    (text, vec![segment])
-}
-
-fn uroman_segments(uroman: &Uroman, text: &str) -> Vec<RomanizationSegment> {
-    let characters = text.chars().collect::<Vec<_>>();
-    uroman
-        .romanize_string::<rom_format::Edges>(text, None)
-        .to_edges()
-        .into_iter()
-        .filter_map(|edge| {
-            let data = edge.get_data();
-            let source = characters
-                .get(data.start..data.end)?
-                .iter()
-                .collect::<String>();
-            Some(RomanizationSegment {
-                romanization: if data.txt != source {
-                    data.txt.clone()
-                } else {
-                    String::new()
-                },
-                text: source,
-            })
-        })
-        .collect()
 }
 
 fn push_separator(output: &mut String) {
