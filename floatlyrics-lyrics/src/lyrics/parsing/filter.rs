@@ -48,17 +48,18 @@ fn looks_like_title_and_artist_list(text: &str) -> bool {
 fn is_credit_line(line: &TimedLine, text: &str) -> bool {
     let normalized = normalize_line_text(text);
 
-    // Generic key-value metadata detector: only within the first 10 seconds,
-    // matches lines like "演唱：Leana Mask", "出品：XX", "Mixing: EE".
-    if line.start_ms < 10_000
-        && let Some((key, _value)) = normalized.split_once(':')
-    {
+    // Key-value credits can extend well beyond the first ten seconds in live
+    // releases. Known roles are safe to remove wherever they occur; unknown
+    // metadata remains limited to the intro to avoid hiding ordinary lyrics.
+    if let Some((key, _value)) = normalized.split_once(':') {
         let key = key.trim();
-        if (2..=18).contains(&key.chars().count())
-            && key
-                .chars()
-                .all(|ch| ch.is_alphanumeric() || ch == ' ' || ch == '&' || ch == '/')
-            && !key.starts_with("http")
+        if is_known_credit_key(key)
+            || (line.start_ms < 10_000
+                && (2..=18).contains(&key.chars().count())
+                && key
+                    .chars()
+                    .all(|ch| ch.is_alphanumeric() || ch == ' ' || ch == '&' || ch == '/')
+                && !key.starts_with("http"))
         {
             return true;
         }
@@ -155,6 +156,8 @@ fn is_credit_line(line: &TimedLine, text: &str) -> bool {
         "翻唱",
         "和声",
         "和聲",
+        "和音",
+        "合音",
         "和声编写",
         "和聲編寫",
         "混音",
@@ -199,6 +202,41 @@ fn is_credit_line(line: &TimedLine, text: &str) -> bool {
     ];
 
     prefixes.iter().any(|prefix| normalized.starts_with(prefix))
+}
+
+fn is_known_credit_key(key: &str) -> bool {
+    let mut components = key.split('/').map(str::trim);
+    let Some(first) = components.next() else {
+        return false;
+    };
+
+    is_known_credit_key_component(first) && components.all(is_known_credit_key_component)
+}
+
+fn is_known_credit_key_component(key: &str) -> bool {
+    matches!(
+        key,
+        "pgm"
+            | "音乐总监"
+            | "音樂總監"
+            | "音响总监"
+            | "音響總監"
+            | "音乐设计"
+            | "音樂設計"
+            | "乐队队长"
+            | "樂隊隊長"
+            | "键盘"
+            | "鍵盤"
+            | "管弦配器"
+            | "和音"
+            | "合音"
+            | "竹笛"
+            | "长笛"
+            | "長笛"
+            | "柳琴"
+            | "打击乐"
+            | "打擊樂"
+    )
 }
 
 fn is_speaker_label_line(text: &str) -> bool {
