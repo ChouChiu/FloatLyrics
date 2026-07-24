@@ -301,25 +301,31 @@ discovery and is the preferred way to isolate catalogue tests.
 
 ### MPRIS module layout
 
-The `mpris` module in `src/backend/mpris.rs` has three submodules:
+The `mpris` module in `src/backend/mpris.rs` has four submodules:
 
 | Submodule | File | Responsibility |
 |---|---|---|
-| `model` | `src/backend/mpris/model.rs` | `PlaybackStatus`, `SpotifyMetadata`, `SpotifyPlayerState`, `SpotifyWatcherEvent`, D-Bus → domain conversion |
+| `compat` | `src/backend/mpris/compat.rs` | Known-player metadata hints for exact provider song IDs |
+| `model` | `src/backend/mpris/model.rs` | `PlaybackStatus`, `MprisMetadata`, `PlayerState`, `PlayerWatcherEvent`, D-Bus → domain conversion |
 | `position` | `src/backend/mpris/position.rs` | playback position synchronization and timing |
-| `watcher` | `src/backend/mpris/watcher.rs` | D-Bus name watching; `spawn_spotify_watcher`, `spotify_mpris_names`, `SPOTIFY_MPRIS_PREFIX` constant |
+| `watcher` | `src/backend/mpris/watcher.rs` | D-Bus discovery, active-player selection, per-player observation, and compatibility wrappers |
 
-The watcher spawns an async Tokio task that listens for Spotify D-Bus name
-appearance/disappearance and pushes `SpotifyWatcherEvent` variants into the
-Controller's MPSC receiver.
+The watcher spawns an async Tokio task that discovers standard MPRIS D-Bus
+names, follows the highest-ranked active player, and pushes `PlayerWatcherEvent`
+variants into the Controller's MPSC receiver. A separate internal channel
+carries track-fingerprint-tagged provider hints so player-specific metadata
+cannot expand the public playback-state API or apply after a track change.
 
 ## Controller and async topology
 
 The `Controller` in `src/backend/controller.rs` is the central orchestrator
 between MPRIS events, lyrics fetching, caching, and presentation:
 
-- MPRIS events arrive via `mpsc::Receiver<SpotifyWatcherEvent>` and are
+- MPRIS events arrive via `mpsc::Receiver<PlayerWatcherEvent>` and are
   processed in `tick()`, which the GTK main loop calls repeatedly.
+- Exact provider hints inferred from known MPRIS metadata arrive on a separate
+  receiver and are ignored unless their bus name and track fingerprint still
+  match the active player.
 - Three MPSC channels offload blocking/async work to the Tokio runtime:
   `lyrics_sender` (HTTP search), `cache_sender` (SQLite read/write),
   `romanization_sender` (CPU-heavy CJK romanization). Results feed back

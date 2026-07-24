@@ -5,7 +5,7 @@
 pkgname=floatlyrics-bin
 pkgver=1.1.2
 pkgrel=1
-pkgdesc='Floating synchronized lyrics for Spotify on Linux Wayland (prebuilt binary)'
+pkgdesc='Floating synchronized lyrics for MPRIS players on Linux Wayland (prebuilt binary)'
 arch=('x86_64')
 url='https://github.com/ChouChiu/FloatLyrics'
 license=('AGPL-3.0-only')

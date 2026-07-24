@@ -131,7 +131,7 @@ data/locale/zh-TW.json
 
 - 测试名称描述可观察行为，例如 `parses_enhanced_lrc`。
 - bug 修复应附带能够先复现问题的回归测试。
-- 单元测试不得要求 Spotify、D-Bus、网络、Wayland 合成器或开发者本地路径。
+- 单元测试不得要求真实 MPRIS 播放器、D-Bus、网络、Wayland 合成器或开发者本地路径。
 - 文件系统和数据库测试使用 `tempfile` 隔离，且不得依赖执行顺序。
 - 尽量在最接近领域逻辑的 crate 中测试，UI 边界只保留必要的组装测试。
 

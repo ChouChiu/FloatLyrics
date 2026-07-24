@@ -9,21 +9,21 @@
   <project_license>AGPL-3.0-only</project_license>
 
   <name>FloatLyrics</name>
-  <summary>Floating synchronized lyrics for Spotify on Wayland</summary>
-  <summary xml:lang="zh-CN">Wayland 桌面上的 Spotify 同步悬浮歌词</summary>
-  <summary xml:lang="zh-TW">Wayland 桌面上的 Spotify 同步懸浮歌詞</summary>
+  <summary>Floating synchronized lyrics for MPRIS players on Wayland</summary>
+  <summary xml:lang="zh-CN">Wayland 桌面上的 MPRIS 同步悬浮歌词</summary>
+  <summary xml:lang="zh-TW">Wayland 桌面上的 MPRIS 同步懸浮歌詞</summary>
 
   <description>
     <p>
-      FloatLyrics follows Spotify playback through MPRIS and displays synchronized lyrics in a
+      FloatLyrics follows MPRIS-compatible players and displays synchronized lyrics in a
       lightweight GTK4 layer-shell overlay. Lyrics can be searched manually and cached locally.
     </p>
     <p xml:lang="zh-CN">
-      FloatLyrics 通过 MPRIS 跟随 Spotify 播放状态，并在轻量的 GTK4 layer-shell 悬浮窗中显示
+      FloatLyrics 通过 MPRIS 跟随兼容播放器的播放状态，并在轻量的 GTK4 layer-shell 悬浮窗中显示
       同步歌词。用户也可以手动搜索歌词，结果会缓存在本地。
     </p>
     <p xml:lang="zh-TW">
-      FloatLyrics 透過 MPRIS 跟隨 Spotify 播放狀態，並在輕量的 GTK4 layer-shell 懸浮視窗中顯示
+      FloatLyrics 透過 MPRIS 跟隨相容播放器的播放狀態，並在輕量的 GTK4 layer-shell 懸浮視窗中顯示
       同步歌詞。使用者也可以手動搜尋歌詞，結果會快取在本機。
     </p>
   </description>

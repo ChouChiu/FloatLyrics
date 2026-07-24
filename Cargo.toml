@@ -29,7 +29,7 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Floating synchronized lyrics for Spotify on Linux Wayland."
+description = "Floating synchronized lyrics for MPRIS players on Linux Wayland."
 homepage = "https://github.com/ChouChiu/FloatLyrics"
 repository.workspace = true
 readme = "README.md"
@@ -73,7 +73,7 @@ maintainer = "ChouChiu"
 copyright = "2026 ChouChiu"
 "license-file" = "LICENSE"
 "extended-description" = """\
-FloatLyrics follows Spotify playback through MPRIS and displays synchronized \
+FloatLyrics follows MPRIS-compatible players and displays synchronized \
 lyrics in a lightweight GTK4 layer-shell overlay. Lyrics can be searched \
 manually and cached locally."""
 section = "sound"
@@ -100,9 +100,9 @@ assets = [
 ]
 
 [package.metadata.generate-rpm]
-summary = "Floating synchronized lyrics for Spotify on Linux Wayland"
+summary = "Floating synchronized lyrics for MPRIS players on Linux Wayland"
 description = """\
-FloatLyrics follows Spotify playback through MPRIS and displays synchronized \
+FloatLyrics follows MPRIS-compatible players and displays synchronized \
 lyrics in a lightweight GTK4 layer-shell overlay. Lyrics can be searched \
 manually and cached locally."""
 assets = [

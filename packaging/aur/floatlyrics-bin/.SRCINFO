@@ -1,5 +1,5 @@
 pkgbase = floatlyrics-bin
-	pkgdesc = Floating synchronized lyrics for Spotify on Linux Wayland (prebuilt binary)
+	pkgdesc = Floating synchronized lyrics for MPRIS players on Linux Wayland (prebuilt binary)
 	pkgver = 1.1.2
 	pkgrel = 1
 	url = https://github.com/ChouChiu/FloatLyrics
