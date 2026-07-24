@@ -117,7 +117,13 @@ impl WebLyricsView {
     }
 
     pub(super) fn show(&self, frame: LyricsFrame) {
-        self.submit(CommandSlot::Frame, command::frame_script(&frame));
+        self.submit(
+            CommandSlot::Frame {
+                seeking: frame.seeking,
+                document_revision: self.document_revision.get(),
+            },
+            command::frame_script(&frame),
+        );
     }
 
     pub(super) fn apply_config(&self, config: &AppConfig) {

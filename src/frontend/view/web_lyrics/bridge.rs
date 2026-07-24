@@ -7,14 +7,23 @@
 pub(super) enum CommandSlot {
     Config,
     Document,
-    Frame,
+    Frame {
+        seeking: bool,
+        document_revision: Option<u64>,
+    },
+}
+
+struct FrameCommand {
+    script: String,
+    seeking: bool,
+    document_revision: Option<u64>,
 }
 
 #[derive(Default)]
 struct CommandBatch {
     config: Option<String>,
     document: Option<String>,
-    frame: Option<String>,
+    frame: Option<FrameCommand>,
 }
 
 impl CommandBatch {
@@ -22,7 +31,21 @@ impl CommandBatch {
         match slot {
             CommandSlot::Config => self.config = Some(script),
             CommandSlot::Document => self.document = Some(script),
-            CommandSlot::Frame => self.frame = Some(script),
+            CommandSlot::Frame {
+                seeking,
+                document_revision,
+            } => {
+                if self.frame.as_ref().is_some_and(|pending| {
+                    pending.seeking && !seeking && pending.document_revision == document_revision
+                }) {
+                    return;
+                }
+                self.frame = Some(FrameCommand {
+                    script,
+                    seeking,
+                    document_revision,
+                });
+            }
         }
     }
 
@@ -30,7 +53,7 @@ impl CommandBatch {
         let scripts = [
             self.config.as_deref(),
             self.document.as_deref(),
-            self.frame.as_deref(),
+            self.frame.as_ref().map(|frame| frame.script.as_str()),
         ]
         .into_iter()
         .flatten()
@@ -45,8 +68,14 @@ impl CommandBatch {
         if newer.document.is_none() {
             newer.document = self.document;
         }
-        if newer.frame.is_none() {
-            newer.frame = self.frame;
+        if let Some(frame) = self.frame
+            && (newer.frame.is_none()
+                || (frame.seeking
+                    && newer.frame.as_ref().is_some_and(|pending| {
+                        !pending.seeking && pending.document_revision == frame.document_revision
+                    })))
+        {
+            newer.frame = Some(frame);
         }
     }
 }
