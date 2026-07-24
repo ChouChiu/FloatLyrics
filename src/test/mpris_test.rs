@@ -1,5 +1,6 @@
 use super::position::position_us_to_ms;
 use super::*;
+use floatlyrics_lyrics::lyrics::LyricsProvider;
 use std::collections::HashMap;
 use zvariant::{OwnedValue, Value};
 
@@ -36,6 +37,87 @@ fn converts_spotify_metadata_to_internal_track() {
 }
 
 #[test]
+fn accepts_title_only_metadata_from_minimal_mpris_players() {
+    let mut metadata = HashMap::new();
+    metadata.insert("xesam:title".to_string(), owned("Radio Stream"));
+    let track = metadata_from_mpris(&metadata)
+        .unwrap()
+        .into_track_metadata()
+        .unwrap();
+
+    assert_eq!(track.title, "Radio Stream");
+    assert!(track.artists.is_empty());
+}
+
+#[test]
+fn infers_netease_ids_from_known_player_track_paths() {
+    let metadata = hint_metadata(Some("/org/mpris/MediaPlayer2/track/123456"));
+
+    for (identity, bus_name) in [
+        ("ElectronNCM", "org.mpris.MediaPlayer2.electron-ncm"),
+        ("Qcm", "org.mpris.MediaPlayer2.qcm"),
+        ("Other", "org.mpris.MediaPlayer2.musicfox.instance42"),
+        ("Other", "org.mpris.MediaPlayer2.NeteaseCloudMusicGtk4"),
+    ] {
+        let hint = super::compat::lyrics_lookup_hint(identity, bus_name, &metadata, None).unwrap();
+        assert_eq!(hint.provider, LyricsProvider::NetEase);
+        assert_eq!(hint.provider_track_id, "123456");
+    }
+}
+
+#[test]
+fn infers_feeluown_netease_and_qq_music_ids_from_source_urls() {
+    for (url, provider, id) in [
+        (
+            "fuo://netease/songs/19723756",
+            LyricsProvider::NetEase,
+            "19723756",
+        ),
+        (
+            "fuo://qqmusic/songs/0039MnYb0qxYhV",
+            LyricsProvider::QqMusic,
+            "0039MnYb0qxYhV",
+        ),
+    ] {
+        let metadata = hint_metadata(None);
+        let hint = super::compat::lyrics_lookup_hint(
+            "feeluown",
+            "org.mpris.MediaPlayer2.feeluown",
+            &metadata,
+            Some(url),
+        )
+        .unwrap();
+        assert_eq!(hint.provider, provider);
+        assert_eq!(hint.provider_track_id, id);
+    }
+}
+
+#[test]
+fn infers_yesplaymusic_id_and_rejects_invalid_provider_ids() {
+    let metadata = hint_metadata(None);
+    let hint = super::compat::lyrics_lookup_hint(
+        "YesPlayMusic",
+        "org.mpris.MediaPlayer2.yesplaymusic",
+        &metadata,
+        Some("/trackid/347230"),
+    )
+    .unwrap();
+    assert_eq!(hint.provider, LyricsProvider::NetEase);
+    assert_eq!(hint.provider_track_id, "347230");
+
+    let invalid = hint_metadata(Some("/track/not-a-number"));
+    assert!(
+        super::compat::lyrics_lookup_hint(
+            "YesPlayMusic",
+            "org.mpris.MediaPlayer2.musicfox",
+            &invalid,
+            Some("/trackid/not-a-number"),
+        )
+        .is_none()
+    );
+}
+
+#[test]
 fn parses_mpris_metadata_map() {
     let mut metadata = HashMap::new();
     metadata.insert("xesam:title".to_string(), owned("Song"));
@@ -49,6 +131,7 @@ fn parses_mpris_metadata_map() {
         "mpris:trackid".to_string(),
         owned(zvariant::ObjectPath::try_from("/org/mpris/MediaPlayer2/Track/1").unwrap()),
     );
+    metadata.insert("xesam:url".to_string(), owned("fuo://netease/songs/123"));
 
     let parsed = spotify_metadata_from_mpris(&metadata).unwrap();
 
@@ -60,10 +143,39 @@ fn parses_mpris_metadata_map() {
         parsed.track_id.as_deref(),
         Some("/org/mpris/MediaPlayer2/Track/1")
     );
+    assert_eq!(
+        super::model::source_url_from_mpris(&metadata).as_deref(),
+        Some("fuo://netease/songs/123")
+    );
+}
+
+#[test]
+fn accepts_string_track_ids_from_nonconforming_players() {
+    let mut metadata = HashMap::new();
+    metadata.insert("xesam:title".to_string(), owned("Song"));
+    metadata.insert(
+        "mpris:trackid".to_string(),
+        owned("/org/mpris/MediaPlayer2/track/123"),
+    );
+
+    assert_eq!(
+        metadata_from_mpris(&metadata).unwrap().track_id.as_deref(),
+        Some("/org/mpris/MediaPlayer2/track/123")
+    );
 }
 
 #[test]
 fn converts_mpris_position_to_milliseconds() {
     assert_eq!(position_us_to_ms(12_345_678), Some(12_345));
     assert_eq!(position_us_to_ms(-1), None);
+}
+
+fn hint_metadata(track_id: Option<&str>) -> MprisMetadata {
+    MprisMetadata {
+        title: "Song".to_string(),
+        artists: vec!["Artist".to_string()],
+        album: None,
+        length_us: None,
+        track_id: track_id.map(str::to_string),
+    }
 }

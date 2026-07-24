@@ -48,6 +48,40 @@ impl WidgetTemplate for OverlayPanel {
                     set_orientation: gtk::Orientation::Horizontal,
                     set_spacing: 4,
 
+                    gtk::Box {
+                        set_orientation: gtk::Orientation::Horizontal,
+                        set_spacing: 0,
+                        set_valign: gtk::Align::Center,
+                        add_css_class: "floating-offset-control",
+
+                        #[name = "offset_decrease_button"]
+                        gtk::Button {
+                            set_icon_name: "list-remove-symbolic",
+                            set_valign: gtk::Align::Center,
+                            set_css_classes: &["flat", "floating-offset-step-button"],
+                            connect_clicked[sender = init.sender.clone()] => move |_| {
+                                let _ = sender.send(AppMsg::AdjustTrackOffset(-100));
+                            },
+                        },
+                        #[name = "track_offset_button"]
+                        gtk::Button {
+                            set_label: "",
+                            set_valign: gtk::Align::Center,
+                            set_css_classes: &["flat", "floating-offset-button"],
+                            connect_clicked[sender = init.sender.clone()] => move |_| {
+                                let _ = sender.send(AppMsg::ResetTrackOffset);
+                            },
+                        },
+                        #[name = "offset_increase_button"]
+                        gtk::Button {
+                            set_icon_name: "list-add-symbolic",
+                            set_valign: gtk::Align::Center,
+                            set_css_classes: &["flat", "floating-offset-step-button"],
+                            connect_clicked[sender = init.sender.clone()] => move |_| {
+                                let _ = sender.send(AppMsg::AdjustTrackOffset(100));
+                            },
+                        },
+                    },
                     #[name = "manual_search_button"]
                     gtk::Button {
                         set_icon_name: "system-search-symbolic",
@@ -96,6 +130,9 @@ impl WidgetTemplate for OverlayPanel {
 pub(super) struct PanelWidgets {
     pub(super) content: gtk::Box,
     pub(super) song_info: gtk::Label,
+    pub(super) offset_decrease_button: gtk::Button,
+    pub(super) track_offset_button: gtk::Button,
+    pub(super) offset_increase_button: gtk::Button,
     pub(super) manual_search_button: gtk::Button,
     pub(super) settings_button: gtk::Button,
     pub(super) close_button: gtk::Button,
@@ -115,6 +152,9 @@ pub(super) fn build(
     PanelWidgets {
         content: panel.content.clone(),
         song_info: panel.song_info.clone(),
+        offset_decrease_button: panel.offset_decrease_button.clone(),
+        track_offset_button: panel.track_offset_button.clone(),
+        offset_increase_button: panel.offset_increase_button.clone(),
         manual_search_button: panel.manual_search_button.clone(),
         settings_button: panel.settings_button.clone(),
         close_button: panel.close_button.clone(),

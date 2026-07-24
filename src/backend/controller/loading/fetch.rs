@@ -9,7 +9,9 @@ use floatlyrics_core::{
     i18n::{Message, Text},
     track::TrackMetadata,
 };
-use floatlyrics_lyrics::lyrics::{FetchedLyrics, LyricsProvider, search_best_lyrics};
+use floatlyrics_lyrics::lyrics::{
+    FetchedLyrics, LyricsLookupHint, LyricsProvider, search_best_lyrics_with_hint,
+};
 
 use crate::{
     backend::{
@@ -116,16 +118,18 @@ pub(super) fn spawn_lyrics_fetch(
     runtime: &tokio::runtime::Handle,
     sender: mpsc::Sender<LyricsFetchEvent>,
     track: TrackMetadata,
+    hint: Option<LyricsLookupHint>,
     provider_order: Vec<LyricsProvider>,
     track_fingerprint: String,
     generation: u64,
 ) {
     runtime.spawn(async move {
-        let result = match search_best_lyrics(&track, &provider_order).await {
-            Ok(Some(fetched)) => Ok(fetched),
-            Ok(None) => Err(LyricsFetchFailure::NotFound),
-            Err(error) => Err(LyricsFetchFailure::Other(error.to_string())),
-        };
+        let result =
+            match search_best_lyrics_with_hint(&track, &provider_order, hint.as_ref()).await {
+                Ok(Some(fetched)) => Ok(fetched),
+                Ok(None) => Err(LyricsFetchFailure::NotFound),
+                Err(error) => Err(LyricsFetchFailure::Other(error.to_string())),
+            };
 
         let _ = sender.send(LyricsFetchEvent {
             track_fingerprint,

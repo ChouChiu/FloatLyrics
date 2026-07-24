@@ -16,10 +16,17 @@ use floatlyrics_lyrics::{
     lyrics::{FetchedLyrics, LyricsProvider},
 };
 
-type LoadCompletion = Box<dyn FnOnce(Result<Option<CachedLyrics>, String>) + Send + 'static>;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CachedTrack {
+    pub(super) lyrics: Option<CachedLyrics>,
+    pub(super) offset_ms: i64,
+}
+
+type LoadCompletion = Box<dyn FnOnce(Result<CachedTrack, String>) + Send + 'static>;
 type StoreCompletion =
     Box<dyn FnOnce(Result<Option<CachedLyrics>, ProviderStoreError>) + Send + 'static>;
 type ApplyCompletion = Box<dyn FnOnce(Result<(), String>) + Send + 'static>;
+type OffsetCompletion = Box<dyn FnOnce(Result<(), String>) + Send + 'static>;
 
 #[derive(Debug)]
 pub(super) enum ProviderStoreError {
@@ -47,6 +54,11 @@ enum CacheCommand {
         lyrics: FetchedLyrics,
         complete: ApplyCompletion,
     },
+    SetTrackOffset {
+        track: TrackMetadata,
+        offset_ms: i64,
+        complete: OffsetCompletion,
+    },
 }
 
 impl CacheCommand {
@@ -60,6 +72,7 @@ impl CacheCommand {
                 complete(Err(ProviderStoreError::Store(message)));
             }
             Self::ApplyManual { complete, .. } => complete(Err(message)),
+            Self::SetTrackOffset { complete, .. } => complete(Err(message)),
         }
     }
 }
@@ -79,7 +92,7 @@ impl CacheService {
         &self,
         track: TrackMetadata,
         provider_order: Vec<LyricsProvider>,
-        complete: impl FnOnce(Result<Option<CachedLyrics>, String>) + Send + 'static,
+        complete: impl FnOnce(Result<CachedTrack, String>) + Send + 'static,
     ) {
         self.send(CacheCommand::LoadTrack {
             track,
@@ -112,6 +125,19 @@ impl CacheService {
         self.send(CacheCommand::ApplyManual {
             track,
             lyrics,
+            complete: Box::new(complete),
+        });
+    }
+
+    pub(super) fn set_track_offset(
+        &self,
+        track: TrackMetadata,
+        offset_ms: i64,
+        complete: impl FnOnce(Result<(), String>) + Send + 'static,
+    ) {
+        self.send(CacheCommand::SetTrackOffset {
+            track,
+            offset_ms,
             complete: Box::new(complete),
         });
     }
@@ -193,6 +219,11 @@ fn run_worker(cache: &dyn LyricsCache, receiver: mpsc::Receiver<CacheCommand>) {
                 lyrics,
                 complete,
             } => complete(apply_manual(cache, &track, &lyrics)),
+            CacheCommand::SetTrackOffset {
+                track,
+                offset_ms,
+                complete,
+            } => complete(set_track_offset(cache, &track, offset_ms)),
         }
     }
 }
@@ -201,13 +232,17 @@ fn load_track(
     cache: &dyn LyricsCache,
     track: &TrackMetadata,
     provider_order: &[LyricsProvider],
-) -> Result<Option<CachedLyrics>, String> {
+) -> Result<CachedTrack, String> {
     let fingerprint = cache
         .upsert_track(track)
         .map_err(|error| format!("{error:#}"))?;
-    cache
+    let lyrics = cache
         .lyrics_for_track(&fingerprint, provider_order)
-        .map_err(|error| format!("{error:#}"))
+        .map_err(|error| format!("{error:#}"))?;
+    let offset_ms = cache
+        .track_offset_ms(&fingerprint)
+        .map_err(|error| format!("{error:#}"))?;
+    Ok(CachedTrack { lyrics, offset_ms })
 }
 
 fn store_provider_and_load(
@@ -251,6 +286,19 @@ fn apply_manual(
         .map_err(|error| format!("{error:#}"))?;
     cache
         .bind_manual_match(&track_fingerprint, lyrics_id)
+        .map_err(|error| format!("{error:#}"))
+}
+
+fn set_track_offset(
+    cache: &dyn LyricsCache,
+    track: &TrackMetadata,
+    offset_ms: i64,
+) -> Result<(), String> {
+    let fingerprint = cache
+        .upsert_track(track)
+        .map_err(|error| format!("{error:#}"))?;
+    cache
+        .set_track_offset_ms(&fingerprint, offset_ms)
         .map_err(|error| format!("{error:#}"))
 }
 

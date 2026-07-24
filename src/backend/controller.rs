@@ -9,6 +9,7 @@ mod presentation;
 use std::{cell::RefCell, rc::Rc, sync::mpsc, time::Instant};
 
 use floatlyrics_core::{i18n::Text, track::TrackMetadata};
+use floatlyrics_lyrics::cache::{TRACK_OFFSET_MS_MAX, TRACK_OFFSET_MS_MIN};
 
 use crate::shared::runtime::LyricsRuntimeConfig;
 
@@ -18,7 +19,7 @@ use super::{
         LyricsDisplayState, PlaybackSnapshot, apply_position_sample, effective_position_ms,
         lyrics_document, playback_jump_detected,
     },
-    mpris::{SpotifyPlayerState, SpotifyWatcherEvent},
+    mpris::{PlayerLyricsHintEvent, PlayerState, PlayerWatcherEvent},
 };
 use loading::{
     LyricsCacheApplyContext, LyricsCacheEvent, LyricsFetchApplyContext, LyricsFetchEvent,
@@ -37,6 +38,10 @@ struct ControllerState {
     document_dirty: bool,
     document_revision: u64,
     seek_pending: bool,
+    track_offset_ms: i64,
+    track_offset_fingerprint: Option<String>,
+    track_offset_generation: u64,
+    lyrics_hint: Option<floatlyrics_lyrics::lyrics::LyricsLookupHint>,
 }
 
 impl ControllerState {
@@ -63,6 +68,8 @@ struct ControllerContext<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ControllerCommand {
     ReloadLyrics,
+    AdjustTrackOffset(i64),
+    ResetTrackOffset,
 }
 
 #[derive(Clone, Default)]
@@ -94,12 +101,23 @@ impl ControllerHandle {
     pub(crate) fn current_track(&self) -> Option<TrackMetadata> {
         self.playback.current_track()
     }
+
+    pub(crate) fn adjust_track_offset(&self, delta_ms: i64) {
+        let _ = self
+            .commands
+            .send(ControllerCommand::AdjustTrackOffset(delta_ms));
+    }
+
+    pub(crate) fn reset_track_offset(&self) {
+        let _ = self.commands.send(ControllerCommand::ResetTrackOffset);
+    }
 }
 
 /// Decoupled controller: owns playback state and exposes a [`Controller::tick`] method
 /// that the caller drives from the GTK main loop (or from tests).
 pub(crate) struct Controller {
-    receiver: mpsc::Receiver<SpotifyWatcherEvent>,
+    receiver: mpsc::Receiver<PlayerWatcherEvent>,
+    hint_receiver: mpsc::Receiver<PlayerLyricsHintEvent>,
     cache_receiver: mpsc::Receiver<LyricsCacheEvent>,
     lyrics_receiver: mpsc::Receiver<LyricsFetchEvent>,
     romanization_receiver: mpsc::Receiver<RomanizationEvent>,
@@ -118,7 +136,8 @@ pub(crate) struct Controller {
 
 impl Controller {
     pub(super) fn new(
-        receiver: mpsc::Receiver<SpotifyWatcherEvent>,
+        receiver: mpsc::Receiver<PlayerWatcherEvent>,
+        hint_receiver: mpsc::Receiver<PlayerLyricsHintEvent>,
         runtime: tokio::runtime::Handle,
         floating: Rc<dyn LyricsView>,
         cache: CacheService,
@@ -135,6 +154,7 @@ impl Controller {
         let playback = PlaybackProjection::default();
         Self {
             receiver,
+            hint_receiver,
             cache_receiver,
             lyrics_receiver,
             romanization_receiver,
@@ -180,6 +200,25 @@ impl Controller {
         for command in self.command_receiver.try_iter() {
             match command {
                 ControllerCommand::ReloadLyrics => self.state.reload_lyrics(),
+                ControllerCommand::AdjustTrackOffset(delta_ms) => {
+                    let offset_ms = self.state.track_offset_ms.saturating_add(delta_ms);
+                    set_track_offset(
+                        &mut self.state,
+                        &self.cache,
+                        self.floating.as_ref(),
+                        offset_ms,
+                        false,
+                    );
+                }
+                ControllerCommand::ResetTrackOffset => {
+                    set_track_offset(
+                        &mut self.state,
+                        &self.cache,
+                        self.floating.as_ref(),
+                        0,
+                        true,
+                    );
+                }
             }
         }
 
@@ -194,7 +233,11 @@ impl Controller {
         };
 
         for event in self.receiver.try_iter() {
-            handle_spotify_event(&event, &ctx, &mut self.state, &self.playback);
+            handle_player_event(&event, &ctx, &mut self.state, &self.playback);
+        }
+
+        for event in self.hint_receiver.try_iter() {
+            apply_player_lyrics_hint(event, &mut self.state);
         }
 
         for event in self.cache_receiver.try_iter() {
@@ -209,6 +252,8 @@ impl Controller {
                     current_generation,
                     snapshot: &snapshot,
                     state: &mut self.state.lyrics,
+                    track_offset_ms: &mut self.state.track_offset_ms,
+                    current_offset_generation: self.state.track_offset_generation,
                     config: ctx.config,
                     runtime: ctx.runtime,
                     lyrics_sender: ctx.lyrics_sender,
@@ -218,6 +263,7 @@ impl Controller {
             if applied {
                 self.state.document_dirty = true;
             }
+            ctx.floating.set_track_offset(self.state.track_offset_ms);
         }
 
         for event in self.lyrics_receiver.try_iter() {
@@ -255,7 +301,8 @@ impl Controller {
         let snapshot = self.state.latest.clone();
         if let Some(snapshot) = snapshot {
             if let Some(track) = snapshot.state.track.as_ref() {
-                ensure_lyrics_loaded(track, &ctx, &mut self.state);
+                let lyrics_hint = self.state.lyrics_hint.clone();
+                ensure_lyrics_loaded(track, lyrics_hint.as_ref(), &ctx, &mut self.state);
             }
             sync_lyrics_document(&mut self.state, &snapshot, ctx.config, ctx.floating);
             refresh_lyrics_display(
@@ -264,6 +311,7 @@ impl Controller {
                 ctx.config,
                 &self.state.lyrics,
                 self.state.seek_pending,
+                self.state.track_offset_ms,
             );
         }
         self.state.seek_pending = false;
@@ -291,14 +339,23 @@ fn sync_lyrics_document(
     floating.set_lyrics_document(document);
 }
 
-fn handle_spotify_event(
-    event: &SpotifyWatcherEvent,
+fn handle_player_event(
+    event: &PlayerWatcherEvent,
     ctx: &ControllerContext<'_>,
     controller_state: &mut ControllerState,
     playback: &PlaybackProjection,
 ) {
     match event {
-        SpotifyWatcherEvent::Connected(state) | SpotifyWatcherEvent::Updated(state) => {
+        PlayerWatcherEvent::Connected(state) | PlayerWatcherEvent::Updated(state) => {
+            let previous_fingerprint = controller_state
+                .latest
+                .as_ref()
+                .and_then(|snapshot| snapshot.state.track.as_ref())
+                .map(TrackMetadata::fingerprint);
+            let next_fingerprint = state.track.as_ref().map(TrackMetadata::fingerprint);
+            if previous_fingerprint != next_fingerprint {
+                controller_state.lyrics_hint = None;
+            }
             let jump_detected =
                 playback_jump_detected(controller_state.latest.as_ref(), state.position_ms, state);
             if jump_detected {
@@ -309,9 +366,9 @@ fn handle_spotify_event(
                 received_at: Instant::now(),
             });
             playback.set_current_track(state.track.clone());
-            update_spotify_state(state, ctx, controller_state);
+            update_player_state(state, ctx, controller_state);
         }
-        SpotifyWatcherEvent::PositionUpdated {
+        PlayerWatcherEvent::PositionUpdated {
             track_identity,
             position_ms,
             sampled_at,
@@ -329,50 +386,79 @@ fn handle_spotify_event(
                 }
             }
         }
-        SpotifyWatcherEvent::Disconnected => {
+        PlayerWatcherEvent::Disconnected => {
             controller_state.latest = None;
             controller_state.lyrics = LyricsDisplayState::default();
             controller_state.document_dirty = true;
             playback.set_current_track(None);
+            controller_state.track_offset_ms = 0;
+            controller_state.track_offset_fingerprint = None;
+            controller_state.lyrics_hint = None;
+            ctx.floating.set_track_offset(0);
             ctx.floating.set_song_info("FloatLyrics");
-            ctx.floating.show_status(Text::OpenSpotify);
+            ctx.floating.show_status(Text::OpenPlayer);
         }
-        SpotifyWatcherEvent::Error(message) => {
+        PlayerWatcherEvent::Error(message) => {
             controller_state.latest = None;
             controller_state.lyrics = LyricsDisplayState::default();
             controller_state.document_dirty = true;
             playback.set_current_track(None);
-            tracing::warn!(%message, "Spotify listener error");
+            controller_state.track_offset_ms = 0;
+            controller_state.track_offset_fingerprint = None;
+            controller_state.lyrics_hint = None;
+            ctx.floating.set_track_offset(0);
+            tracing::warn!(%message, "MPRIS listener error");
             ctx.floating.set_song_info("FloatLyrics");
-            ctx.floating.show_status(Text::SpotifyAttention);
+            ctx.floating.show_status(Text::PlayerAttention);
         }
     }
 }
 
-fn update_spotify_state(
-    state: &SpotifyPlayerState,
+fn apply_player_lyrics_hint(event: PlayerLyricsHintEvent, state: &mut ControllerState) {
+    let Some(snapshot) = state.latest.as_ref() else {
+        return;
+    };
+    if snapshot.state.bus_name != event.bus_name
+        || snapshot
+            .state
+            .track
+            .as_ref()
+            .map(TrackMetadata::fingerprint)
+            != event.track_fingerprint
+        || state.lyrics_hint == event.hint
+    {
+        return;
+    }
+
+    state.lyrics_hint = event.hint;
+    state.reload_lyrics();
+}
+
+fn update_player_state(
+    state: &PlayerState,
     ctx: &ControllerContext<'_>,
     controller_state: &mut ControllerState,
 ) {
-    if let Some(track) = &state.track {
-        ctx.cache.record_track(track.clone());
-        ensure_lyrics_loaded(track, ctx, controller_state);
-        update_track_display(
-            state,
-            ctx.floating,
-            ctx.config,
-            &controller_state.lyrics,
-            state.position_ms,
-            controller_state.seek_pending,
-        );
-    } else {
+    let Some(track) = &state.track else {
         ctx.floating.set_song_info("FloatLyrics");
         ctx.floating.show_status(Text::WaitingForMetadata);
-    }
+        return;
+    };
+    ctx.cache.record_track(track.clone());
+    update_track_display(
+        state,
+        ctx.floating,
+        ctx.config,
+        &controller_state.lyrics,
+        state.position_ms,
+        controller_state.seek_pending,
+        controller_state.track_offset_ms,
+    );
 }
 
 fn ensure_lyrics_loaded(
     track: &TrackMetadata,
+    hint: Option<&floatlyrics_lyrics::lyrics::LyricsLookupHint>,
     ctx: &ControllerContext<'_>,
     state: &mut ControllerState,
 ) {
@@ -382,16 +468,55 @@ fn ensure_lyrics_loaded(
     }
 
     state.lyrics_generation = state.lyrics_generation.wrapping_add(1);
+    if state.track_offset_fingerprint.as_deref() != Some(fingerprint.as_str()) {
+        state.track_offset_fingerprint = Some(fingerprint.clone());
+        state.track_offset_generation = state.track_offset_generation.wrapping_add(1);
+        state.track_offset_ms = 0;
+        ctx.floating.set_track_offset(0);
+    }
     let generation = state.lyrics_generation;
     let load_context = LyricsLoadContext {
         cache: ctx.cache,
         config: ctx.config,
         cache_sender: ctx.cache_sender,
         generation,
+        offset_generation: state.track_offset_generation,
+        hint: hint.cloned(),
     };
     let lyrics = load_lyrics_for_track(track, fingerprint, &load_context);
     state.lyrics = lyrics;
     state.document_dirty = true;
+}
+
+fn set_track_offset(
+    state: &mut ControllerState,
+    cache: &CacheService,
+    floating: &dyn LyricsView,
+    offset_ms: i64,
+    persist_unchanged: bool,
+) {
+    let Some(track) = state
+        .latest
+        .as_ref()
+        .and_then(|snapshot| snapshot.state.track.clone())
+    else {
+        return;
+    };
+    let offset_ms = offset_ms.clamp(TRACK_OFFSET_MS_MIN, TRACK_OFFSET_MS_MAX);
+    if state.track_offset_ms == offset_ms && !persist_unchanged {
+        return;
+    }
+
+    state.track_offset_ms = offset_ms;
+    state.track_offset_fingerprint = Some(track.fingerprint());
+    state.track_offset_generation = state.track_offset_generation.wrapping_add(1);
+    state.seek_pending = true;
+    floating.set_track_offset(offset_ms);
+    cache.set_track_offset(track, offset_ms, move |result| {
+        if let Err(error) = result {
+            tracing::warn!(%error, offset_ms, "failed to save per-track lyrics offset");
+        }
+    });
 }
 
 #[cfg(test)]

@@ -1,4 +1,5 @@
 use super::*;
+use crate::backend::mpris::PlayerState;
 use crate::shared::config::AppConfig;
 use floatlyrics_lyrics::lyrics::TimedSyllable;
 use std::time::Duration;
@@ -90,7 +91,7 @@ fn romanization_is_shown_with_translation_and_karaoke() {
     let mut config = runtime_config();
     config.show_romanization = true;
 
-    let text = current_line_text(Some(&line), &config, 1_500);
+    let text = current_line_text(Some(&line), &config, 1_500, config.offset_ms);
 
     assert!(text.karaoke.is_some());
     assert_eq!(text.romanization, "nǐ hǎo");
@@ -111,11 +112,35 @@ fn lyric_frame_uses_stable_key_for_active_line() {
         true,
         false,
         Language::English,
+        0,
     );
     assert_eq!(frame.key, "line:0");
     assert_eq!(frame.content.text, "Hello");
     assert_eq!(frame.position_ms, Some(1_500));
     assert!(frame.playing);
+}
+
+#[test]
+fn lyric_frame_combines_global_and_per_track_offsets() {
+    let state = LyricsDisplayState {
+        lines: vec![test_line()],
+        ..LyricsDisplayState::default()
+    };
+    let mut config = runtime_config();
+    config.offset_ms = 200;
+
+    let frame = lyrics_frame(
+        &state,
+        &config,
+        Some(500),
+        true,
+        false,
+        Language::English,
+        300,
+    );
+
+    assert_eq!(frame.key, "line:0");
+    assert_eq!(frame.position_ms, Some(1_000));
 }
 
 #[test]
@@ -157,7 +182,7 @@ fn snapshot(status: PlaybackStatus, elapsed: Duration) -> PlaybackSnapshot {
     }
 }
 
-fn player_state(title: &str, position_ms: u64) -> SpotifyPlayerState {
+fn player_state(title: &str, position_ms: u64) -> PlayerState {
     player_state_with_status(title, position_ms, PlaybackStatus::Paused)
 }
 
@@ -165,8 +190,8 @@ fn player_state_with_status(
     title: &str,
     position_ms: u64,
     playback_status: PlaybackStatus,
-) -> SpotifyPlayerState {
-    SpotifyPlayerState {
+) -> PlayerState {
+    PlayerState {
         bus_name: "org.mpris.MediaPlayer2.spotify".to_string(),
         playback_status,
         position_ms: Some(position_ms),

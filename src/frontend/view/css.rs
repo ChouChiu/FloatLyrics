@@ -115,6 +115,58 @@ pub(super) fn panel_css(panel_alpha: f64) -> String {
             background: rgba(255,255,255,0.20);
         }
 
+        .floating-offset-control {
+            border: 1px solid rgba(255,255,255,0.16);
+            border-radius: 7px;
+            background: rgba(255,255,255,0.06);
+        }
+
+        .floating-offset-control button {
+            margin: 0;
+            border: none;
+            border-radius: 0;
+            box-shadow: none;
+            background: transparent;
+            transition: 140ms ease;
+        }
+
+        .floating-offset-control button:first-child {
+            border-top-left-radius: 6px;
+            border-bottom-left-radius: 6px;
+        }
+
+        .floating-offset-control button:last-child {
+            border-top-right-radius: 6px;
+            border-bottom-right-radius: 6px;
+        }
+
+        .floating-offset-control button:hover {
+            color: white;
+            background: rgba(255,255,255,0.12);
+        }
+
+        .floating-offset-control button:active {
+            background: rgba(255,255,255,0.20);
+        }
+
+        .floating-offset-step-button {
+            min-width: 20px;
+            min-height: 20px;
+            padding: 2px;
+            color: rgba(255,255,255,0.72);
+        }
+
+        .floating-offset-control .floating-offset-button {
+            min-width: 48px;
+            min-height: 20px;
+            padding: 2px 4px;
+            border-left: 1px solid rgba(255,255,255,0.12);
+            border-right: 1px solid rgba(255,255,255,0.12);
+            color: rgba(255,255,255,0.64);
+            font-size: 11px;
+            font-variant-numeric: tabular-nums;
+        }
+
         .floating-separator {
             margin: 3px 0 1px 0;
             background: rgba(255,255,255,0.24);

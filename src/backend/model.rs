@@ -18,7 +18,7 @@ use crate::shared::{
     runtime::LyricsRuntimeConfig,
 };
 
-use super::mpris::{PlaybackStatus, SpotifyPlayerState};
+use super::mpris::{PlaybackStatus, PlayerState};
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct LyricsDisplayState {
@@ -29,7 +29,7 @@ pub(super) struct LyricsDisplayState {
 
 #[derive(Clone)]
 pub(super) struct PlaybackSnapshot {
-    pub(super) state: SpotifyPlayerState,
+    pub(super) state: PlayerState,
     pub(super) received_at: Instant,
 }
 
@@ -40,6 +40,7 @@ pub(super) fn lyrics_frame(
     playing: bool,
     seeking: bool,
     language: Language,
+    track_offset_ms: i64,
 ) -> LyricsFrame {
     if let Some(message) = &state.status_message {
         return status_frame(message, language);
@@ -51,20 +52,21 @@ pub(super) fn lyrics_frame(
         return status_frame(&Message::Text(Text::WaitingForPosition), language);
     };
 
-    let index = active_line_index(&state.lines, position_ms, config.offset_ms)
-        .or_else(|| line_index_at_or_before(&state.lines, position_ms, config.offset_ms));
+    let offset_ms = config.offset_ms.saturating_add(track_offset_ms);
+    let index = active_line_index(&state.lines, position_ms, offset_ms)
+        .or_else(|| line_index_at_or_before(&state.lines, position_ms, offset_ms));
     match index {
         Some(index) => LyricsFrame {
             key: format!("line:{index}"),
-            content: current_line_text(state.lines.get(index), config, position_ms),
-            position_ms: Some(adjusted_position_ms(position_ms, config.offset_ms)),
+            content: current_line_text(state.lines.get(index), config, position_ms, offset_ms),
+            position_ms: Some(adjusted_position_ms(position_ms, offset_ms)),
             playing,
             seeking,
         },
         None => LyricsFrame {
             key: "before-first-line".to_string(),
             content: LyricSlotText::message("…"),
-            position_ms: Some(adjusted_position_ms(position_ms, config.offset_ms)),
+            position_ms: Some(adjusted_position_ms(position_ms, offset_ms)),
             playing,
             seeking,
         },
@@ -149,6 +151,7 @@ fn current_line_text(
     line: Option<&TimedLine>,
     config: &LyricsRuntimeConfig,
     position_ms: u64,
+    offset_ms: i64,
 ) -> LyricSlotText {
     let mut value = line_text(line, config);
     let Some(line) = line else {
@@ -158,7 +161,7 @@ fn current_line_text(
         value.karaoke = Some(KaraokeRenderState {
             text: line.text.clone(),
             syllables: line.syllables.clone(),
-            position_ms: adjusted_position_ms(position_ms, config.offset_ms),
+            position_ms: adjusted_position_ms(position_ms, offset_ms),
         });
     }
     value
@@ -197,7 +200,7 @@ pub(super) fn effective_position_ms(snapshot: &PlaybackSnapshot) -> Option<u64> 
 pub(super) fn playback_jump_detected(
     previous: Option<&PlaybackSnapshot>,
     next_position_ms: Option<u64>,
-    next: &SpotifyPlayerState,
+    next: &PlayerState,
 ) -> bool {
     let Some(previous) = previous else {
         return true;

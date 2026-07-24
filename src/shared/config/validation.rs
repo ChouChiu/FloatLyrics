@@ -89,6 +89,15 @@ pub(super) fn validate(config: &AppConfig) -> Result<()> {
     {
         bail!("lyrics.font_order must contain only non-empty font names");
     }
+    let effective_preferred_players = config.player.effective_preferred_players();
+    for (name, selectors) in [
+        ("player.preferred_players", &effective_preferred_players),
+        ("player.ignored_players", &config.player.ignored_players),
+    ] {
+        if selectors.iter().any(|selector| selector.trim().is_empty()) {
+            bail!("{name} must contain only non-empty selectors");
+        }
+    }
     for (name, color) in [
         ("lyrics.played_color", &config.lyrics.played_color),
         ("lyrics.unplayed_color", &config.lyrics.unplayed_color),

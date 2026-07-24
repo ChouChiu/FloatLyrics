@@ -6,7 +6,7 @@ use crate::shared::presentation::LyricSlotText;
 fn content_and_status_updates_control_runtime_relocalization() {
     let config = AppConfig::default();
     let mut state = OverlayState::new(&config, 400);
-    assert_eq!(state.static_status(), Some(Text::OpenSpotify));
+    assert_eq!(state.static_status(), Some(Text::OpenPlayer));
 
     state.show_content();
     assert_eq!(state.static_status(), None);

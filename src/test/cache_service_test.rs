@@ -16,7 +16,10 @@ fn worker_serializes_load_store_and_manual_selection() {
     });
     assert_eq!(
         receiver.recv_timeout(Duration::from_secs(3)).unwrap(),
-        Ok(None)
+        Ok(CachedTrack {
+            lyrics: None,
+            offset_ms: 0,
+        })
     );
 
     let (sender, receiver) = mpsc::channel();
@@ -50,7 +53,7 @@ fn worker_serializes_load_store_and_manual_selection() {
     });
     let (worker_name, cached) = receiver.recv_timeout(Duration::from_secs(3)).unwrap();
     assert_eq!(worker_name.as_deref(), Some("floatlyrics-cache"));
-    let cached = cached.unwrap().unwrap();
+    let cached = cached.unwrap().lyrics.unwrap();
     assert_eq!(cached.raw_lyrics, "manual");
     assert!(cached.manually_selected);
 }
@@ -74,6 +77,33 @@ fn dropping_worker_flushes_queued_commands() {
         receiver.recv_timeout(Duration::from_secs(3)).unwrap(),
         Ok(())
     );
+}
+
+#[test]
+fn worker_persists_per_track_offset_with_the_track() {
+    let directory = tempfile::tempdir().unwrap();
+    let worker = CacheWorker::new(&directory.path().join("lyrics.db")).unwrap();
+    let service = worker.service();
+    let track = track();
+    let (sender, receiver) = mpsc::channel();
+
+    service.set_track_offset(track.clone(), 450, move |result| {
+        sender.send(result).unwrap();
+    });
+    assert_eq!(
+        receiver.recv_timeout(Duration::from_secs(3)).unwrap(),
+        Ok(())
+    );
+
+    let (sender, receiver) = mpsc::channel();
+    service.load_track(track, Vec::new(), move |result| {
+        sender.send(result).unwrap();
+    });
+    let loaded = receiver
+        .recv_timeout(Duration::from_secs(3))
+        .unwrap()
+        .unwrap();
+    assert_eq!(loaded.offset_ms, 450);
 }
 
 fn track() -> TrackMetadata {

@@ -24,8 +24,9 @@ pub struct AppConfig {
     pub window: WindowConfig,
     /// Lyrics display and provider preferences.
     pub lyrics: LyricsConfig,
-    /// Spotify-compatible MPRIS preferences.
-    pub spotify: SpotifyConfig,
+    /// MPRIS player discovery and selection preferences.
+    #[serde(alias = "spotify")]
+    pub player: PlayerConfig,
 }
 
 impl AppConfig {
@@ -187,18 +188,44 @@ pub fn format_hex_color(color: (f64, f64, f64, f64)) -> String {
     )
 }
 
-/// Spotify-compatible MPRIS discovery preferences.
+/// MPRIS player discovery and selection preferences.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
-pub struct SpotifyConfig {
-    /// D-Bus well-known-name prefix accepted as a player instance.
-    pub mpris_prefix: String,
+pub struct PlayerConfig {
+    /// Player selectors preferred when several players have the same playback state.
+    ///
+    /// A selector matches either a complete MPRIS bus name, its suffix after
+    /// `org.mpris.MediaPlayer2.`, or the player's MPRIS identity.
+    pub preferred_players: Vec<String>,
+    /// Player selectors excluded from automatic discovery.
+    pub ignored_players: Vec<String>,
+    #[serde(default, rename = "mpris_prefix", skip_serializing)]
+    legacy_mpris_prefix: Option<String>,
 }
 
-impl Default for SpotifyConfig {
+impl Default for PlayerConfig {
     fn default() -> Self {
         Self {
-            mpris_prefix: default_spotify_prefix(),
+            preferred_players: vec!["spotify".to_string()],
+            ignored_players: Vec::new(),
+            legacy_mpris_prefix: None,
+        }
+    }
+}
+
+impl PlayerConfig {
+    /// Returns the effective preferred-player selectors, including the former
+    /// `spotify.mpris_prefix` representation when loading an older config.
+    pub fn effective_preferred_players(&self) -> Vec<String> {
+        self.legacy_mpris_prefix.as_ref().map_or_else(
+            || self.preferred_players.clone(),
+            |prefix| vec![prefix.clone()],
+        )
+    }
+
+    fn normalize_legacy(&mut self) {
+        if let Some(prefix) = self.legacy_mpris_prefix.take() {
+            self.preferred_players = vec![prefix];
         }
     }
 }
@@ -253,10 +280,6 @@ fn default_translation_color() -> String {
 
 fn default_romanization_color() -> String {
     "#B8D8F0E6".to_string()
-}
-
-fn default_spotify_prefix() -> String {
-    "org.mpris.MediaPlayer2.spotify".to_string()
 }
 
 #[cfg(test)]

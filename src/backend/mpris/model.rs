@@ -12,11 +12,11 @@ use floatlyrics_core::track::TrackMetadata;
 
 /// State change emitted by the background MPRIS watcher.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SpotifyWatcherEvent {
+pub enum PlayerWatcherEvent {
     /// A matching player appeared with its initial state.
-    Connected(SpotifyPlayerState),
+    Connected(PlayerState),
     /// Metadata or playback status changed.
-    Updated(SpotifyPlayerState),
+    Updated(PlayerState),
     /// A new authoritative playback position sample arrived.
     PositionUpdated {
         /// Identity of the sampled track, when known.
@@ -32,9 +32,9 @@ pub enum SpotifyWatcherEvent {
     Error(String),
 }
 
-/// Latest known state for one Spotify-compatible MPRIS player.
+/// Latest known state for one MPRIS player.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SpotifyPlayerState {
+pub struct PlayerState {
     /// D-Bus well-known name of the player instance.
     pub bus_name: String,
     /// Current playback status.
@@ -47,7 +47,7 @@ pub struct SpotifyPlayerState {
 
 /// Typed subset of MPRIS metadata used by FloatLyrics.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SpotifyMetadata {
+pub struct MprisMetadata {
     /// Track title.
     pub title: String,
     /// Track artists.
@@ -64,16 +64,21 @@ pub struct SpotifyMetadata {
 ///
 /// Returns `None` when required title metadata is absent or has an unexpected
 /// D-Bus type.
-pub fn spotify_metadata_from_mpris(
-    metadata: &HashMap<String, OwnedValue>,
-) -> Option<SpotifyMetadata> {
-    Some(SpotifyMetadata {
+pub fn metadata_from_mpris(metadata: &HashMap<String, OwnedValue>) -> Option<MprisMetadata> {
+    Some(MprisMetadata {
         title: string_value(metadata.get("xesam:title")?)?,
-        artists: string_vec_value(metadata.get("xesam:artist")?).unwrap_or_default(),
+        artists: metadata
+            .get("xesam:artist")
+            .and_then(string_vec_value)
+            .unwrap_or_default(),
         album: metadata.get("xesam:album").and_then(string_value),
         length_us: metadata.get("mpris:length").and_then(u64_value),
-        track_id: metadata.get("mpris:trackid").and_then(object_path_value),
+        track_id: metadata.get("mpris:trackid").and_then(track_id_value),
     })
+}
+
+pub(super) fn source_url_from_mpris(metadata: &HashMap<String, OwnedValue>) -> Option<String> {
+    metadata.get("xesam:url").and_then(string_value)
 }
 
 fn string_value(value: &OwnedValue) -> Option<String> {
@@ -94,17 +99,18 @@ fn object_path_value(value: &OwnedValue) -> Option<String> {
         .map(|path| path.to_string())
 }
 
-impl SpotifyMetadata {
+fn track_id_value(value: &OwnedValue) -> Option<String> {
+    object_path_value(value).or_else(|| string_value(value))
+}
+
+impl MprisMetadata {
     /// Validates and converts MPRIS metadata into shared track metadata.
     ///
     /// # Errors
-    /// Returns an error when the title or usable artist list is empty.
+    /// Returns an error when the title is empty.
     pub fn into_track_metadata(self) -> Result<TrackMetadata> {
         if self.title.trim().is_empty() {
-            anyhow::bail!("Spotify metadata did not include a title");
-        }
-        if self.artists.is_empty() {
-            anyhow::bail!("Spotify metadata did not include artists");
+            anyhow::bail!("MPRIS metadata did not include a title");
         }
 
         let track = TrackMetadata {
@@ -123,16 +129,26 @@ impl SpotifyMetadata {
             mpris_track_id: self.track_id,
         };
 
-        if track.artists.is_empty() {
-            anyhow::bail!("Spotify metadata did not include usable artists");
-        }
-
         Ok(track)
     }
 }
 
+/// Compatibility alias for the former Spotify-specific event name.
+pub type SpotifyWatcherEvent = PlayerWatcherEvent;
+/// Compatibility alias for the former Spotify-specific player-state name.
+pub type SpotifyPlayerState = PlayerState;
+/// Compatibility alias for the former Spotify-specific metadata name.
+pub type SpotifyMetadata = MprisMetadata;
+
+/// Compatibility wrapper for the former Spotify-specific conversion function.
+pub fn spotify_metadata_from_mpris(
+    metadata: &HashMap<String, OwnedValue>,
+) -> Option<MprisMetadata> {
+    metadata_from_mpris(metadata)
+}
+
 /// Normalized MPRIS playback status.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaybackStatus {
     /// Playback is advancing.
     Playing,

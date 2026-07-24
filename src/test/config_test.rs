@@ -10,6 +10,14 @@ fn default_provider_order_matches_plan() {
 }
 
 #[test]
+fn default_player_selection_prefers_spotify_without_excluding_other_players() {
+    let player = AppConfig::default().player;
+
+    assert_eq!(player.effective_preferred_players(), ["spotify"]);
+    assert!(player.ignored_players.is_empty());
+}
+
+#[test]
 fn default_window_uses_compact_width() {
     assert_eq!(AppConfig::default().window.width, 350);
     assert!(AppConfig::default().window.remember_position);
@@ -210,6 +218,35 @@ fn load_recovers_type_and_enum_changes_field_by_field() {
 }
 
 #[test]
+fn legacy_spotify_prefix_loads_and_saves_as_generic_player_config() {
+    let mut value = toml::Value::try_from(AppConfig::default()).unwrap();
+    value.as_table_mut().unwrap().remove("player");
+    value.as_table_mut().unwrap().insert(
+        "spotify".to_string(),
+        toml::Value::Table(toml::Table::from_iter([(
+            "mpris_prefix".to_string(),
+            toml::Value::String("org.mpris.MediaPlayer2.spotifyd".to_string()),
+        )])),
+    );
+    let legacy = toml::to_string(&value).unwrap();
+    let config: AppConfig = toml::from_str(&legacy).unwrap();
+
+    assert_eq!(
+        config.player.effective_preferred_players(),
+        ["org.mpris.MediaPlayer2.spotifyd"]
+    );
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+    config.save(&path).unwrap();
+    let saved = fs::read_to_string(path).unwrap();
+    assert!(saved.contains("[player]"));
+    assert!(saved.contains("org.mpris.MediaPlayer2.spotifyd"));
+    assert!(!saved.contains("[spotify]"));
+    assert!(!saved.contains("mpris_prefix"));
+}
+
+#[test]
 fn malformed_or_non_utf8_config_falls_back_without_losing_original_bytes() {
     for original in [b"[window\nwidth = 500".as_slice(), &[0xff, 0xfe, 0xfd]] {
         let directory = tempfile::tempdir().unwrap();
@@ -288,6 +325,8 @@ fn validates_every_numeric_preference_at_its_boundary() {
     assert_invalid(|config| {
         config.lyrics.romanization_font_size = ConfigLimits::SECONDARY_FONT_SIZE_MAX + 1;
     });
+    assert_invalid(|config| config.player.preferred_players = vec![" ".to_string()]);
+    assert_invalid(|config| config.player.ignored_players = vec!["".to_string()]);
 }
 
 #[test]

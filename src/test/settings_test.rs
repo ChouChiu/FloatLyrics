@@ -50,5 +50,5 @@ fn config_change_updates_only_its_owned_preference() {
     assert_eq!(config.lyrics.offset_ms, -375);
     assert_eq!(config.general, original.general);
     assert_eq!(config.window, original.window);
-    assert_eq!(config.spotify, original.spotify);
+    assert_eq!(config.player, original.player);
 }

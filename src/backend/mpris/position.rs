@@ -5,7 +5,7 @@
 
 use floatlyrics_core::track::TrackMetadata;
 
-use super::model::SpotifyPlayerState;
+use super::model::PlayerState;
 
 pub(super) fn position_us_to_ms(position_us: i64) -> Option<u64> {
     if position_us >= 0 {
@@ -15,6 +15,6 @@ pub(super) fn position_us_to_ms(position_us: i64) -> Option<u64> {
     }
 }
 
-pub(super) fn player_track_identity(state: &SpotifyPlayerState) -> Option<String> {
+pub(super) fn player_track_identity(state: &PlayerState) -> Option<String> {
     state.track.as_ref().map(TrackMetadata::playback_identity)
 }

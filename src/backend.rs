@@ -36,22 +36,30 @@ impl Backend {
         Ok(Self { runtime, cache })
     }
 
-    pub(crate) fn spawn_spotify_watcher(
+    pub(crate) fn spawn_player_watcher(
         &self,
-        sender: mpsc::Sender<mpris::SpotifyWatcherEvent>,
-        prefix: String,
+        sender: mpsc::Sender<mpris::PlayerWatcherEvent>,
+        hint_sender: mpsc::Sender<mpris::PlayerLyricsHintEvent>,
+        selection: mpris::PlayerSelection,
     ) {
-        mpris::spawn_spotify_watcher_with_prefix(self.runtime.handle(), sender, prefix);
+        mpris::spawn_player_watcher_with_hints(
+            self.runtime.handle(),
+            sender,
+            hint_sender,
+            selection,
+        );
     }
 
     pub(crate) fn controller(
         &self,
-        receiver: mpsc::Receiver<mpris::SpotifyWatcherEvent>,
+        receiver: mpsc::Receiver<mpris::PlayerWatcherEvent>,
+        hint_receiver: mpsc::Receiver<mpris::PlayerLyricsHintEvent>,
         floating: Rc<dyn LyricsView>,
         config: LyricsRuntimeConfig,
     ) -> Controller {
         Controller::new(
             receiver,
+            hint_receiver,
             self.runtime.handle().clone(),
             floating,
             self.cache.service(),

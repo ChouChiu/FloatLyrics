@@ -3,7 +3,7 @@ use std::{sync::mpsc, time::Duration, time::Instant};
 
 use crate::{
     backend::{
-        cache::{CacheWorker, ProviderStoreError},
+        cache::{CacheWorker, CachedTrack, ProviderStoreError},
         controller::loading::{
             LyricsCacheApplyContext, LyricsCacheEvent, apply_lyrics_cache_event,
         },
@@ -12,7 +12,10 @@ use crate::{
     shared::config::AppConfig,
 };
 use floatlyrics_core::{i18n::Message, track::TrackMetadata};
-use floatlyrics_lyrics::lyrics::{FetchedLyrics, LyricsProvider, TimedLine};
+use floatlyrics_lyrics::{
+    cache::CachedLyrics,
+    lyrics::{FetchedLyrics, LyricsLookupHint, LyricsProvider, TimedLine},
+};
 
 #[test]
 fn background_fetch_failure_preserves_loaded_lyrics() {
@@ -123,8 +126,10 @@ fn obsolete_same_track_cache_generation_is_ignored() {
     let mut state = searching_state(&fingerprint);
     let event = LyricsCacheEvent::TrackLoaded {
         track: snapshot.state.track.clone().unwrap(),
+        hint: None,
         track_fingerprint: fingerprint,
         generation: 4,
+        offset_generation: 2,
         result: Err("stale cache failure".to_string()),
     };
 
@@ -156,7 +161,10 @@ fn accepted_fetch_is_persisted_and_reloaded_as_display_state() {
     );
     assert_eq!(
         load_receiver.recv_timeout(Duration::from_secs(3)).unwrap(),
-        Ok(None)
+        Ok(CachedTrack {
+            lyrics: None,
+            offset_ms: 0,
+        })
     );
     let snapshot = PlaybackSnapshot {
         state: player,
@@ -165,6 +173,7 @@ fn accepted_fetch_is_persisted_and_reloaded_as_display_state() {
     let mut state = searching_state(&fingerprint);
     let config = LyricsRuntimeConfig::from(&AppConfig::default());
     let (romanization_sender, _romanization_receiver) = mpsc::channel();
+    let mut track_offset_ms = 0;
     let (cache_sender, cache_receiver) = mpsc::channel();
     let event = LyricsFetchEvent {
         track_fingerprint: fingerprint.clone(),
@@ -199,6 +208,8 @@ fn accepted_fetch_is_persisted_and_reloaded_as_display_state() {
             current_generation: 7,
             snapshot: &snapshot,
             state: &mut state,
+            track_offset_ms: &mut track_offset_ms,
+            current_offset_generation: 0,
             config: &config,
             runtime: runtime.handle(),
             lyrics_sender: &lyrics_sender,
@@ -216,8 +227,150 @@ fn accepted_fetch_is_persisted_and_reloaded_as_display_state() {
         .recv_timeout(Duration::from_secs(3))
         .unwrap()
         .unwrap()
+        .lyrics
         .unwrap();
     assert_eq!(cached.provider_track_id.as_deref(), Some("provider-song"));
+}
+
+#[test]
+fn track_cache_load_applies_remembered_offset_without_cached_lyrics() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let snapshot = PlaybackSnapshot {
+        state: player_state("Song", 10_000),
+        received_at: Instant::now(),
+    };
+    let fingerprint = snapshot.state.track.as_ref().unwrap().fingerprint();
+    let mut state = searching_state(&fingerprint);
+    let mut config = LyricsRuntimeConfig::from(&AppConfig::default());
+    config.provider_order.clear();
+    let (lyrics_sender, _lyrics_receiver) = mpsc::channel();
+    let (romanization_sender, _romanization_receiver) = mpsc::channel();
+    let mut track_offset_ms = 0;
+
+    let applied = apply_lyrics_cache_event(
+        LyricsCacheEvent::TrackLoaded {
+            track: snapshot.state.track.as_ref().unwrap().clone(),
+            hint: None,
+            track_fingerprint: fingerprint,
+            generation: 4,
+            offset_generation: 6,
+            result: Ok(CachedTrack {
+                lyrics: None,
+                offset_ms: -450,
+            }),
+        },
+        &mut LyricsCacheApplyContext {
+            current_generation: 4,
+            snapshot: &snapshot,
+            state: &mut state,
+            track_offset_ms: &mut track_offset_ms,
+            current_offset_generation: 6,
+            config: &config,
+            runtime: runtime.handle(),
+            lyrics_sender: &lyrics_sender,
+            romanization_sender: &romanization_sender,
+        },
+    );
+
+    assert!(!applied);
+    assert_eq!(track_offset_ms, -450);
+}
+
+#[test]
+fn stale_offset_load_does_not_overwrite_a_new_user_adjustment() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let snapshot = PlaybackSnapshot {
+        state: player_state("Song", 10_000),
+        received_at: Instant::now(),
+    };
+    let fingerprint = snapshot.state.track.as_ref().unwrap().fingerprint();
+    let mut state = searching_state(&fingerprint);
+    let mut config = LyricsRuntimeConfig::from(&AppConfig::default());
+    config.provider_order.clear();
+    let (lyrics_sender, _lyrics_receiver) = mpsc::channel();
+    let (romanization_sender, _romanization_receiver) = mpsc::channel();
+    let mut track_offset_ms = 100;
+
+    apply_lyrics_cache_event(
+        LyricsCacheEvent::TrackLoaded {
+            track: snapshot.state.track.as_ref().unwrap().clone(),
+            hint: None,
+            track_fingerprint: fingerprint,
+            generation: 4,
+            offset_generation: 6,
+            result: Ok(CachedTrack {
+                lyrics: None,
+                offset_ms: -450,
+            }),
+        },
+        &mut LyricsCacheApplyContext {
+            current_generation: 4,
+            snapshot: &snapshot,
+            state: &mut state,
+            track_offset_ms: &mut track_offset_ms,
+            current_offset_generation: 7,
+            config: &config,
+            runtime: runtime.handle(),
+            lyrics_sender: &lyrics_sender,
+            romanization_sender: &romanization_sender,
+        },
+    );
+
+    assert_eq!(track_offset_ms, 100);
+}
+
+#[test]
+fn exact_player_hint_refreshes_only_automatic_cache_from_an_enabled_provider() {
+    let config = LyricsRuntimeConfig::from(&AppConfig::default());
+    let hint = LyricsLookupHint {
+        provider: LyricsProvider::NetEase,
+        provider_track_id: "123".to_string(),
+    };
+    let mut cached = CachedLyrics {
+        manually_selected: false,
+        id: 1,
+        provider: LyricsProvider::NetEase,
+        provider_track_id: Some("old".to_string()),
+        title: "Song".to_string(),
+        artists: vec!["Artist".to_string()],
+        raw_lyrics: "[00:01.00]Hello".to_string(),
+    };
+
+    assert!(super::super::hint_requires_refresh(
+        &cached,
+        Some(&hint),
+        &config
+    ));
+
+    cached.manually_selected = true;
+    assert!(!super::super::hint_requires_refresh(
+        &cached,
+        Some(&hint),
+        &config
+    ));
+
+    cached.manually_selected = false;
+    let mut disabled = config.clone();
+    disabled.provider_order = vec![LyricsProvider::QqMusic];
+    assert!(!super::super::hint_requires_refresh(
+        &cached,
+        Some(&hint),
+        &disabled
+    ));
+
+    let earlier_provider_cache = CachedLyrics {
+        provider: LyricsProvider::QqMusic,
+        ..cached
+    };
+    assert!(!super::super::hint_requires_refresh(
+        &earlier_provider_cache,
+        Some(&hint),
+        &config
+    ));
 }
 
 fn apply_cache_event(
@@ -232,12 +385,15 @@ fn apply_cache_event(
     let config = LyricsRuntimeConfig::from(&AppConfig::default());
     let (lyrics_sender, _lyrics_receiver) = mpsc::channel();
     let (romanization_sender, _romanization_receiver) = mpsc::channel();
+    let mut track_offset_ms = 0;
     apply_lyrics_cache_event(
         event,
         &mut LyricsCacheApplyContext {
             current_generation: generation,
             snapshot,
             state,
+            track_offset_ms: &mut track_offset_ms,
+            current_offset_generation: 0,
             config: &config,
             runtime: runtime.handle(),
             lyrics_sender: &lyrics_sender,

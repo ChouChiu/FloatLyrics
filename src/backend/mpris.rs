@@ -1,23 +1,26 @@
 // SPDX-FileCopyrightText: 2026 ChouChiu
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Backend Spotify MPRIS facade.
+//! Backend MPRIS facade.
 //!
 //! D-Bus watching, metadata models, and position synchronization are isolated
 //! behind focused modules.
 
+mod compat;
 mod model;
 mod position;
 mod watcher;
 
 pub use model::{
-    PlaybackStatus, SpotifyMetadata, SpotifyPlayerState, SpotifyWatcherEvent,
-    spotify_metadata_from_mpris,
+    MprisMetadata, PlaybackStatus, PlayerState, PlayerWatcherEvent, SpotifyMetadata,
+    SpotifyPlayerState, SpotifyWatcherEvent, metadata_from_mpris, spotify_metadata_from_mpris,
 };
 pub use watcher::{
-    SPOTIFY_MPRIS_PREFIX, is_spotify_mpris_name, spawn_spotify_watcher,
+    MPRIS_BUS_PREFIX, PlayerSelection, SPOTIFY_MPRIS_PREFIX, is_spotify_mpris_name,
+    mpris_player_names, spawn_player_watcher, spawn_spotify_watcher,
     spawn_spotify_watcher_with_prefix, spotify_mpris_names,
 };
+pub(crate) use watcher::{PlayerLyricsHintEvent, spawn_player_watcher_with_hints};
 
 #[cfg(test)]
 #[path = "../test/mpris_test.rs"]

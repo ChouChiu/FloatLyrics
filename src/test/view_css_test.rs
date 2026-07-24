@@ -14,3 +14,12 @@ fn font_css_quotes_and_escapes_every_family() {
     assert!(css.contains(r#""Family \"Quoted\"""#));
     assert!(css.contains(r#""Back\\Slash""#));
 }
+
+#[test]
+fn panel_css_groups_the_per_track_offset_buttons() {
+    let css = panel_css(0.5);
+
+    assert!(css.contains(".floating-offset-control {"));
+    assert!(css.contains(".floating-offset-control button:first-child"));
+    assert!(css.contains(".floating-offset-control .floating-offset-button {"));
+}

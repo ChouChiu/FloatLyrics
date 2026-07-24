@@ -49,6 +49,7 @@ struct AppModel {
     about: Controller<about::AboutModel>,
     controller: backend::Controller,
     song_info: String,
+    track_offset_ms: i64,
     lyrics: LyricsPresentation,
     lyrics_document: Option<LyricsDocument>,
     _backend: backend::Backend,
@@ -64,12 +65,15 @@ enum LyricsPresentation {
 enum AppMsg {
     Tick,
     SetSongInfo(String),
+    SetTrackOffset(i64),
     SetLyricsDocument(LyricsDocument),
     ShowLyrics(LyricsFrame),
     ShowStatus(floatlyrics_core::i18n::Text),
     OpenSettings,
     OpenManualSearch,
     OpenAbout,
+    AdjustTrackOffset(i64),
+    ResetTrackOffset,
     WindowMoved(WindowPosition),
     ConfigChanged(AppConfig),
     Quit,
@@ -120,11 +124,21 @@ impl SimpleComponent for AppModel {
         } = init;
         let i18n = I18n::new(config.general.language);
         let overlay = view::build(&root, &config, i18n.clone(), sender.input_sender().clone());
-        let (spotify_sender, spotify_receiver) = mpsc::channel();
-        backend.spawn_spotify_watcher(spotify_sender, config.spotify.mpris_prefix.clone());
+        let (player_sender, player_receiver) = mpsc::channel();
+        let (player_hint_sender, player_hint_receiver) = mpsc::channel();
+        backend.spawn_player_watcher(
+            player_sender,
+            player_hint_sender,
+            backend::mpris::PlayerSelection {
+                preferred_players: config.player.effective_preferred_players(),
+                ignored_players: config.player.ignored_players.clone(),
+                allowed_bus_prefixes: Vec::new(),
+            },
+        );
         let controller_config = LyricsRuntimeConfig::from(&config);
         let controller = backend.controller(
-            spotify_receiver,
+            player_receiver,
+            player_hint_receiver,
             Rc::new(view::OverlaySender::new(sender.input_sender().clone())),
             controller_config,
         );
@@ -165,7 +179,8 @@ impl SimpleComponent for AppModel {
             about,
             controller,
             song_info: "FloatLyrics".to_string(),
-            lyrics: LyricsPresentation::Status(floatlyrics_core::i18n::Text::OpenSpotify),
+            track_offset_ms: 0,
+            lyrics: LyricsPresentation::Status(floatlyrics_core::i18n::Text::OpenPlayer),
             lyrics_document: None,
             _backend: backend,
         };
@@ -177,6 +192,7 @@ impl SimpleComponent for AppModel {
         match message {
             AppMsg::Tick => self.controller.tick(),
             AppMsg::SetSongInfo(value) => self.song_info = value,
+            AppMsg::SetTrackOffset(value) => self.track_offset_ms = value,
             AppMsg::SetLyricsDocument(document) => self.lyrics_document = Some(document),
             AppMsg::ShowLyrics(frame) => self.lyrics = LyricsPresentation::Content(frame),
             AppMsg::ShowStatus(key) => self.lyrics = LyricsPresentation::Status(key),
@@ -191,6 +207,12 @@ impl SimpleComponent for AppModel {
             }
             AppMsg::OpenAbout => {
                 let _ = self.about.sender().send(about::AboutMsg::Show);
+            }
+            AppMsg::AdjustTrackOffset(delta_ms) => {
+                self.controller.handle().adjust_track_offset(delta_ms);
+            }
+            AppMsg::ResetTrackOffset => {
+                self.controller.handle().reset_track_offset();
             }
             AppMsg::WindowMoved(position) => {
                 if self.config.window.remember_position {
@@ -217,6 +239,7 @@ impl SimpleComponent for AppModel {
 
     fn post_view() {
         self.overlay.set_song_info(&self.song_info);
+        self.overlay.set_track_offset(self.track_offset_ms);
         if let Some(document) = &self.lyrics_document {
             self.overlay.set_lyrics_document(document);
         }

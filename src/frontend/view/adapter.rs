@@ -32,6 +32,10 @@ impl LyricsView for OverlaySender {
         let _ = self.sender.send(AppMsg::SetSongInfo(value.to_string()));
     }
 
+    fn set_track_offset(&self, offset_ms: i64) {
+        let _ = self.sender.send(AppMsg::SetTrackOffset(offset_ms));
+    }
+
     fn set_lyrics_document(&self, document: LyricsDocument) {
         let _ = self.sender.send(AppMsg::SetLyricsDocument(document));
     }

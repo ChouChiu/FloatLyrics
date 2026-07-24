@@ -100,7 +100,7 @@ impl OverlayState {
                 translation_font_size: config.lyrics.translation_font_size,
                 apple_music_style: config.lyrics.apple_music_style,
             },
-            static_status: Some(Text::OpenSpotify),
+            static_status: Some(Text::OpenPlayer),
             last_lyrics_layout: None,
             animation_generation: 0,
         }

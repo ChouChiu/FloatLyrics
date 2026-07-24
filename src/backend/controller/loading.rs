@@ -17,11 +17,11 @@ use floatlyrics_core::{
     i18n::{Message, Text},
     track::TrackMetadata,
 };
-use floatlyrics_lyrics::cache::CachedLyrics;
+use floatlyrics_lyrics::{cache::CachedLyrics, lyrics::LyricsLookupHint};
 
 use crate::{
     backend::{
-        cache::{CacheService, ProviderStoreError},
+        cache::{CacheService, CachedTrack, ProviderStoreError},
         model::{LyricsDisplayState, PlaybackSnapshot},
     },
     shared::runtime::LyricsRuntimeConfig,
@@ -37,9 +37,11 @@ pub(super) use romanization::{RomanizationEvent, apply_romanization_event};
 pub(super) enum LyricsCacheEvent {
     TrackLoaded {
         track: TrackMetadata,
+        hint: Option<LyricsLookupHint>,
         track_fingerprint: String,
         generation: u64,
-        result: Result<Option<CachedLyrics>, String>,
+        offset_generation: u64,
+        result: Result<CachedTrack, String>,
     },
     ProviderStored {
         track_fingerprint: String,
@@ -53,6 +55,8 @@ pub(super) struct LyricsLoadContext<'a> {
     pub(super) config: &'a LyricsRuntimeConfig,
     pub(super) cache_sender: &'a mpsc::Sender<LyricsCacheEvent>,
     pub(super) generation: u64,
+    pub(super) offset_generation: u64,
+    pub(super) hint: Option<LyricsLookupHint>,
 }
 
 pub(super) fn load_lyrics_for_track(
@@ -63,14 +67,18 @@ pub(super) fn load_lyrics_for_track(
     let provider_order = active_provider_order(ctx.config);
     let sender = ctx.cache_sender.clone();
     let event_track = track.clone();
+    let event_hint = ctx.hint.clone();
     let event_fingerprint = fingerprint.clone();
     let generation = ctx.generation;
+    let offset_generation = ctx.offset_generation;
     ctx.cache
         .load_track(track.clone(), provider_order, move |result| {
             let _ = sender.send(LyricsCacheEvent::TrackLoaded {
                 track: event_track,
+                hint: event_hint,
                 track_fingerprint: event_fingerprint,
                 generation,
+                offset_generation,
                 result,
             });
         });
@@ -86,6 +94,8 @@ pub(super) struct LyricsCacheApplyContext<'a> {
     pub(super) current_generation: u64,
     pub(super) snapshot: &'a PlaybackSnapshot,
     pub(super) state: &'a mut LyricsDisplayState,
+    pub(super) track_offset_ms: &'a mut i64,
+    pub(super) current_offset_generation: u64,
     pub(super) config: &'a LyricsRuntimeConfig,
     pub(super) runtime: &'a tokio::runtime::Handle,
     pub(super) lyrics_sender: &'a mpsc::Sender<LyricsFetchEvent>,
@@ -123,10 +133,20 @@ pub(super) fn apply_lyrics_cache_event(
     match event {
         LyricsCacheEvent::TrackLoaded {
             track,
+            hint,
             track_fingerprint,
             generation,
+            offset_generation,
             result,
-        } => apply_track_cache_result(track, track_fingerprint, generation, result, ctx),
+        } => apply_track_cache_result(
+            track,
+            hint,
+            track_fingerprint,
+            generation,
+            offset_generation,
+            result,
+            ctx,
+        ),
         LyricsCacheEvent::ProviderStored {
             track_fingerprint,
             result,
@@ -175,13 +195,21 @@ pub(super) fn apply_lyrics_cache_event(
 
 fn apply_track_cache_result(
     track: TrackMetadata,
+    hint: Option<LyricsLookupHint>,
     fingerprint: String,
     generation: u64,
-    result: Result<Option<CachedLyrics>, String>,
+    offset_generation: u64,
+    result: Result<CachedTrack, String>,
     ctx: &mut LyricsCacheApplyContext<'_>,
 ) -> bool {
     match result {
-        Ok(Some(cached)) => {
+        Ok(CachedTrack {
+            lyrics: Some(cached),
+            offset_ms,
+        }) => {
+            if offset_generation == ctx.current_offset_generation {
+                *ctx.track_offset_ms = offset_ms;
+            }
             let state = lyrics_state_from_cached(
                 fingerprint.clone(),
                 &cached,
@@ -189,11 +217,14 @@ fn apply_track_cache_result(
                 ctx.runtime,
                 ctx.romanization_sender,
             );
-            if should_refresh_translation(&cached, &state, ctx.config) {
+            let should_refresh = should_refresh_translation(&cached, &state, ctx.config)
+                || hint_requires_refresh(&cached, hint.as_ref(), ctx.config);
+            if should_refresh {
                 spawn_lyrics_fetch(
                     ctx.runtime,
                     ctx.lyrics_sender.clone(),
                     track,
+                    hint,
                     active_provider_order(ctx.config),
                     fingerprint,
                     generation,
@@ -202,11 +233,18 @@ fn apply_track_cache_result(
             *ctx.state = state;
             true
         }
-        Ok(None) => {
+        Ok(CachedTrack {
+            lyrics: None,
+            offset_ms,
+        }) => {
+            if offset_generation == ctx.current_offset_generation {
+                *ctx.track_offset_ms = offset_ms;
+            }
             spawn_lyrics_fetch(
                 ctx.runtime,
                 ctx.lyrics_sender.clone(),
                 track,
+                hint,
                 active_provider_order(ctx.config),
                 fingerprint,
                 generation,
@@ -222,4 +260,28 @@ fn apply_track_cache_result(
             true
         }
     }
+}
+
+fn hint_requires_refresh(
+    cached: &CachedLyrics,
+    hint: Option<&LyricsLookupHint>,
+    config: &LyricsRuntimeConfig,
+) -> bool {
+    let Some(hint) = hint else {
+        return false;
+    };
+    let provider_order = active_provider_order(config);
+    let Some(hint_index) = provider_order
+        .iter()
+        .position(|provider| *provider == hint.provider)
+    else {
+        return false;
+    };
+    let cached_index = provider_order
+        .iter()
+        .position(|provider| *provider == cached.provider);
+    !cached.manually_selected
+        && cached_index.is_none_or(|cached_index| hint_index <= cached_index)
+        && (cached.provider != hint.provider
+            || cached.provider_track_id.as_deref() != Some(hint.provider_track_id.as_str()))
 }

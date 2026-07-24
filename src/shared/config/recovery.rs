@@ -181,11 +181,27 @@ pub(super) fn recover_fields(content: &str) -> AppConfig {
 
     apply(
         &value,
-        "spotify",
-        "mpris_prefix",
-        &mut config.spotify.mpris_prefix,
-        |_| true,
+        "player",
+        "preferred_players",
+        &mut config.player.preferred_players,
+        |selectors| valid_player_selectors(selectors),
     );
+    apply(
+        &value,
+        "player",
+        "ignored_players",
+        &mut config.player.ignored_players,
+        |selectors| valid_player_selectors(selectors),
+    );
+    if let Some(prefix) = value
+        .get("spotify")
+        .and_then(|section| section.get("mpris_prefix"))
+        .and_then(toml::Value::as_str)
+        .map(str::trim)
+        .filter(|prefix| !prefix.is_empty())
+    {
+        config.player.preferred_players = vec![prefix.to_string()];
+    }
 
     config
 }
@@ -266,4 +282,8 @@ fn valid_position(position: &Option<WindowPosition>) -> bool {
             && position.vertical.is_finite()
             && (0.0..=1.0).contains(&position.vertical)
     })
+}
+
+fn valid_player_selectors(selectors: &[String]) -> bool {
+    selectors.iter().all(|selector| !selector.trim().is_empty())
 }

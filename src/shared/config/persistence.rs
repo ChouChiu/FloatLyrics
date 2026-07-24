@@ -70,13 +70,15 @@ impl AppConfig {
     /// Returns an error when validation, serialization, directory creation,
     /// writing, or replacement fails. A failed write cleans up its temporary file.
     pub fn save(&self, path: &Path) -> Result<()> {
-        self.validate().context("validating config")?;
+        let mut persisted = self.clone();
+        persisted.player.normalize_legacy();
+        persisted.validate().context("validating config")?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .with_context(|| format!("creating config directory {}", parent.display()))?;
         }
 
-        let content = toml::to_string_pretty(self).context("serializing config")?;
+        let content = toml::to_string_pretty(&persisted).context("serializing config")?;
         let temporary = temporary_config_path(path)?;
         if let Err(error) = fs::write(&temporary, content)
             .with_context(|| format!("writing temporary config file {}", temporary.display()))

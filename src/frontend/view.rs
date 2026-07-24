@@ -6,7 +6,7 @@
 use cairo::RectangleInt;
 use gtk::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
-use std::cell::Cell;
+use std::{cell::Cell, rc::Rc};
 
 use floatlyrics_core::i18n::{I18n, Text};
 
@@ -94,6 +94,8 @@ pub(super) struct OverlayView {
     style: OverlayStyle,
     placement: PlacementState,
     song_info: gtk::Label,
+    track_offset_button: gtk::Button,
+    track_offset_ms: Rc<Cell<i64>>,
     lyrics_viewport: gtk::Box,
     web_lyrics: WebLyricsView,
     i18n: I18n,
@@ -163,6 +165,9 @@ pub(super) fn build(
 
     let panel = panel::build(panel_width, viewport_h, sender.clone());
     let song_info = panel.song_info;
+    let offset_decrease_button = panel.offset_decrease_button;
+    let track_offset_button = panel.track_offset_button;
+    let offset_increase_button = panel.offset_increase_button;
     let manual_search_button = panel.manual_search_button;
     let settings_button = panel.settings_button;
     let close_button = panel.close_button;
@@ -170,10 +175,21 @@ pub(super) fn build(
     let content = panel.content;
 
     bind_button_tooltip(&manual_search_button, &i18n, Text::ManualSearchTooltip);
+    bind_button_tooltip(
+        &offset_decrease_button,
+        &i18n,
+        Text::DecreaseTrackOffsetTooltip,
+    );
+    bind_button_tooltip(&track_offset_button, &i18n, Text::ResetTrackOffsetTooltip);
+    bind_button_tooltip(
+        &offset_increase_button,
+        &i18n,
+        Text::IncreaseTrackOffsetTooltip,
+    );
     bind_button_tooltip(&settings_button, &i18n, Text::OpenSettingsTooltip);
     bind_button_tooltip(&close_button, &i18n, Text::CloseTooltip);
 
-    let web_lyrics = WebLyricsView::new(config, i18n.text(Text::OpenSpotify));
+    let web_lyrics = WebLyricsView::new(config, i18n.text(Text::OpenPlayer));
     lyrics_viewport.append(&web_lyrics.widget());
     let placement = attach_floating_drag(
         window,
@@ -199,6 +215,8 @@ pub(super) fn build(
         style,
         placement,
         song_info,
+        track_offset_button,
+        track_offset_ms: Rc::new(Cell::new(0)),
         lyrics_viewport,
         web_lyrics,
         i18n: i18n.clone(),
@@ -206,6 +224,7 @@ pub(super) fn build(
     {
         let overlay = overlay.clone();
         i18n.subscribe(move |language| {
+            overlay.render_track_offset(language);
             let static_status = overlay.state.static_status();
             if let Some(key) = static_status {
                 set_status_lyrics(&overlay, language.text(key), key);
@@ -248,6 +267,19 @@ fn set_status_lyrics(floating: &OverlayView, message: &str, key: Text) {
 impl OverlayView {
     pub(super) fn set_song_info(&self, value: &str) {
         self.song_info.set_label(value);
+    }
+
+    pub(super) fn set_track_offset(&self, offset_ms: i64) {
+        self.track_offset_ms.set(offset_ms);
+        self.render_track_offset(self.i18n.language());
+    }
+
+    fn render_track_offset(&self, language: floatlyrics_core::i18n::Language) {
+        let label = track_offset_label(
+            self.track_offset_ms.get(),
+            language.text(Text::MillisecondsShort),
+        );
+        self.track_offset_button.set_label(&label);
     }
 
     pub(super) fn set_lyrics_document(&self, document: &LyricsDocument) {
@@ -418,3 +450,15 @@ impl OverlayView {
         apply_snap_css_classes(&self.content, &self.placement.current());
     }
 }
+
+fn track_offset_label(offset_ms: i64, unit: &str) -> String {
+    match offset_ms.cmp(&0) {
+        std::cmp::Ordering::Greater => format!("+{offset_ms} {unit}"),
+        std::cmp::Ordering::Less => format!("−{} {unit}", offset_ms.unsigned_abs()),
+        std::cmp::Ordering::Equal => format!("0 {unit}"),
+    }
+}
+
+#[cfg(test)]
+#[path = "../test/overlay_view_test.rs"]
+mod tests;
