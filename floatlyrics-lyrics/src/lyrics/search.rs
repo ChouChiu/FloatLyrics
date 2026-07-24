@@ -14,8 +14,10 @@ mod ranking;
 use anyhow::Result;
 use floatlyrics_core::track::TrackMetadata;
 
-use super::model::{FetchedLyrics, LyricsCandidate, LyricsProvider};
-use provider::{fetch_candidate_raw_lyrics, search_provider_best, search_provider_candidates};
+use super::model::{FetchedLyrics, LyricsCandidate, LyricsLookupHint, LyricsProvider};
+use provider::{
+    fetch_candidate_raw_lyrics, fetch_hint_lyrics, search_provider_best, search_provider_candidates,
+};
 pub(super) use query::lyrics_helper_metadata;
 use ranking::finalize_candidates;
 
@@ -74,9 +76,31 @@ pub async fn search_best_lyrics(
     track: &TrackMetadata,
     provider_order: &[LyricsProvider],
 ) -> Result<Option<FetchedLyrics>> {
+    search_best_lyrics_with_hint(track, provider_order, None).await
+}
+
+/// Uses an exact playback-source hint before falling back to provider search.
+///
+/// Hints for providers absent from `provider_order` are ignored. A missing or
+/// stale identifier is recoverable and falls back to the same metadata search
+/// used by [`search_best_lyrics`].
+///
+/// # Errors
+/// Returns an error when a provider search reports a recoverable failure.
+pub async fn search_best_lyrics_with_hint(
+    track: &TrackMetadata,
+    provider_order: &[LyricsProvider],
+    hint: Option<&LyricsLookupHint>,
+) -> Result<Option<FetchedLyrics>> {
     let metadata = lyrics_helper_metadata(track);
 
     for provider in provider_order {
+        if let Some(hint) = hint
+            && hint.provider == *provider
+            && let Some(fetched) = fetch_hint_lyrics(track, hint).await
+        {
+            return Ok(Some(fetched));
+        }
         if let Some(fetched) = search_provider_best(*provider, &metadata).await? {
             return Ok(Some(fetched));
         }

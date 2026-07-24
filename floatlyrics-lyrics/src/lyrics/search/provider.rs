@@ -6,9 +6,10 @@
 use anyhow::Result;
 
 use crate::lyrics::{
-    model::{FetchedLyrics, LyricsCandidate, LyricsProvider},
+    model::{FetchedLyrics, LyricsCandidate, LyricsLookupHint, LyricsProvider},
     parsing::combine_lyrics_with_translation,
 };
+use floatlyrics_core::track::TrackMetadata;
 
 pub(super) async fn search_provider_candidates(
     provider: LyricsProvider,
@@ -50,6 +51,44 @@ pub(super) async fn fetch_candidate_raw_lyrics(candidate: &LyricsCandidate) -> O
         duration_ms: candidate.duration_ms,
     })
     .await
+}
+
+pub(super) async fn fetch_hint_lyrics(
+    track: &TrackMetadata,
+    hint: &LyricsLookupHint,
+) -> Option<FetchedLyrics> {
+    let artist = track.display_artist();
+    let (id, numeric_id) = match hint.provider {
+        LyricsProvider::QqMusic => (
+            hint.provider_track_id.as_str(),
+            hint.provider_track_id.parse::<i64>().ok(),
+        ),
+        LyricsProvider::NetEase => (hint.provider_track_id.as_str(), None),
+    };
+    let raw_lyrics = fetch_raw_lyrics(ProviderTrackRef {
+        provider: hint.provider,
+        id,
+        numeric_id,
+        title: &track.title,
+        artist: &artist,
+        album: track.album.as_deref().unwrap_or_default(),
+        duration_ms: track.duration_ms.and_then(|value| value.try_into().ok()),
+    })
+    .await?
+    .trim()
+    .to_string();
+    if raw_lyrics.is_empty() {
+        return None;
+    }
+
+    Some(FetchedLyrics {
+        provider: hint.provider,
+        provider_track_id: Some(hint.provider_track_id.clone()),
+        title: track.title.clone(),
+        artists: track.artists.clone(),
+        score: 100.0,
+        raw_lyrics,
+    })
 }
 
 pub(super) async fn search_provider_best(

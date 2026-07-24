@@ -14,8 +14,8 @@ mod timeline;
 
 pub use lyrics_helper::{LineInfo, LyricsData, LyricsTypes, generate_string};
 pub use model::{
-    FetchedLyrics, LyricsCandidate, LyricsProvider, LyricsProviderParseError, RomanizationSegment,
-    TimedLine, TimedSyllable,
+    FetchedLyrics, LyricsCandidate, LyricsLookupHint, LyricsProvider, LyricsProviderParseError,
+    RomanizationSegment, TimedLine, TimedSyllable,
 };
 pub use parsing::{
     combine_lyrics_with_translation, export_lyrics, parse_local_lyrics, timed_lines_from_data,
@@ -25,8 +25,8 @@ pub use romanization::{
     ChineseRomanizationMode, generate_local_romanization, generate_local_romanization_with_mode,
 };
 pub use search::{
-    SearchPlan, fetch_candidate_lyrics, search_best_lyrics, search_lyrics_candidates,
-    simplify_search_text,
+    SearchPlan, fetch_candidate_lyrics, search_best_lyrics, search_best_lyrics_with_hint,
+    search_lyrics_candidates, simplify_search_text,
 };
 pub use timeline::{active_line_index, line_index_at_or_before};
 

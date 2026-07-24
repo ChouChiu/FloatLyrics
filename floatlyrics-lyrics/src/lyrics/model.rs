@@ -16,6 +16,19 @@ pub enum LyricsProvider {
     NetEase,
 }
 
+/// Provider-specific track identifier suggested by a playback source.
+///
+/// Applications can use this hint to bypass fuzzy metadata search while still
+/// falling back to normal provider search when the identifier is stale or the
+/// provider is disabled.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LyricsLookupHint {
+    /// Lyrics provider that owns the identifier.
+    pub provider: LyricsProvider,
+    /// Provider-specific song identifier.
+    pub provider_track_id: String,
+}
+
 impl LyricsProvider {
     /// Returns the default automatic search priority.
     pub fn default_order() -> Vec<Self> {
