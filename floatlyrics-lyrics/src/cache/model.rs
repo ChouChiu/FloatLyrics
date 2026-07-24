@@ -7,6 +7,11 @@ use floatlyrics_core::track::TrackMetadata;
 
 use crate::lyrics::LyricsProvider;
 
+/// Minimum per-track lyrics timing adjustment accepted by the cache.
+pub const TRACK_OFFSET_MS_MIN: i64 = -10_000;
+/// Maximum per-track lyrics timing adjustment accepted by the cache.
+pub const TRACK_OFFSET_MS_MAX: i64 = 10_000;
+
 /// Persistence boundary used by lyrics controllers.
 ///
 /// Implementations may use SQLite, another database, or an in-memory test
@@ -41,6 +46,21 @@ pub trait LyricsCache {
         track_fingerprint: &str,
         provider_order: &[LyricsProvider],
     ) -> anyhow::Result<Option<CachedLyrics>>;
+
+    /// Loads the timing adjustment remembered for one track.
+    ///
+    /// Missing adjustments are returned as zero.
+    ///
+    /// # Errors
+    /// Returns an error when stored data cannot be read.
+    fn track_offset_ms(&self, track_fingerprint: &str) -> anyhow::Result<i64>;
+
+    /// Stores the timing adjustment for one track.
+    ///
+    /// # Errors
+    /// Returns an error when the track is unknown, the value is outside
+    /// [`TRACK_OFFSET_MS_MIN`]..=[`TRACK_OFFSET_MS_MAX`], or persistence fails.
+    fn set_track_offset_ms(&self, track_fingerprint: &str, offset_ms: i64) -> anyhow::Result<()>;
 
     /// Records an automatic provider result and returns its backend identifier.
     ///

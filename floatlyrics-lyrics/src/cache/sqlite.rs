@@ -12,7 +12,10 @@ use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 use crate::lyrics::LyricsProvider;
 
 use super::{
-    model::{CachedLyrics, LyricsCache, LyricsInsert, ProviderResultInsert},
+    model::{
+        CachedLyrics, LyricsCache, LyricsInsert, ProviderResultInsert, TRACK_OFFSET_MS_MAX,
+        TRACK_OFFSET_MS_MIN,
+    },
     schema,
 };
 
@@ -202,6 +205,40 @@ impl Cache {
             .context("loading cached provider result")
     }
 
+    fn track_offset_ms(&self, track_fingerprint: &str) -> Result<i64> {
+        self.conn
+            .query_row(
+                "SELECT offset_ms FROM track_offsets WHERE track_fingerprint = ?1",
+                params![track_fingerprint],
+                |row| row.get(0),
+            )
+            .optional()
+            .map(Option::unwrap_or_default)
+            .context("loading per-track lyrics offset")
+    }
+
+    fn set_track_offset_ms(&self, track_fingerprint: &str, offset_ms: i64) -> Result<()> {
+        if !(TRACK_OFFSET_MS_MIN..=TRACK_OFFSET_MS_MAX).contains(&offset_ms) {
+            anyhow::bail!(
+                "per-track lyrics offset must be between {TRACK_OFFSET_MS_MIN} and \
+                 {TRACK_OFFSET_MS_MAX}, got {offset_ms}"
+            );
+        }
+        self.conn
+            .execute(
+                r#"
+                INSERT INTO track_offsets (track_fingerprint, offset_ms)
+                VALUES (?1, ?2)
+                ON CONFLICT(track_fingerprint) DO UPDATE SET
+                    offset_ms = excluded.offset_ms,
+                    updated_at = CURRENT_TIMESTAMP
+                "#,
+                params![track_fingerprint, offset_ms],
+            )
+            .context("storing per-track lyrics offset")?;
+        Ok(())
+    }
+
     fn insert_provider_result(&self, result: ProviderResultInsert<'_>) -> Result<i64> {
         let artists_json = serde_json::to_string(result.artists)?;
         self.conn
@@ -251,6 +288,14 @@ impl LyricsCache for Cache {
         provider_order: &[LyricsProvider],
     ) -> anyhow::Result<Option<CachedLyrics>> {
         Cache::lyrics_for_track(self, track_fingerprint, provider_order)
+    }
+
+    fn track_offset_ms(&self, track_fingerprint: &str) -> anyhow::Result<i64> {
+        Cache::track_offset_ms(self, track_fingerprint)
+    }
+
+    fn set_track_offset_ms(&self, track_fingerprint: &str, offset_ms: i64) -> anyhow::Result<()> {
+        Cache::set_track_offset_ms(self, track_fingerprint, offset_ms)
     }
 
     fn insert_provider_result(&self, result: ProviderResultInsert<'_>) -> anyhow::Result<i64> {

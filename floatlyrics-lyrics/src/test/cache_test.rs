@@ -186,3 +186,72 @@ fn oversized_duration_is_stored_as_unknown() {
 
     assert_eq!(stored, None);
 }
+
+#[test]
+fn per_track_offset_defaults_to_zero_and_round_trips() {
+    let cache = Cache::open_memory().unwrap();
+    let fingerprint = cache.upsert_track(&track()).unwrap();
+
+    assert_eq!(cache.track_offset_ms(&fingerprint).unwrap(), 0);
+
+    cache.set_track_offset_ms(&fingerprint, -350).unwrap();
+    assert_eq!(cache.track_offset_ms(&fingerprint).unwrap(), -350);
+
+    cache.set_track_offset_ms(&fingerprint, 725).unwrap();
+    assert_eq!(cache.track_offset_ms(&fingerprint).unwrap(), 725);
+}
+
+#[test]
+fn per_track_offset_rejects_out_of_range_values() {
+    let cache = Cache::open_memory().unwrap();
+    let fingerprint = cache.upsert_track(&track()).unwrap();
+
+    assert!(
+        cache
+            .set_track_offset_ms(&fingerprint, TRACK_OFFSET_MS_MIN - 1)
+            .is_err()
+    );
+    assert!(
+        cache
+            .set_track_offset_ms(&fingerprint, TRACK_OFFSET_MS_MAX + 1)
+            .is_err()
+    );
+    assert_eq!(cache.track_offset_ms(&fingerprint).unwrap(), 0);
+}
+
+#[test]
+fn existing_database_gains_track_offsets_without_losing_tracks() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("lyrics.db");
+    let fingerprint = track().fingerprint();
+    {
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE tracks (
+                    fingerprint TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    artists_json TEXT NOT NULL,
+                    album TEXT,
+                    duration_ms INTEGER,
+                    mpris_track_id TEXT,
+                    last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                "#,
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO tracks (fingerprint, title, artists_json) VALUES (?1, ?2, ?3)",
+                params![fingerprint, "A Song", "[\"Alice\"]"],
+            )
+            .unwrap();
+    }
+
+    let cache = Cache::open(&path).unwrap();
+
+    assert_eq!(cache.track_offset_ms(&fingerprint).unwrap(), 0);
+    cache.set_track_offset_ms(&fingerprint, 300).unwrap();
+    assert_eq!(cache.track_offset_ms(&fingerprint).unwrap(), 300);
+}

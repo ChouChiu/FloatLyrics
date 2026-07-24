@@ -7,5 +7,8 @@ mod model;
 mod schema;
 mod sqlite;
 
-pub use model::{CachedLyrics, LyricsCache, LyricsInsert, ProviderResultInsert};
+pub use model::{
+    CachedLyrics, LyricsCache, LyricsInsert, ProviderResultInsert, TRACK_OFFSET_MS_MAX,
+    TRACK_OFFSET_MS_MIN,
+};
 pub use sqlite::Cache;

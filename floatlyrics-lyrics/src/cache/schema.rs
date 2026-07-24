@@ -33,6 +33,12 @@ pub(super) const MIGRATION: &str = r#"
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS track_offsets (
+        track_fingerprint TEXT PRIMARY KEY REFERENCES tracks(fingerprint) ON DELETE CASCADE,
+        offset_ms INTEGER NOT NULL CHECK (offset_ms BETWEEN -10000 AND 10000),
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS provider_results (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         track_fingerprint TEXT NOT NULL REFERENCES tracks(fingerprint) ON DELETE CASCADE,
