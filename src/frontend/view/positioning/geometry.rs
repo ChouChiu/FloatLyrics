@@ -103,10 +103,60 @@ pub(super) fn dragged_placement(
     )
 }
 
+pub(super) fn dragged_free_placement(
+    origin: DragOrigin,
+    offset_x: f64,
+    offset_y: f64,
+) -> (i32, i32, WindowPlacement) {
+    let max_x = maximum_position(
+        origin.geometry.viewport_width,
+        origin.geometry.surface_width,
+    );
+    let max_y = maximum_position(
+        origin.geometry.viewport_height,
+        origin.geometry.surface_height,
+    );
+    let x = origin
+        .x
+        .saturating_add(offset_x.round() as i32)
+        .clamp(0, max_x);
+    let y = origin
+        .y
+        .saturating_add(offset_y.round() as i32)
+        .clamp(0, max_y);
+
+    (
+        x,
+        bottom_margin_from_y(y, origin.geometry),
+        free_placement_at(x, y, origin.geometry),
+    )
+}
+
 pub(super) fn placement_at(x: i32, y: i32, geometry: FloatingGeometry) -> WindowPlacement {
     WindowPlacement {
         horizontal: snap_axis(x, geometry.surface_width, geometry.viewport_width).1,
         vertical: snap_axis(y, geometry.surface_height, geometry.viewport_height).1,
+    }
+}
+
+fn free_placement_at(x: i32, y: i32, geometry: FloatingGeometry) -> WindowPlacement {
+    WindowPlacement {
+        horizontal: AxisAnchor::Free(center_factor(
+            x.clamp(
+                0,
+                maximum_position(geometry.viewport_width, geometry.surface_width),
+            ),
+            geometry.surface_width,
+            geometry.viewport_width,
+        )),
+        vertical: AxisAnchor::Free(center_factor(
+            y.clamp(
+                0,
+                maximum_position(geometry.viewport_height, geometry.surface_height),
+            ),
+            geometry.surface_height,
+            geometry.viewport_height,
+        )),
     }
 }
 

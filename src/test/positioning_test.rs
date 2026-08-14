@@ -26,6 +26,23 @@ fn free_drag_stays_inside_viewport() {
 }
 
 #[test]
+fn unsnapped_drag_tracks_the_pointer_through_snap_zones() {
+    let origin = DragOrigin {
+        x: 100,
+        y: 420,
+        geometry: geometry(),
+    };
+
+    let (left, bottom, placement) = dragged_free_placement(origin, -92.0, 72.0);
+    assert_eq!((left, bottom), (8, 8));
+    assert_eq!(snap_css_classes(&placement), Vec::<&str>::new());
+
+    let restored = WindowPlacement::from_position(placement.position());
+    assert_eq!(horizontal_position(&restored, 800, 300), 8);
+    assert_eq!(vertical_position(&restored, 600, 100), 492);
+}
+
+#[test]
 fn snaps_to_horizontal_edges_and_center() {
     assert_eq!(snap_axis(8, 300, 800), (0, AxisAnchor::Start));
     assert_eq!(snap_axis(245, 300, 800), (250, AxisAnchor::Center));

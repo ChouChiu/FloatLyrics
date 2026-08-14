@@ -32,8 +32,9 @@ use layout::{
     lyrics_horizontal_padding, maximum_lyrics_width, viewport_height,
 };
 use positioning::{
-    PlacementState, WindowPlacement, apply_snap_css_classes, attach_floating_drag,
-    available_panel_width, bottom_margin_from_placement, initial_x, left_margin_for_width,
+    DragMode, FloatingDragLayout, PlacementState, WindowPlacement, apply_snap_css_classes,
+    attach_floating_drag, available_panel_width, bottom_margin_from_placement, initial_x,
+    left_position_for_width, reposition_for_width, reposition_internal_content,
 };
 use state::OverlayStateHandle;
 use web_lyrics::{WebLyricsView, font_family, lyric_content_width};
@@ -44,7 +45,7 @@ const PANEL_CHROME_WIDTH: i32 = 28;
 /// Restricts the surface input region to the interactive header area
 /// (song-info label, action buttons, and separator) so that clicks on the
 /// lyrics viewport pass through to windows below.
-fn setup_input_region(window: &gtk::ApplicationWindow) {
+fn setup_input_region(window: &gtk::ApplicationWindow, content: &gtk::Box) {
     let Some(surface) = window.surface() else {
         return;
     };
@@ -55,9 +56,6 @@ fn setup_input_region(window: &gtk::ApplicationWindow) {
         return;
     }
 
-    let Some(content) = window.child() else {
-        return;
-    };
     let Some(header) = content.first_child() else {
         return;
     };
@@ -89,6 +87,7 @@ fn setup_input_region(window: &gtk::ApplicationWindow) {
 #[derive(Clone)]
 pub(super) struct OverlayView {
     window: gtk::ApplicationWindow,
+    stage: gtk::Fixed,
     content: gtk::Box,
     state: OverlayStateHandle,
     style: OverlayStyle,
@@ -107,6 +106,7 @@ pub(super) fn build(
     i18n: I18n,
     sender: relm4::Sender<AppMsg>,
 ) -> OverlayView {
+    let drag_mode = desktop_drag_mode(std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref());
     let panel_width = compact_panel_width(config.window.width);
     let initial_placement = if config.window.remember_position {
         config.window.position.map(WindowPlacement::from_position)
@@ -132,34 +132,38 @@ pub(super) fn build(
     window.set_keyboard_mode(KeyboardMode::None);
     window.set_anchor(Edge::Bottom, true);
     window.set_anchor(Edge::Left, true);
-    window.set_anchor(Edge::Right, false);
-    window.set_anchor(Edge::Top, false);
-    window.set_margin(
-        Edge::Left,
-        initial_placement
-            .and_then(|placement| {
-                left_margin_for_width(
-                    window,
-                    &placement,
-                    panel_width.saturating_add(PANEL_CHROME_WIDTH),
-                )
-            })
-            .or_else(|| initial_x(panel_width.saturating_add(PANEL_CHROME_WIDTH)))
-            .unwrap_or_default(),
-    );
-    window.set_margin(
-        Edge::Bottom,
-        initial_placement
-            .and_then(|placement| {
-                bottom_margin_from_placement(
-                    window,
-                    &placement,
-                    panel_width.saturating_add(PANEL_CHROME_WIDTH),
-                    fallback_height,
-                )
-            })
-            .unwrap_or_else(|| effective_bottom_margin(config)),
-    );
+    // KWin can apply desktop effects whenever a layer surface moves. On KDE,
+    // keep the surface fixed to the output and drag only its child panel.
+    window.set_anchor(Edge::Right, drag_mode.is_internal());
+    window.set_anchor(Edge::Top, drag_mode.is_internal());
+    if !drag_mode.is_internal() {
+        window.set_margin(
+            Edge::Left,
+            initial_placement
+                .and_then(|placement| {
+                    left_position_for_width(
+                        window,
+                        &placement,
+                        panel_width.saturating_add(PANEL_CHROME_WIDTH),
+                    )
+                })
+                .or_else(|| initial_x(panel_width.saturating_add(PANEL_CHROME_WIDTH)))
+                .unwrap_or_default(),
+        );
+        window.set_margin(
+            Edge::Bottom,
+            initial_placement
+                .and_then(|placement| {
+                    bottom_margin_from_placement(
+                        window,
+                        &placement,
+                        panel_width.saturating_add(PANEL_CHROME_WIDTH),
+                        fallback_height,
+                    )
+                })
+                .unwrap_or_else(|| effective_bottom_margin(config)),
+        );
+    }
     window.set_exclusive_zone(-1);
     window.add_css_class("floating-window");
 
@@ -173,6 +177,7 @@ pub(super) fn build(
     let close_button = panel.close_button;
     let lyrics_viewport = panel.lyrics_viewport;
     let content = panel.content;
+    let drag_handle = panel.drag_handle;
 
     bind_button_tooltip(&manual_search_button, &i18n, Text::ManualSearchTooltip);
     bind_button_tooltip(
@@ -191,25 +196,61 @@ pub(super) fn build(
 
     let web_lyrics = WebLyricsView::new(config, i18n.text(Text::OpenPlayer));
     lyrics_viewport.append(&web_lyrics.widget());
+    let stage = gtk::Fixed::new();
+    stage.set_hexpand(true);
+    stage.set_vexpand(true);
+    let input_window = window.downgrade();
+    let input_content = content.downgrade();
     let placement = attach_floating_drag(
         window,
         &content,
-        panel_width.saturating_add(PANEL_CHROME_WIDTH),
-        fallback_height,
-        initial_placement,
+        &drag_handle,
+        FloatingDragLayout {
+            stage: stage.clone(),
+            fallback_width: panel_width.saturating_add(PANEL_CHROME_WIDTH),
+            fallback_height,
+            initial_placement,
+            initial_bottom_margin: effective_bottom_margin(config),
+            mode: drag_mode,
+        },
         move |position| {
             let _ = sender.send(AppMsg::WindowMoved(position));
+            if drag_mode.is_internal() {
+                let (Some(window), Some(content)) =
+                    (input_window.upgrade(), input_content.upgrade())
+                else {
+                    return;
+                };
+                gtk::glib::idle_add_local_once(move || setup_input_region(&window, &content));
+            }
         },
     );
 
     let style = OverlayStyle::install(config.window.opacity, initial_font_family);
 
-    window.set_child(Some(&content));
-    window.connect_map(|window| {
-        setup_input_region(window);
-    });
+    window.set_child(Some(&stage));
+    {
+        let stage = stage.downgrade();
+        let content = content.downgrade();
+        let placement = placement.clone();
+        window.connect_map(move |window| {
+            let (Some(stage), Some(content)) = (stage.upgrade(), content.upgrade()) else {
+                return;
+            };
+            reposition_internal_content(
+                window,
+                &stage,
+                &content,
+                &placement,
+                panel_width.saturating_add(PANEL_CHROME_WIDTH),
+                fallback_height,
+            );
+            setup_input_region(window, &content);
+        });
+    }
     let overlay = OverlayView {
         window: window.clone(),
+        stage,
         content,
         state: OverlayStateHandle::new(config, panel_width),
         style,
@@ -235,6 +276,7 @@ pub(super) fn build(
 }
 
 fn apply_panel_width(
+    stage: &gtk::Fixed,
     content: &gtk::Box,
     lyrics_viewport: &gtk::Box,
     window: &gtk::ApplicationWindow,
@@ -243,15 +285,15 @@ fn apply_panel_width(
 ) {
     content.set_width_request(width);
     lyrics_viewport.set_width_request(width);
-    if let Some(left_margin) = left_margin_for_width(
+    reposition_for_width(
         window,
-        &placement.current(),
+        stage,
+        content,
+        placement,
         width.saturating_add(PANEL_CHROME_WIDTH),
-    ) {
-        window.set_margin(Edge::Left, left_margin);
-    }
+    );
     apply_snap_css_classes(content, &placement.current());
-    setup_input_region(window);
+    setup_input_region(window, content);
 }
 
 fn set_status_lyrics(floating: &OverlayView, message: &str, key: Text) {
@@ -313,23 +355,34 @@ impl OverlayView {
         self.state.apply_config(config, width);
         self.content.set_width_request(width);
         self.lyrics_viewport.set_width_request(width);
-        self.window.set_margin(
-            Edge::Bottom,
-            bottom_margin_from_placement(
+        if self.placement.uses_internal_drag() {
+            reposition_internal_content(
                 &self.window,
-                &self.placement.current(),
+                &self.stage,
+                &self.content,
+                &self.placement,
                 width.saturating_add(PANEL_CHROME_WIDTH),
                 fallback_height,
-            )
-            .unwrap_or_else(|| effective_bottom_margin(config)),
-        );
-        if let Some(left_margin) = left_margin_for_width(
-            &self.window,
-            &self.placement.current(),
-            width.saturating_add(PANEL_CHROME_WIDTH),
-        ) {
-            self.window.set_margin(Edge::Left, left_margin);
+            );
+        } else {
+            self.window.set_margin(
+                Edge::Bottom,
+                bottom_margin_from_placement(
+                    &self.window,
+                    &self.placement.current(),
+                    width.saturating_add(PANEL_CHROME_WIDTH),
+                    fallback_height,
+                )
+                .unwrap_or_else(|| effective_bottom_margin(config)),
+            );
         }
+        reposition_for_width(
+            &self.window,
+            &self.stage,
+            &self.content,
+            &self.placement,
+            width.saturating_add(PANEL_CHROME_WIDTH),
+        );
         self.lyrics_viewport.set_height_request(viewport_h);
         let family = font_family(&config.lyrics.font_order);
         self.style.apply(config.window.opacity, family);
@@ -337,9 +390,20 @@ impl OverlayView {
         self.sync_snap_classes();
 
         let window = self.window.clone();
+        let stage = self.stage.clone();
+        let content = self.content.clone();
         let placement = self.placement.clone();
         gtk::glib::idle_add_local_once(move || {
-            if let Some(bottom_margin) = bottom_margin_from_placement(
+            if placement.uses_internal_drag() {
+                reposition_internal_content(
+                    &window,
+                    &stage,
+                    &content,
+                    &placement,
+                    width.saturating_add(PANEL_CHROME_WIDTH),
+                    fallback_height,
+                );
+            } else if let Some(bottom_margin) = bottom_margin_from_placement(
                 &window,
                 &placement.current(),
                 width.saturating_add(PANEL_CHROME_WIDTH),
@@ -347,7 +411,7 @@ impl OverlayView {
             ) {
                 window.set_margin(Edge::Bottom, bottom_margin);
             }
-            setup_input_region(&window);
+            setup_input_region(&window, &content);
         });
     }
 
@@ -390,6 +454,7 @@ impl OverlayView {
         } else {
             self.cancel_width_animation();
             apply_panel_width(
+                &self.stage,
                 &self.content,
                 &self.lyrics_viewport,
                 &self.window,
@@ -405,6 +470,7 @@ impl OverlayView {
         let start_width = self.content.width_request().max(compact_width);
         if start_width == target_width {
             apply_panel_width(
+                &self.stage,
                 &self.content,
                 &self.lyrics_viewport,
                 &self.window,
@@ -414,6 +480,7 @@ impl OverlayView {
             return;
         }
 
+        let stage = self.stage.clone();
         let content = self.content.clone();
         let lyrics_viewport = self.lyrics_viewport.clone();
         let window = self.window.clone();
@@ -432,7 +499,14 @@ impl OverlayView {
             });
             let elapsed_us = now_us.saturating_sub(animation_start_us);
             let width = animated_panel_width(start_width, target_width, elapsed_us);
-            apply_panel_width(&content, &lyrics_viewport, &window, &placement, width);
+            apply_panel_width(
+                &stage,
+                &content,
+                &lyrics_viewport,
+                &window,
+                &placement,
+                width,
+            );
 
             if elapsed_us >= PANEL_RESIZE_DURATION_US {
                 gtk::glib::ControlFlow::Break
@@ -456,6 +530,18 @@ fn track_offset_label(offset_ms: i64, unit: &str) -> String {
         std::cmp::Ordering::Greater => format!("+{offset_ms} {unit}"),
         std::cmp::Ordering::Less => format!("−{} {unit}", offset_ms.unsigned_abs()),
         std::cmp::Ordering::Equal => format!("0 {unit}"),
+    }
+}
+
+fn desktop_drag_mode(desktop: Option<&str>) -> DragMode {
+    if desktop.is_some_and(|desktop| {
+        desktop
+            .split([':', ';'])
+            .any(|name| matches!(name.trim().to_ascii_lowercase().as_str(), "kde" | "plasma"))
+    }) {
+        DragMode::InternalPanel
+    } else {
+        DragMode::LayerSurface
     }
 }
 

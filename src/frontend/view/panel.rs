@@ -28,6 +28,7 @@ impl WidgetTemplate for OverlayPanel {
             set_size_request: (init.width, -1),
             add_css_class: "floating-panel",
 
+            #[name = "drag_handle"]
             gtk::Box {
                 set_orientation: gtk::Orientation::Horizontal,
                 set_spacing: 6,
@@ -129,6 +130,7 @@ impl WidgetTemplate for OverlayPanel {
 
 pub(super) struct PanelWidgets {
     pub(super) content: gtk::Box,
+    pub(super) drag_handle: gtk::Box,
     pub(super) song_info: gtk::Label,
     pub(super) offset_decrease_button: gtk::Button,
     pub(super) track_offset_button: gtk::Button,
@@ -151,6 +153,7 @@ pub(super) fn build(
     });
     PanelWidgets {
         content: panel.content.clone(),
+        drag_handle: panel.drag_handle.clone(),
         song_info: panel.song_info.clone(),
         offset_decrease_button: panel.offset_decrease_button.clone(),
         track_offset_button: panel.track_offset_button.clone(),
