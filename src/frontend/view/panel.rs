@@ -57,7 +57,6 @@ impl WidgetTemplate for OverlayPanel {
 
                         #[name = "offset_decrease_button"]
                         gtk::Button {
-                            set_icon_name: "list-remove-symbolic",
                             set_valign: gtk::Align::Center,
                             set_css_classes: &["flat", "floating-offset-step-button"],
                             connect_clicked[sender = init.sender.clone()] => move |_| {
@@ -75,7 +74,6 @@ impl WidgetTemplate for OverlayPanel {
                         },
                         #[name = "offset_increase_button"]
                         gtk::Button {
-                            set_icon_name: "list-add-symbolic",
                             set_valign: gtk::Align::Center,
                             set_css_classes: &["flat", "floating-offset-step-button"],
                             connect_clicked[sender = init.sender.clone()] => move |_| {
@@ -85,7 +83,6 @@ impl WidgetTemplate for OverlayPanel {
                     },
                     #[name = "manual_search_button"]
                     gtk::Button {
-                        set_icon_name: "system-search-symbolic",
                         set_valign: gtk::Align::Center,
                         set_css_classes: &["flat", "circular", "floating-action-button"],
                         connect_clicked[sender = init.sender.clone()] => move |_| {
@@ -94,7 +91,6 @@ impl WidgetTemplate for OverlayPanel {
                     },
                     #[name = "settings_button"]
                     gtk::Button {
-                        set_icon_name: "emblem-system-symbolic",
                         set_valign: gtk::Align::Center,
                         set_css_classes: &["flat", "circular", "floating-action-button"],
                         connect_clicked[sender = init.sender.clone()] => move |_| {
@@ -103,7 +99,6 @@ impl WidgetTemplate for OverlayPanel {
                     },
                     #[name = "close_button"]
                     gtk::Button {
-                        set_icon_name: "window-close-symbolic",
                         set_valign: gtk::Align::Center,
                         set_css_classes: &["flat", "circular", "floating-action-button"],
                         connect_clicked[sender = init.sender.clone()] => move |_| {
@@ -151,6 +146,11 @@ pub(super) fn build(
         viewport_height,
         sender,
     });
+    set_button_icon(&panel.offset_decrease_button, PanelIcon::Minus);
+    set_button_icon(&panel.offset_increase_button, PanelIcon::Plus);
+    set_button_icon(&panel.manual_search_button, PanelIcon::Search);
+    set_button_icon(&panel.settings_button, PanelIcon::Settings);
+    set_button_icon(&panel.close_button, PanelIcon::Close);
     PanelWidgets {
         content: panel.content.clone(),
         drag_handle: panel.drag_handle.clone(),
@@ -163,4 +163,66 @@ pub(super) fn build(
         close_button: panel.close_button.clone(),
         lyrics_viewport: panel.lyrics_viewport.clone(),
     }
+}
+
+#[derive(Clone, Copy)]
+enum PanelIcon {
+    Minus,
+    Plus,
+    Search,
+    Settings,
+    Close,
+}
+
+fn set_button_icon(button: &gtk::Button, icon: PanelIcon) {
+    let drawing = gtk::DrawingArea::new();
+    drawing.set_content_width(16);
+    drawing.set_content_height(16);
+    drawing.set_draw_func(move |drawing, cr, width, height| {
+        let color = drawing.color();
+        cr.set_source_rgba(
+            color.red().into(),
+            color.green().into(),
+            color.blue().into(),
+            color.alpha().into(),
+        );
+        cr.scale(width as f64 / 16.0, height as f64 / 16.0);
+        cr.set_line_cap(cairo::LineCap::Round);
+        cr.set_line_join(cairo::LineJoin::Round);
+        cr.set_line_width(1.6);
+
+        match icon {
+            PanelIcon::Minus => {
+                cr.move_to(3.0, 8.0);
+                cr.line_to(13.0, 8.0);
+            }
+            PanelIcon::Plus => {
+                cr.move_to(3.0, 8.0);
+                cr.line_to(13.0, 8.0);
+                cr.move_to(8.0, 3.0);
+                cr.line_to(8.0, 13.0);
+            }
+            PanelIcon::Search => {
+                cr.arc(6.75, 6.75, 4.25, 0.0, std::f64::consts::TAU);
+                cr.move_to(9.8, 9.8);
+                cr.line_to(13.5, 13.5);
+            }
+            PanelIcon::Settings => {
+                for (y, knob_x) in [(4.0, 6.0), (8.0, 10.0), (12.0, 5.0)] {
+                    cr.move_to(2.5, y);
+                    cr.line_to(13.5, y);
+                    cr.move_to(knob_x, y - 1.7);
+                    cr.line_to(knob_x, y + 1.7);
+                }
+            }
+            PanelIcon::Close => {
+                cr.move_to(4.0, 4.0);
+                cr.line_to(12.0, 12.0);
+                cr.move_to(12.0, 4.0);
+                cr.line_to(4.0, 12.0);
+            }
+        }
+        let _ = cr.stroke();
+    });
+    button.set_child(Some(&drawing));
 }
