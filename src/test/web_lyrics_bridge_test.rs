@@ -89,6 +89,24 @@ fn bridge_dispatches_config_document_and_frame_in_dependency_order() {
 }
 
 #[test]
+fn bridge_keeps_independent_react_shell_state_commands() {
+    let mut bridge = BridgeState::default();
+    bridge.enqueue(CommandSlot::Navigation, "navigate".to_string());
+    bridge.enqueue(CommandSlot::SearchState, "search".to_string());
+    bridge.enqueue(CommandSlot::ConfigState, "config-state".to_string());
+    bridge.enqueue(CommandSlot::OverlayPlacement, "old-placement".to_string());
+    bridge.enqueue(CommandSlot::OverlayPlacement, "placement".to_string());
+    bridge.enqueue(CommandSlot::OverlayAppearance, "old-appearance".to_string());
+    bridge.enqueue(CommandSlot::OverlayAppearance, "appearance".to_string());
+    bridge.set_ready(true);
+
+    assert_eq!(
+        bridge.take_pending().as_deref(),
+        Some("config-state\nsearch\nnavigate\nplacement\nappearance")
+    );
+}
+
+#[test]
 fn bridge_does_not_coalesce_away_a_pending_seek_frame() {
     let mut bridge = BridgeState::default();
     bridge.set_ready(true);

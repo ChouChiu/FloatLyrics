@@ -19,6 +19,7 @@
     "@pixi/filter-bulge-pinch": "5.1.1",
     "@pixi/filter-color-matrix": "7.4.3",
     "@pixi/sprite": "7.4.3",
+    "@remixicon/react": "^4.9.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },

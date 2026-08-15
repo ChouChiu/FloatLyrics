@@ -35,6 +35,20 @@ fn recognizes_multiple_commands_in_argument_order() {
 }
 
 #[test]
+fn parses_sidebar_settings_navigation() {
+    let action =
+        serde_json::from_str::<UiAction>(r#"{"type":"open-settings-page","page":"display"}"#)
+            .unwrap();
+
+    assert!(matches!(
+        action,
+        UiAction::OpenSettingsPage {
+            page: view::web_lyrics::ControlPage::Display
+        }
+    ));
+}
+
+#[test]
 fn enabling_romanization_reloads_current_lyrics() {
     let current = AppConfig::default();
     let mut next = current.clone();

@@ -17,29 +17,34 @@ fn free_drag_stays_inside_viewport() {
         geometry: geometry(),
     };
 
-    let (left, bottom, _) = dragged_placement(origin, 25.4, -10.2);
+    let previous = placement_at(origin.x, origin.y, origin.geometry);
+    let (left, bottom, _) = dragged_placement(origin, 25.4, -10.2, previous);
     assert_eq!((left, bottom), (125, 90));
-    let (left, bottom, _) = dragged_placement(origin, -150.0, -500.0);
+    let (left, bottom, _) = dragged_placement(origin, -150.0, -500.0, previous);
     assert_eq!((left, bottom), (0, 500));
-    let (left, bottom, _) = dragged_placement(origin, 500.0, 500.0);
+    let (left, bottom, _) = dragged_placement(origin, 500.0, 500.0, previous);
     assert_eq!((left, bottom), (500, 0));
 }
 
 #[test]
-fn unsnapped_drag_tracks_the_pointer_through_snap_zones() {
+fn drag_snaps_to_edges_and_persists_the_edge_anchors() {
     let origin = DragOrigin {
         x: 100,
         y: 420,
         geometry: geometry(),
     };
 
-    let (left, bottom, placement) = dragged_free_placement(origin, -92.0, 72.0);
-    assert_eq!((left, bottom), (8, 8));
-    assert_eq!(snap_css_classes(&placement), Vec::<&str>::new());
+    let previous = placement_at(origin.x, origin.y, origin.geometry);
+    let (left, bottom, placement) = dragged_placement(origin, -92.0, 72.0, previous);
+    assert_eq!((left, bottom), (0, 0));
+    assert_eq!(
+        snap_css_classes(&placement),
+        vec!["snapped-left", "snapped-bottom"]
+    );
 
     let restored = WindowPlacement::from_position(placement.position());
-    assert_eq!(horizontal_position(&restored, 800, 300), 8);
-    assert_eq!(vertical_position(&restored, 600, 100), 492);
+    assert_eq!(horizontal_position(&restored, 800, 300), 0);
+    assert_eq!(vertical_position(&restored, 600, 100), 500);
 }
 
 #[test]
@@ -47,6 +52,26 @@ fn snaps_to_horizontal_edges_and_center() {
     assert_eq!(snap_axis(8, 300, 800), (0, AxisAnchor::Start));
     assert_eq!(snap_axis(245, 300, 800), (250, AxisAnchor::Center));
     assert_eq!(snap_axis(493, 300, 800), (500, AxisAnchor::End));
+}
+
+#[test]
+fn center_axes_have_a_wider_capture_zone_and_release_hysteresis() {
+    let origin = DragOrigin {
+        x: 100,
+        y: 100,
+        geometry: geometry(),
+    };
+    let previous = placement_at(origin.x, origin.y, origin.geometry);
+
+    let (left, bottom, centered) = dragged_placement(origin, 126.0, 126.0, previous);
+    assert_eq!((left, bottom), (250, 250));
+
+    let (left, bottom, still_centered) = dragged_placement(origin, 184.0, 184.0, centered);
+    assert_eq!((left, bottom), (250, 250));
+
+    let (left, bottom, released) = dragged_placement(origin, 199.0, 199.0, still_centered);
+    assert_eq!((left, bottom), (299, 201));
+    assert_eq!(snap_css_classes(&released), Vec::<&str>::new());
 }
 
 #[test]

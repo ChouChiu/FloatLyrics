@@ -3,22 +3,22 @@
 
 //! Embedded dependency-license parsing and deterministic merging.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub(super) struct LicenseData {
     pub(super) dependencies: Vec<Dependency>,
     pub(super) licenses: Vec<DependencyLicense>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub(super) struct Dependency {
     pub(super) name: String,
     pub(super) version: String,
     pub(super) license: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub(super) struct DependencyLicense {
     pub(super) name: String,
     pub(super) id: String,

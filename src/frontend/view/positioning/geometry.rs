@@ -5,7 +5,9 @@
 
 use crate::shared::config::WindowPosition;
 
-const SNAP_THRESHOLD_PX: i32 = 12;
+const EDGE_SNAP_THRESHOLD_PX: i32 = 12;
+const CENTER_SNAP_THRESHOLD_PX: i32 = 28;
+const SNAP_RELEASE_THRESHOLD_PX: i32 = 44;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum AxisAnchor {
@@ -65,6 +67,7 @@ pub(super) fn dragged_placement(
     origin: DragOrigin,
     offset_x: f64,
     offset_y: f64,
+    previous: WindowPlacement,
 ) -> (i32, i32, WindowPlacement) {
     let max_x = maximum_position(
         origin.geometry.viewport_width,
@@ -82,15 +85,17 @@ pub(super) fn dragged_placement(
         .y
         .saturating_add(offset_y.round() as i32)
         .clamp(0, max_y);
-    let (x, horizontal) = snap_axis(
+    let (x, horizontal) = snap_axis_with_previous(
         raw_x,
         origin.geometry.surface_width,
         origin.geometry.viewport_width,
+        previous.horizontal,
     );
-    let (y, vertical) = snap_axis(
+    let (y, vertical) = snap_axis_with_previous(
         raw_y,
         origin.geometry.surface_height,
         origin.geometry.viewport_height,
+        previous.vertical,
     );
 
     (
@@ -103,60 +108,10 @@ pub(super) fn dragged_placement(
     )
 }
 
-pub(super) fn dragged_free_placement(
-    origin: DragOrigin,
-    offset_x: f64,
-    offset_y: f64,
-) -> (i32, i32, WindowPlacement) {
-    let max_x = maximum_position(
-        origin.geometry.viewport_width,
-        origin.geometry.surface_width,
-    );
-    let max_y = maximum_position(
-        origin.geometry.viewport_height,
-        origin.geometry.surface_height,
-    );
-    let x = origin
-        .x
-        .saturating_add(offset_x.round() as i32)
-        .clamp(0, max_x);
-    let y = origin
-        .y
-        .saturating_add(offset_y.round() as i32)
-        .clamp(0, max_y);
-
-    (
-        x,
-        bottom_margin_from_y(y, origin.geometry),
-        free_placement_at(x, y, origin.geometry),
-    )
-}
-
 pub(super) fn placement_at(x: i32, y: i32, geometry: FloatingGeometry) -> WindowPlacement {
     WindowPlacement {
         horizontal: snap_axis(x, geometry.surface_width, geometry.viewport_width).1,
         vertical: snap_axis(y, geometry.surface_height, geometry.viewport_height).1,
-    }
-}
-
-fn free_placement_at(x: i32, y: i32, geometry: FloatingGeometry) -> WindowPlacement {
-    WindowPlacement {
-        horizontal: AxisAnchor::Free(center_factor(
-            x.clamp(
-                0,
-                maximum_position(geometry.viewport_width, geometry.surface_width),
-            ),
-            geometry.surface_width,
-            geometry.viewport_width,
-        )),
-        vertical: AxisAnchor::Free(center_factor(
-            y.clamp(
-                0,
-                maximum_position(geometry.viewport_height, geometry.surface_height),
-            ),
-            geometry.surface_height,
-            geometry.viewport_height,
-        )),
     }
 }
 
@@ -187,15 +142,38 @@ fn anchor_factor(anchor: AxisAnchor) -> f64 {
 }
 
 fn snap_axis(position: i32, surface_size: i32, viewport_size: i32) -> (i32, AxisAnchor) {
+    snap_axis_with_previous(position, surface_size, viewport_size, AxisAnchor::Free(0.5))
+}
+
+fn snap_axis_with_previous(
+    position: i32,
+    surface_size: i32,
+    viewport_size: i32,
+    previous: AxisAnchor,
+) -> (i32, AxisAnchor) {
     let maximum = maximum_position(viewport_size, surface_size);
     let position = position.clamp(0, maximum);
     let center = maximum / 2;
 
-    if position <= SNAP_THRESHOLD_PX {
+    if matches!(previous, AxisAnchor::Start) && position <= SNAP_RELEASE_THRESHOLD_PX {
+        return (0, AxisAnchor::Start);
+    }
+    if matches!(previous, AxisAnchor::End)
+        && maximum.saturating_sub(position) <= SNAP_RELEASE_THRESHOLD_PX
+    {
+        return (maximum, AxisAnchor::End);
+    }
+    if matches!(previous, AxisAnchor::Center)
+        && position.abs_diff(center) <= SNAP_RELEASE_THRESHOLD_PX as u32
+    {
+        return (center, AxisAnchor::Center);
+    }
+
+    if position <= EDGE_SNAP_THRESHOLD_PX {
         (0, AxisAnchor::Start)
-    } else if maximum.saturating_sub(position) <= SNAP_THRESHOLD_PX {
+    } else if maximum.saturating_sub(position) <= EDGE_SNAP_THRESHOLD_PX {
         (maximum, AxisAnchor::End)
-    } else if position.abs_diff(center) <= SNAP_THRESHOLD_PX as u32 {
+    } else if position.abs_diff(center) <= CENTER_SNAP_THRESHOLD_PX as u32 {
         (center, AxisAnchor::Center)
     } else {
         (

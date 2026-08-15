@@ -45,7 +45,7 @@ impl ConfigSaveService {
         })
     }
 
-    pub(super) fn save(
+    pub(in crate::frontend) fn save(
         &self,
         config: AppConfig,
         complete: impl FnOnce(ConfigSaveResult) + Send + 'static,

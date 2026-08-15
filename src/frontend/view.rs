@@ -6,7 +6,10 @@
 use cairo::RectangleInt;
 use gtk::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
-use std::{cell::Cell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
 use floatlyrics_core::i18n::{I18n, Text};
 
@@ -15,36 +18,33 @@ use crate::shared::{
     presentation::{LyricSlotText, LyricsDocument, LyricsFrame},
 };
 mod adapter;
-mod css;
 mod layout;
-mod panel;
 mod positioning;
 mod state;
-mod web_lyrics;
+pub(super) mod web_lyrics;
 
 use super::AppMsg;
-use super::localization::bind_button_tooltip;
 pub(super) use adapter::OverlaySender;
-use css::OverlayStyle;
 use layout::{
     MAX_EXPANDED_PANEL_WIDTH, PANEL_RESIZE_DURATION_US, animated_panel_width, compact_panel_width,
     effective_bottom_margin, expanded_panel_width, fallback_panel_height,
     lyrics_horizontal_padding, maximum_lyrics_width, viewport_height,
 };
 use positioning::{
-    DragMode, FloatingDragLayout, PlacementState, WindowPlacement, apply_snap_css_classes,
-    attach_floating_drag, available_panel_width, bottom_margin_from_placement, initial_x,
-    left_position_for_width, reposition_for_width, reposition_internal_content,
+    DragMode, FloatingDragLayout, PlacementState, WindowPlacement, attach_floating_drag,
+    available_panel_width, bottom_margin_from_placement, initial_x, left_position_for_width,
+    reposition_for_width, reposition_internal_content, snap_classes,
 };
 use state::OverlayStateHandle;
-use web_lyrics::{WebLyricsView, font_family, lyric_content_width};
+use web_lyrics::{UiSurface, WebLyricsView, font_family, lyric_content_width};
 
 const PANEL_HORIZONTAL_GUTTER: i32 = 32;
 const PANEL_CHROME_WIDTH: i32 = 28;
+const PANEL_HEADER_HEIGHT: i32 = 42;
+const PANEL_ACTIONS_WIDTH: i32 = 232;
 
-/// Restricts the surface input region to the interactive header area
-/// (song-info label, action buttons, and separator) so that clicks on the
-/// lyrics viewport pass through to windows below.
+/// Restricts the surface input region to the React toolbar so that clicks on
+/// the lyrics viewport pass through to windows below.
 fn setup_input_region(window: &gtk::ApplicationWindow, content: &gtk::Box) {
     let Some(surface) = window.surface() else {
         return;
@@ -56,24 +56,13 @@ fn setup_input_region(window: &gtk::ApplicationWindow, content: &gtk::Box) {
         return;
     }
 
-    let Some(header) = content.first_child() else {
+    let Some(bounds) = content.compute_bounds(window) else {
         return;
     };
-
-    let Some(header_bounds) = header.compute_bounds(window) else {
-        return;
-    };
-
-    let separator_bottom = header
-        .next_sibling()
-        .and_then(|sep| sep.compute_bounds(window))
-        .map(|b| b.y() + b.height())
-        .unwrap_or_else(|| header_bounds.y() + header_bounds.height());
-
-    let x = header_bounds.x() as i32;
-    let y = header_bounds.y() as i32;
-    let width = header_bounds.width() as i32;
-    let height = (separator_bottom - header_bounds.y()) as i32;
+    let x = bounds.x() as i32;
+    let y = bounds.y() as i32;
+    let width = bounds.width() as i32;
+    let height = PANEL_HEADER_HEIGHT.min(bounds.height() as i32);
 
     if width <= 0 || height <= 0 {
         surface.set_input_region(None::<&cairo::Region>);
@@ -90,13 +79,13 @@ pub(super) struct OverlayView {
     stage: gtk::Fixed,
     content: gtk::Box,
     state: OverlayStateHandle,
-    style: OverlayStyle,
     placement: PlacementState,
-    song_info: gtk::Label,
-    track_offset_button: gtk::Button,
+    song_info: Rc<RefCell<String>>,
     track_offset_ms: Rc<Cell<i64>>,
     lyrics_viewport: gtk::Box,
     web_lyrics: WebLyricsView,
+    measurement_label: gtk::Label,
+    font_family: Rc<RefCell<String>>,
     i18n: I18n,
 }
 
@@ -104,6 +93,7 @@ pub(super) fn build(
     window: &gtk::ApplicationWindow,
     config: &AppConfig,
     i18n: I18n,
+    about: Rc<serde_json::Value>,
     sender: relm4::Sender<AppMsg>,
 ) -> OverlayView {
     let drag_mode = desktop_drag_mode(std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref());
@@ -121,7 +111,6 @@ pub(super) fn build(
         config.lyrics.apple_music_style,
     );
     let fallback_height = fallback_panel_height(viewport_h);
-    let initial_font_family = font_family(&config.lyrics.font_order);
     window.set_title(Some("FloatLyrics Overlay"));
     window.set_decorated(false);
     window.set_resizable(false);
@@ -167,40 +156,44 @@ pub(super) fn build(
     window.set_exclusive_zone(-1);
     window.add_css_class("floating-window");
 
-    let panel = panel::build(panel_width, viewport_h, sender.clone());
-    let song_info = panel.song_info;
-    let offset_decrease_button = panel.offset_decrease_button;
-    let track_offset_button = panel.track_offset_button;
-    let offset_increase_button = panel.offset_increase_button;
-    let manual_search_button = panel.manual_search_button;
-    let settings_button = panel.settings_button;
-    let close_button = panel.close_button;
-    let lyrics_viewport = panel.lyrics_viewport;
-    let content = panel.content;
-    let drag_handle = panel.drag_handle;
-
-    bind_button_tooltip(&manual_search_button, &i18n, Text::ManualSearchTooltip);
-    bind_button_tooltip(
-        &offset_decrease_button,
-        &i18n,
-        Text::DecreaseTrackOffsetTooltip,
+    super::style::install(
+        "window.floating-window, window.floating-window > contents { background: transparent; box-shadow: none; }",
     );
-    bind_button_tooltip(&track_offset_button, &i18n, Text::ResetTrackOffsetTooltip);
-    bind_button_tooltip(
-        &offset_increase_button,
-        &i18n,
-        Text::IncreaseTrackOffsetTooltip,
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    content.set_size_request(panel_width, fallback_height);
+    content.set_halign(gtk::Align::Center);
+    content.set_valign(gtk::Align::Center);
+    let lyrics_viewport = content.clone();
+    let web_lyrics = WebLyricsView::new(
+        config,
+        i18n.text(Text::OpenPlayer),
+        UiSurface::Overlay,
+        about,
+        sender.clone(),
     );
-    bind_button_tooltip(&settings_button, &i18n, Text::OpenSettingsTooltip);
-    bind_button_tooltip(&close_button, &i18n, Text::CloseTooltip);
+    let web_stack = gtk::Overlay::new();
+    web_stack.set_hexpand(true);
+    web_stack.set_vexpand(true);
+    web_stack.set_child(Some(&web_lyrics.widget()));
 
-    let web_lyrics = WebLyricsView::new(config, i18n.text(Text::OpenPlayer));
-    lyrics_viewport.append(&web_lyrics.widget());
+    // WebKit owns its own event surface, so gestures attached only to GTK
+    // ancestors do not reliably receive pointer motion. Put a native target
+    // above the non-interactive song-title portion of the React toolbar.
+    let drag_handle = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    drag_handle.set_hexpand(true);
+    drag_handle.set_halign(gtk::Align::Fill);
+    drag_handle.set_valign(gtk::Align::Start);
+    drag_handle.set_height_request(PANEL_HEADER_HEIGHT);
+    drag_handle.set_margin_end(PANEL_ACTIONS_WIDTH);
+    drag_handle.set_widget_name("overlay-drag-handle");
+    web_stack.add_overlay(&drag_handle);
+    content.append(&web_stack);
     let stage = gtk::Fixed::new();
     stage.set_hexpand(true);
     stage.set_vexpand(true);
     let input_window = window.downgrade();
     let input_content = content.downgrade();
+    let placement_view = web_lyrics.clone();
     let placement = attach_floating_drag(
         window,
         &content,
@@ -213,6 +206,7 @@ pub(super) fn build(
             initial_bottom_margin: effective_bottom_margin(config),
             mode: drag_mode,
         },
+        move |placement| placement_view.set_overlay_placement(snap_classes(&placement)),
         move |position| {
             let _ = sender.send(AppMsg::WindowMoved(position));
             if drag_mode.is_internal() {
@@ -226,15 +220,20 @@ pub(super) fn build(
         },
     );
 
-    let style = OverlayStyle::install(config.window.opacity, initial_font_family);
-
     window.set_child(Some(&stage));
     {
         let stage = stage.downgrade();
         let content = content.downgrade();
+        let web_stack = web_stack.downgrade();
+        let drag_handle = drag_handle.downgrade();
         let placement = placement.clone();
         window.connect_map(move |window| {
-            let (Some(stage), Some(content)) = (stage.upgrade(), content.upgrade()) else {
+            let (Some(stage), Some(content), Some(web_stack), Some(drag_handle)) = (
+                stage.upgrade(),
+                content.upgrade(),
+                web_stack.upgrade(),
+                drag_handle.upgrade(),
+            ) else {
                 return;
             };
             reposition_internal_content(
@@ -246,6 +245,20 @@ pub(super) fn build(
                 fallback_height,
             );
             setup_input_region(window, &content);
+            gtk::glib::idle_add_local_once(move || {
+                let picked = web_stack.pick(16.0, 16.0, gtk::PickFlags::DEFAULT);
+                if picked
+                    .as_ref()
+                    .is_some_and(|widget| widget == drag_handle.upcast_ref::<gtk::Widget>())
+                {
+                    tracing::debug!("overlay title drag target is active");
+                } else {
+                    tracing::warn!(
+                        picked = picked.as_ref().map(gtk::Widget::widget_name).as_deref(),
+                        "overlay title drag target is not receiving pointer events"
+                    );
+                }
+            });
         });
     }
     let overlay = OverlayView {
@@ -253,19 +266,19 @@ pub(super) fn build(
         stage,
         content,
         state: OverlayStateHandle::new(config, panel_width),
-        style,
         placement,
-        song_info,
-        track_offset_button,
+        song_info: Rc::new(RefCell::new("FloatLyrics".to_string())),
         track_offset_ms: Rc::new(Cell::new(0)),
         lyrics_viewport,
         web_lyrics,
+        measurement_label: gtk::Label::new(None),
+        font_family: Rc::new(RefCell::new(font_family(&config.lyrics.font_order))),
         i18n: i18n.clone(),
     };
     {
         let overlay = overlay.clone();
         i18n.subscribe(move |language| {
-            overlay.render_track_offset(language);
+            overlay.render_overlay_state(language);
             let static_status = overlay.state.static_status();
             if let Some(key) = static_status {
                 set_status_lyrics(&overlay, language.text(key), key);
@@ -292,7 +305,6 @@ fn apply_panel_width(
         placement,
         width.saturating_add(PANEL_CHROME_WIDTH),
     );
-    apply_snap_css_classes(content, &placement.current());
     setup_input_region(window, content);
 }
 
@@ -308,20 +320,25 @@ fn set_status_lyrics(floating: &OverlayView, message: &str, key: Text) {
 
 impl OverlayView {
     pub(super) fn set_song_info(&self, value: &str) {
-        self.song_info.set_label(value);
+        if self.song_info.borrow().as_str() == value {
+            return;
+        }
+        *self.song_info.borrow_mut() = value.to_string();
+        self.render_overlay_state(self.i18n.language());
     }
 
     pub(super) fn set_track_offset(&self, offset_ms: i64) {
         self.track_offset_ms.set(offset_ms);
-        self.render_track_offset(self.i18n.language());
+        self.render_overlay_state(self.i18n.language());
     }
 
-    fn render_track_offset(&self, language: floatlyrics_core::i18n::Language) {
+    fn render_overlay_state(&self, language: floatlyrics_core::i18n::Language) {
         let label = track_offset_label(
             self.track_offset_ms.get(),
             language.text(Text::MillisecondsShort),
         );
-        self.track_offset_button.set_label(&label);
+        self.web_lyrics
+            .set_overlay_state(&self.song_info.borrow(), &label);
     }
 
     pub(super) fn set_lyrics_document(&self, document: &LyricsDocument) {
@@ -384,10 +401,13 @@ impl OverlayView {
             width.saturating_add(PANEL_CHROME_WIDTH),
         );
         self.lyrics_viewport.set_height_request(viewport_h);
-        let family = font_family(&config.lyrics.font_order);
-        self.style.apply(config.window.opacity, family);
+        self.content.set_height_request(fallback_height);
+        *self.font_family.borrow_mut() = font_family(&config.lyrics.font_order);
+        self.web_lyrics.refresh_bootstrap(config);
         self.web_lyrics.apply_config(config);
-        self.sync_snap_classes();
+        self.web_lyrics
+            .set_overlay_appearance(config.window.opacity);
+        self.sync_snap_state();
 
         let window = self.window.clone();
         let stage = self.stage.clone();
@@ -426,9 +446,9 @@ impl OverlayView {
     fn resize_for_lyrics(&self, value: &LyricSlotText, animate: bool) {
         let metrics = self.state.metrics();
         let lyric_font_px = metrics.lyric_font_size;
-        let font_family = self.style.font_family();
+        let font_family = self.font_family.borrow().clone();
         let measured_width = lyric_content_width(
-            &self.song_info,
+            &self.measurement_label,
             value,
             &font_family,
             lyric_font_px,
@@ -520,8 +540,9 @@ impl OverlayView {
         self.state.cancel_animation();
     }
 
-    fn sync_snap_classes(&self) {
-        apply_snap_css_classes(&self.content, &self.placement.current());
+    fn sync_snap_state(&self) {
+        self.web_lyrics
+            .set_overlay_placement(snap_classes(&self.placement.current()));
     }
 }
 

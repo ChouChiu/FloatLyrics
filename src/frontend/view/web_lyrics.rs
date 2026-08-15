@@ -10,6 +10,7 @@ use std::{
 };
 use webkit6::prelude::*;
 
+use crate::frontend::{AppMsg, UiAction};
 use crate::shared::{
     config::AppConfig,
     presentation::{LyricSlotText, LyricsDocument, LyricsFrame},
@@ -20,6 +21,7 @@ mod command;
 mod metrics;
 
 use bridge::{BridgeState, CommandSlot};
+pub(in crate::frontend) use command::{ControlPage, UiSurface};
 pub(super) use metrics::{font_family, lyric_content_width};
 
 #[derive(Clone, Default)]
@@ -45,14 +47,24 @@ impl Bridge {
 
 /// A transparent, non-interactive WebKit view backed by packaged HTML.
 #[derive(Clone)]
-pub(super) struct WebLyricsView {
+pub(in crate::frontend) struct WebLyricsView {
     web_view: webkit6::WebView,
     bridge: Bridge,
     document_revision: Rc<Cell<Option<u64>>>,
+    surface: UiSurface,
+    about: Rc<serde_json::Value>,
+    available_fonts: Rc<Vec<String>>,
+    language: Rc<Cell<floatlyrics_core::i18n::Language>>,
 }
 
 impl WebLyricsView {
-    pub(super) fn new(config: &AppConfig, initial_text: &str) -> Self {
+    pub(in crate::frontend) fn new(
+        config: &AppConfig,
+        initial_text: &str,
+        surface: UiSurface,
+        about: Rc<serde_json::Value>,
+        sender: relm4::Sender<AppMsg>,
+    ) -> Self {
         let settings = webkit6::Settings::new();
         settings.set_auto_load_images(false);
         settings.set_enable_developer_extras(false);
@@ -65,13 +77,43 @@ impl WebLyricsView {
         settings.set_javascript_can_access_clipboard(false);
         settings.set_javascript_can_open_windows_automatically(false);
 
-        let web_view = webkit6::WebView::builder().settings(&settings).build();
+        let content_manager = webkit6::UserContentManager::new();
+        assert!(
+            content_manager.register_script_message_handler("floatLyrics", None),
+            "FloatLyrics WebKit message handler must register exactly once"
+        );
+        content_manager.connect_script_message_received(Some("floatLyrics"), move |_, value| {
+            let raw = value.to_str();
+            match serde_json::from_str::<UiAction>(&raw) {
+                Ok(action) => {
+                    let _ = sender.send(AppMsg::UiAction(action));
+                }
+                Err(error) => tracing::warn!(%error, %raw, "ignored invalid web UI action"),
+            }
+        });
+        let web_view = webkit6::WebView::builder()
+            .settings(&settings)
+            .user_content_manager(&content_manager)
+            .build();
         web_view.set_background_color(&gtk::gdk::RGBA::TRANSPARENT);
-        web_view.set_can_target(false);
-        web_view.set_focusable(false);
+        web_view.set_can_target(true);
+        web_view.set_focusable(!matches!(surface, UiSurface::Overlay));
         web_view.set_hexpand(true);
         web_view.set_vexpand(true);
         web_view.connect_context_menu(|_, _, _| true);
+        let available_fonts = Rc::new(if matches!(surface, UiSurface::FontPicker) {
+            let mut families = web_view
+                .pango_context()
+                .list_families()
+                .into_iter()
+                .map(|family| family.name().to_string())
+                .collect::<Vec<_>>();
+            families.sort_by_key(|family| family.to_lowercase());
+            families.dedup();
+            families
+        } else {
+            Vec::new()
+        });
 
         let bridge = Bridge::default();
 
@@ -92,7 +134,12 @@ impl WebLyricsView {
             web_view,
             bridge,
             document_revision: Rc::new(Cell::new(None)),
+            surface,
+            about,
+            available_fonts,
+            language: Rc::new(Cell::new(config.general.language)),
         };
+        renderer.bootstrap(config);
         renderer.apply_config(config);
         renderer.show(LyricsFrame {
             key: "initial".to_string(),
@@ -104,7 +151,71 @@ impl WebLyricsView {
         renderer
     }
 
-    pub(super) fn widget(&self) -> webkit6::WebView {
+    pub(in crate::frontend) fn bootstrap(&self, config: &AppConfig) {
+        self.language.set(config.general.language);
+        self.submit(
+            CommandSlot::Bootstrap,
+            command::bootstrap_script(
+                self.surface,
+                config,
+                config.general.language.catalogue(),
+                &self.about,
+                &self.available_fonts,
+            ),
+        );
+    }
+
+    pub(in crate::frontend) fn refresh_bootstrap(&self, config: &AppConfig) {
+        if self.language.get() != config.general.language {
+            self.bootstrap(config);
+        }
+    }
+
+    pub(in crate::frontend) fn set_config_state(
+        &self,
+        config: &AppConfig,
+        saved: bool,
+        error: Option<&str>,
+    ) {
+        self.submit(
+            CommandSlot::ConfigState,
+            command::config_state_script(config, saved, error),
+        );
+    }
+
+    pub(in crate::frontend) fn set_search_state(&self, state: &serde_json::Value) {
+        self.submit(
+            CommandSlot::SearchState,
+            command::search_state_script(state),
+        );
+    }
+
+    pub(in crate::frontend) fn navigate(&self, page: ControlPage) {
+        self.submit(CommandSlot::Navigation, command::navigate_script(page));
+    }
+
+    pub(in crate::frontend) fn set_overlay_state(&self, song_info: &str, track_offset: &str) {
+        self.submit(
+            CommandSlot::OverlayState,
+            command::overlay_state_script(song_info, track_offset),
+        );
+    }
+
+    pub(in crate::frontend) fn set_overlay_placement(&self, classes: Vec<&str>) {
+        self.submit(
+            CommandSlot::OverlayPlacement,
+            command::overlay_placement_script(&classes),
+        );
+    }
+
+    pub(in crate::frontend) fn set_overlay_appearance(&self, opacity: f64) {
+        self.submit(
+            CommandSlot::OverlayAppearance,
+            command::overlay_appearance_script(opacity),
+        );
+    }
+
+    pub(in crate::frontend) fn widget(&self) -> webkit6::WebView {
         self.web_view.clone()
     }
 

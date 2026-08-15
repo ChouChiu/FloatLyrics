@@ -69,6 +69,8 @@ export function advanceLyricsViewState(
       return { ...state, document: command.document };
     case "frame":
       return applyFrame(state, command.frame);
+    default:
+      return state;
   }
 }
 

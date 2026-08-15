@@ -30,7 +30,7 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
-    fn validate(&self) -> anyhow::Result<()> {
+    pub(crate) fn validate(&self) -> anyhow::Result<()> {
         validation::validate(self)
     }
 }

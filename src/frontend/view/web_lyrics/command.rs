@@ -3,7 +3,9 @@
 
 //! Typed JavaScript command protocol for the embedded lyrics frontend.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
 
 use crate::shared::{
     config::{AppConfig, parse_hex_color},
@@ -56,6 +58,58 @@ enum LyricsCommand<'a> {
     },
 }
 
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(in crate::frontend) enum UiSurface {
+    Overlay,
+    ControlCenter,
+    ManualSearch,
+    FontPicker,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(in crate::frontend) enum ControlPage {
+    General,
+    Display,
+    Sources,
+    About,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+enum UiCommand<'a> {
+    Bootstrap {
+        surface: UiSurface,
+        config: &'a AppConfig,
+        strings: BTreeMap<&'static str, &'static str>,
+        version: &'static str,
+        about: &'a Value,
+        available_fonts: &'a [String],
+    },
+    ConfigState {
+        config: &'a AppConfig,
+        saved: bool,
+        error: Option<&'a str>,
+    },
+    SearchState {
+        state: &'a Value,
+    },
+    Navigate {
+        page: ControlPage,
+    },
+    OverlayState {
+        song_info: &'a str,
+        track_offset: &'a str,
+    },
+    OverlayPlacement {
+        classes: &'a [&'a str],
+    },
+    OverlayAppearance {
+        opacity: f64,
+    },
+}
+
 pub(super) fn configure_script(config: &AppConfig) -> serde_json::Result<String> {
     render_script(&LyricsCommand::Configure {
         apple_music_style: config.lyrics.apple_music_style,
@@ -69,6 +123,63 @@ pub(super) fn document_script(document: &LyricsDocument) -> serde_json::Result<S
 
 pub(super) fn frame_script(frame: &LyricsFrame) -> serde_json::Result<String> {
     render_script(&LyricsCommand::Frame { frame })
+}
+
+pub(super) fn bootstrap_script(
+    surface: UiSurface,
+    config: &AppConfig,
+    strings: BTreeMap<&'static str, &'static str>,
+    about: &Value,
+    available_fonts: &[String],
+) -> serde_json::Result<String> {
+    render_script(&UiCommand::Bootstrap {
+        surface,
+        config,
+        strings,
+        version: env!("CARGO_PKG_VERSION"),
+        about,
+        available_fonts,
+    })
+}
+
+pub(super) fn config_state_script(
+    config: &AppConfig,
+    saved: bool,
+    error: Option<&str>,
+) -> serde_json::Result<String> {
+    render_script(&UiCommand::ConfigState {
+        config,
+        saved,
+        error,
+    })
+}
+
+pub(super) fn search_state_script(state: &Value) -> serde_json::Result<String> {
+    render_script(&UiCommand::SearchState { state })
+}
+
+pub(super) fn navigate_script(page: ControlPage) -> serde_json::Result<String> {
+    render_script(&UiCommand::Navigate { page })
+}
+
+pub(super) fn overlay_state_script(
+    song_info: &str,
+    track_offset: &str,
+) -> serde_json::Result<String> {
+    render_script(&UiCommand::OverlayState {
+        song_info,
+        track_offset,
+    })
+}
+
+pub(super) fn overlay_placement_script(classes: &[&str]) -> serde_json::Result<String> {
+    render_script(&UiCommand::OverlayPlacement { classes })
+}
+
+pub(super) fn overlay_appearance_script(opacity: f64) -> serde_json::Result<String> {
+    render_script(&UiCommand::OverlayAppearance {
+        opacity: opacity.clamp(0.15, 1.0),
+    })
 }
 
 fn render_script(command: &impl Serialize) -> serde_json::Result<String> {

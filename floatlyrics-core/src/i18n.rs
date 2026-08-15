@@ -10,6 +10,7 @@
 use serde::{Deserialize, Serialize};
 use std::{
     cell::{Cell, RefCell},
+    collections::BTreeMap,
     env,
     rc::Rc,
 };
@@ -108,6 +109,18 @@ impl Language {
         };
         self.text(key).replace("{count}", &count.to_string())
     }
+
+    /// Returns the complete validated catalogue for web-based user interfaces.
+    ///
+    /// Keys are the stable [`Text`] variant names used by the runtime JSON
+    /// catalogues. The returned map is sorted to keep serialized bootstrap
+    /// payloads deterministic.
+    pub fn catalogue(self) -> BTreeMap<&'static str, &'static str> {
+        Text::ALL
+            .iter()
+            .map(|key| (key.key(), self.text(*key)))
+            .collect()
+    }
 }
 
 /// Verifies that every supported runtime catalogue can be loaded completely.
@@ -198,11 +211,13 @@ define_text_keys!(
     ChangesSavedAutomatically,
     Saved,
     SaveFailed,
+    Colors,
     General,
     Display,
     LyricsSources,
     GeneralTitle,
     GeneralDescription,
+    LyricsContent,
     Language,
     LanguageDescription,
     GlobalOffset,
@@ -221,6 +236,7 @@ define_text_keys!(
     DisplayDescription,
     AppleMusicStyle,
     AppleMusicStyleDescription,
+    Panel,
     PanelWidth,
     PanelWidthDescription,
     RememberWindowPosition,

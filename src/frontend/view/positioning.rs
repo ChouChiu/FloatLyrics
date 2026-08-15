@@ -13,9 +13,9 @@ mod geometry;
 
 pub(super) use geometry::WindowPlacement;
 use geometry::{
-    DragOrigin, FloatingGeometry, bottom_margin_from_y, centered_position, dragged_free_placement,
-    dragged_placement, effective_surface_size, fallback_geometry, horizontal_position,
-    placement_at, snap_css_classes, vertical_position, y_from_bottom_margin,
+    DragOrigin, FloatingGeometry, bottom_margin_from_y, centered_position, dragged_placement,
+    effective_surface_size, fallback_geometry, horizontal_position, placement_at, snap_css_classes,
+    vertical_position, y_from_bottom_margin,
 };
 
 #[derive(Clone)]
@@ -91,6 +91,7 @@ pub(super) fn attach_floating_drag(
     content: &gtk::Box,
     drag_handle: &gtk::Box,
     layout: FloatingDragLayout,
+    on_placement_changed: impl Fn(WindowPlacement) + 'static,
     on_drag_end: impl Fn(WindowPosition) + 'static,
 ) -> PlacementState {
     let FloatingDragLayout {
@@ -129,6 +130,7 @@ pub(super) fn attach_floating_drag(
         stage.put(content, 0.0, 0.0);
     }
     let placement = PlacementState::new(initial_placement, initial_left, initial_top, mode);
+    on_placement_changed(initial_placement);
     let gesture = gtk::GestureDrag::new();
     drag_handle.set_cursor_from_name(Some("grab"));
 
@@ -183,6 +185,7 @@ pub(super) fn attach_floating_drag(
         let content = content.downgrade();
         let drag_origin = Rc::clone(&drag_origin);
         let placement = placement.clone();
+        let on_placement_changed = Rc::new(on_placement_changed);
         gesture.connect_drag_update(move |_, offset_x, offset_y| {
             let (Some(window), Some(stage), Some(content)) =
                 (window.upgrade(), stage.upgrade(), content.upgrade())
@@ -190,11 +193,8 @@ pub(super) fn attach_floating_drag(
                 return;
             };
             let origin = *drag_origin.borrow();
-            let (next_left, next_bottom, next_placement) = if mode.is_internal() {
-                dragged_free_placement(origin, offset_x, offset_y)
-            } else {
-                dragged_placement(origin, offset_x, offset_y)
-            };
+            let (next_left, next_bottom, next_placement) =
+                dragged_placement(origin, offset_x, offset_y, placement.current());
             let next_top = y_from_bottom_margin(next_bottom, origin.geometry);
 
             if placement.position() == (next_left, next_top) {
@@ -207,7 +207,7 @@ pub(super) fn attach_floating_drag(
                 window.set_margin(Edge::Left, next_left);
                 window.set_margin(Edge::Bottom, next_bottom);
             }
-            apply_snap_css_classes(&content, &next_placement);
+            on_placement_changed(next_placement);
         });
     }
 
@@ -402,22 +402,6 @@ fn first_monitor() -> Option<gtk::gdk::Monitor> {
         .ok()
 }
 
-const SNAP_CSS_CLASSES: &[&str] = &[
-    "snapped-left",
-    "snapped-right",
-    "snapped-top",
-    "snapped-bottom",
-];
-
-pub(super) fn apply_snap_css_classes(content: &gtk::Box, placement: &WindowPlacement) {
-    let wanted = snap_css_classes(placement);
-    for cls in SNAP_CSS_CLASSES {
-        if wanted.contains(cls) {
-            if !content.has_css_class(cls) {
-                content.add_css_class(cls);
-            }
-        } else {
-            content.remove_css_class(cls);
-        }
-    }
+pub(super) fn snap_classes(placement: &WindowPlacement) -> Vec<&'static str> {
+    snap_css_classes(placement)
 }

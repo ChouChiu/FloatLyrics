@@ -8,18 +8,18 @@
 //! playback controller remains independent from the concrete widget tree.
 
 mod about;
-mod localization;
+mod control_center;
+mod font_picker_window;
 mod manual_search;
+mod manual_search_window;
 mod settings;
 mod style;
 mod view;
 
 use anyhow::Result;
 use gtk::prelude::*;
-use relm4::{
-    Component, ComponentController, ComponentParts, ComponentSender, Controller, MessageBroker,
-    RelmApp, SimpleComponent,
-};
+use relm4::{ComponentParts, ComponentSender, MessageBroker, RelmApp, SimpleComponent};
+use serde::Deserialize;
 use std::{ffi::OsStr, rc::Rc, sync::mpsc};
 
 use crate::{
@@ -44,9 +44,12 @@ struct AppModel {
     config: AppConfig,
     i18n: I18n,
     overlay: view::OverlayView,
-    settings: Controller<settings::SettingsModel>,
-    manual_search: Controller<manual_search::ManualSearchModel>,
-    about: Controller<about::AboutModel>,
+    control_center: control_center::ControlCenterView,
+    font_picker: font_picker_window::FontPickerView,
+    manual_search: manual_search::ManualSearchCoordinator,
+    manual_search_window: manual_search_window::ManualSearchView,
+    config_saver: settings::ConfigSaveService,
+    save_revision: u64,
     controller: backend::Controller,
     song_info: String,
     track_offset_ms: i64,
@@ -71,12 +74,31 @@ enum AppMsg {
     ShowStatus(floatlyrics_core::i18n::Text),
     OpenSettings,
     OpenManualSearch,
-    OpenAbout,
-    AdjustTrackOffset(i64),
-    ResetTrackOffset,
+    UiAction(UiAction),
+    SearchEvent(manual_search::SearchEvent),
+    ConfigSaveFinished {
+        revision: u64,
+        result: settings::ConfigSaveResult,
+    },
     WindowMoved(WindowPosition),
-    ConfigChanged(AppConfig),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+enum UiAction {
+    OpenSettings,
+    OpenSearch,
+    OpenSettingsPage { page: view::web_lyrics::ControlPage },
+    OpenFontPicker,
+    CloseFontPicker,
     Quit,
+    AdjustTrackOffset { delta_ms: i64 },
+    ResetTrackOffset,
+    SaveConfig { config: Box<AppConfig> },
+    SearchLyrics { title: String, artist: String },
+    PreviewLyrics { index: usize },
+    ApplyLyrics,
+    OpenUrl { url: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,7 +145,13 @@ impl SimpleComponent for AppModel {
             config_saver,
         } = init;
         let i18n = I18n::new(config.general.language);
-        let overlay = view::build(&root, &config, i18n.clone(), sender.input_sender().clone());
+        let overlay = view::build(
+            &root,
+            &config,
+            i18n.clone(),
+            Rc::new(serde_json::json!({ "dependencies": [], "licenses": [] })),
+            sender.input_sender().clone(),
+        );
         let (player_sender, player_receiver) = mpsc::channel();
         let (player_hint_sender, player_hint_receiver) = mpsc::channel();
         backend.spawn_player_watcher(
@@ -143,24 +171,19 @@ impl SimpleComponent for AppModel {
             controller_config,
         );
 
-        let manual_search = manual_search::ManualSearchModel::builder()
-            .launch(manual_search::ManualSearchInit {
-                service: backend.manual_search(),
-                controller: controller.handle(),
-                i18n: i18n.clone(),
-            })
-            .detach();
-        let about = about::AboutModel::builder().launch(i18n.clone()).detach();
-        let settings = settings::SettingsModel::builder()
-            .launch(settings::SettingsInit {
-                initial: config.clone(),
-                config_saver,
-                i18n: i18n.clone(),
-            })
-            .forward(sender.input_sender(), |output| match output {
-                settings::SettingsOutput::Saved(config) => AppMsg::ConfigChanged(*config),
-                settings::SettingsOutput::OpenAbout => AppMsg::OpenAbout,
-            });
+        let manual_search = manual_search::ManualSearchCoordinator::new(
+            backend.manual_search(),
+            controller.handle(),
+        );
+        let control_center = control_center::ControlCenterView::new(
+            &config,
+            Rc::new(about::license_data_json()),
+            sender.input_sender().clone(),
+        );
+        let manual_search_window =
+            manual_search_window::ManualSearchView::new(&config, sender.input_sender().clone());
+        let font_picker =
+            font_picker_window::FontPickerView::new(&config, sender.input_sender().clone());
 
         {
             let input = sender.input_sender().clone();
@@ -174,9 +197,12 @@ impl SimpleComponent for AppModel {
             config,
             i18n,
             overlay,
-            settings,
+            control_center,
+            font_picker,
             manual_search,
-            about,
+            manual_search_window,
+            config_saver,
+            save_revision: 0,
             controller,
             song_info: "FloatLyrics".to_string(),
             track_offset_ms: 0,
@@ -188,7 +214,7 @@ impl SimpleComponent for AppModel {
         ComponentParts { model, widgets }
     }
 
-    fn update(&mut self, message: Self::Input, _sender: ComponentSender<Self>) {
+    fn update(&mut self, message: Self::Input, sender: ComponentSender<Self>) {
         match message {
             AppMsg::Tick => self.controller.tick(),
             AppMsg::SetSongInfo(value) => self.song_info = value,
@@ -197,43 +223,32 @@ impl SimpleComponent for AppModel {
             AppMsg::ShowLyrics(frame) => self.lyrics = LyricsPresentation::Content(frame),
             AppMsg::ShowStatus(key) => self.lyrics = LyricsPresentation::Status(key),
             AppMsg::OpenSettings => {
-                let _ = self.settings.sender().send(settings::SettingsMsg::Show);
+                self.control_center
+                    .show(view::web_lyrics::ControlPage::General);
             }
             AppMsg::OpenManualSearch => {
-                let _ = self
-                    .manual_search
-                    .sender()
-                    .send(manual_search::ManualSearchMsg::Show);
-            }
-            AppMsg::OpenAbout => {
-                let _ = self.about.sender().send(about::AboutMsg::Show);
-            }
-            AppMsg::AdjustTrackOffset(delta_ms) => {
-                self.controller.handle().adjust_track_offset(delta_ms);
-            }
-            AppMsg::ResetTrackOffset => {
-                self.controller.handle().reset_track_offset();
+                self.manual_search_window.show();
+                self.manual_search
+                    .prepare_and_search(sender.input_sender().clone());
+                self.render_search_state();
             }
             AppMsg::WindowMoved(position) => {
                 if self.config.window.remember_position {
-                    let _ = self.settings.sender().send(settings::SettingsMsg::Change(
-                        settings::ConfigChange::WindowPosition(position),
-                    ));
+                    let mut next = self.config.clone();
+                    next.window.position = Some(position);
+                    self.save_config(next, sender.input_sender().clone());
                 }
             }
-            AppMsg::ConfigChanged(next_config) => {
-                let reload_lyrics = should_reload_lyrics(&self.config, &next_config);
-                self.overlay.apply_config(&next_config);
-                self.i18n.set_language(next_config.general.language);
-                self.controller
-                    .update_config(LyricsRuntimeConfig::from(&next_config));
-                self.config = next_config;
-                self.controller.refresh_lyrics_presentation();
-                if reload_lyrics {
-                    self.controller.reload_lyrics();
-                }
+            AppMsg::UiAction(action) => {
+                self.handle_ui_action(action, sender.input_sender().clone())
             }
-            AppMsg::Quit => relm4::main_application().quit(),
+            AppMsg::SearchEvent(event) => {
+                self.manual_search.handle_event(event);
+                self.render_search_state();
+            }
+            AppMsg::ConfigSaveFinished { revision, result } => {
+                self.handle_config_saved(revision, result);
+            }
         }
     }
 
@@ -249,6 +264,114 @@ impl SimpleComponent for AppModel {
             }
             LyricsPresentation::Status(key) => self.overlay.show_status(*key),
         }
+    }
+}
+
+impl AppModel {
+    fn handle_ui_action(&mut self, action: UiAction, sender: relm4::Sender<AppMsg>) {
+        match action {
+            UiAction::OpenSettings => self
+                .control_center
+                .show(view::web_lyrics::ControlPage::General),
+            UiAction::OpenSearch => {
+                self.manual_search_window.show();
+                self.manual_search.prepare_and_search(sender);
+                self.render_search_state();
+            }
+            UiAction::OpenSettingsPage { page } => self.control_center.show(page),
+            UiAction::OpenFontPicker => self.font_picker.show(),
+            UiAction::CloseFontPicker => self.font_picker.hide(),
+            UiAction::Quit => relm4::main_application().quit(),
+            UiAction::AdjustTrackOffset { delta_ms } => {
+                self.controller.handle().adjust_track_offset(delta_ms)
+            }
+            UiAction::ResetTrackOffset => self.controller.handle().reset_track_offset(),
+            UiAction::SaveConfig { config } => self.save_config(*config, sender),
+            UiAction::SearchLyrics { title, artist } => {
+                self.manual_search.search(title, artist, sender);
+                self.render_search_state();
+            }
+            UiAction::PreviewLyrics { index } => {
+                self.manual_search.select(index, sender);
+                self.render_search_state();
+            }
+            UiAction::ApplyLyrics => {
+                self.manual_search.apply(sender);
+                self.render_search_state();
+            }
+            UiAction::OpenUrl { url } => {
+                if matches!(
+                    url.as_str(),
+                    "https://github.com/ChouChiu/FloatLyrics"
+                        | "https://github.com/MxIris-LyricsX-Project/LyricsX"
+                ) && let Err(error) = gtk::gio::AppInfo::launch_default_for_uri(
+                    &url,
+                    None::<&gtk::gio::AppLaunchContext>,
+                ) {
+                    tracing::warn!(%error, %url, "failed to open project link");
+                }
+            }
+        }
+    }
+
+    fn save_config(&mut self, config: AppConfig, sender: relm4::Sender<AppMsg>) {
+        if let Err(error) = config.validate() {
+            self.control_center
+                .set_config_state(&self.config, false, Some(&format!("{error:#}")));
+            self.font_picker
+                .set_config_state(&self.config, false, Some(&format!("{error:#}")));
+            return;
+        }
+        self.save_revision = self.save_revision.wrapping_add(1);
+        let revision = self.save_revision;
+        self.apply_config(config.clone());
+        self.control_center.set_config_state(&config, false, None);
+        self.font_picker.set_config_state(&config, false, None);
+        self.config_saver.save(config, move |result| {
+            let _ = sender.send(AppMsg::ConfigSaveFinished { revision, result });
+        });
+    }
+
+    fn handle_config_saved(&mut self, revision: u64, result: settings::ConfigSaveResult) {
+        use settings::ConfigSaveResult;
+        match result {
+            ConfigSaveResult::Saved if revision == self.save_revision => {
+                self.control_center
+                    .set_config_state(&self.config, true, None);
+                self.font_picker.set_config_state(&self.config, true, None);
+            }
+            ConfigSaveResult::Failed(error) if revision == self.save_revision => {
+                self.control_center
+                    .set_config_state(&self.config, false, Some(&error));
+                self.font_picker
+                    .set_config_state(&self.config, false, Some(&error));
+            }
+            ConfigSaveResult::Saved
+            | ConfigSaveResult::Failed(_)
+            | ConfigSaveResult::Superseded => {}
+        }
+    }
+
+    fn apply_config(&mut self, next_config: AppConfig) {
+        let reload_lyrics = should_reload_lyrics(&self.config, &next_config);
+        self.overlay.apply_config(&next_config);
+        self.i18n.set_language(next_config.general.language);
+        self.controller
+            .update_config(LyricsRuntimeConfig::from(&next_config));
+        self.config = next_config;
+        self.control_center.bootstrap(&self.config);
+        self.font_picker.bootstrap(&self.config);
+        self.manual_search_window.bootstrap(&self.config);
+        self.controller.refresh_lyrics_presentation();
+        self.render_search_state();
+        if reload_lyrics {
+            self.controller.reload_lyrics();
+        }
+    }
+
+    fn render_search_state(&self) {
+        self.manual_search_window
+            .set_search_state(&self.manual_search.snapshot(self.i18n.language()));
     }
 }
 

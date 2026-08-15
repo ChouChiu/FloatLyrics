@@ -5,7 +5,14 @@
 
 #[derive(Clone, Copy)]
 pub(super) enum CommandSlot {
+    Bootstrap,
     Config,
+    ConfigState,
+    SearchState,
+    Navigation,
+    OverlayState,
+    OverlayPlacement,
+    OverlayAppearance,
     Document,
     Frame {
         seeking: bool,
@@ -21,7 +28,14 @@ struct FrameCommand {
 
 #[derive(Default)]
 struct CommandBatch {
+    bootstrap: Option<String>,
     config: Option<String>,
+    config_state: Option<String>,
+    search_state: Option<String>,
+    navigation: Option<String>,
+    overlay_state: Option<String>,
+    overlay_placement: Option<String>,
+    overlay_appearance: Option<String>,
     document: Option<String>,
     frame: Option<FrameCommand>,
 }
@@ -29,7 +43,14 @@ struct CommandBatch {
 impl CommandBatch {
     fn enqueue(&mut self, slot: CommandSlot, script: String) {
         match slot {
+            CommandSlot::Bootstrap => self.bootstrap = Some(script),
             CommandSlot::Config => self.config = Some(script),
+            CommandSlot::ConfigState => self.config_state = Some(script),
+            CommandSlot::SearchState => self.search_state = Some(script),
+            CommandSlot::Navigation => self.navigation = Some(script),
+            CommandSlot::OverlayState => self.overlay_state = Some(script),
+            CommandSlot::OverlayPlacement => self.overlay_placement = Some(script),
+            CommandSlot::OverlayAppearance => self.overlay_appearance = Some(script),
             CommandSlot::Document => self.document = Some(script),
             CommandSlot::Frame {
                 seeking,
@@ -51,7 +72,14 @@ impl CommandBatch {
 
     fn script(&self) -> Option<String> {
         let scripts = [
+            self.bootstrap.as_deref(),
             self.config.as_deref(),
+            self.config_state.as_deref(),
+            self.search_state.as_deref(),
+            self.navigation.as_deref(),
+            self.overlay_state.as_deref(),
+            self.overlay_placement.as_deref(),
+            self.overlay_appearance.as_deref(),
             self.document.as_deref(),
             self.frame.as_ref().map(|frame| frame.script.as_str()),
         ]
@@ -64,6 +92,27 @@ impl CommandBatch {
     fn restore_behind(self, newer: &mut Self) {
         if newer.config.is_none() {
             newer.config = self.config;
+        }
+        if newer.bootstrap.is_none() {
+            newer.bootstrap = self.bootstrap;
+        }
+        if newer.config_state.is_none() {
+            newer.config_state = self.config_state;
+        }
+        if newer.search_state.is_none() {
+            newer.search_state = self.search_state;
+        }
+        if newer.navigation.is_none() {
+            newer.navigation = self.navigation;
+        }
+        if newer.overlay_state.is_none() {
+            newer.overlay_state = self.overlay_state;
+        }
+        if newer.overlay_placement.is_none() {
+            newer.overlay_placement = self.overlay_placement;
+        }
+        if newer.overlay_appearance.is_none() {
+            newer.overlay_appearance = self.overlay_appearance;
         }
         if newer.document.is_none() {
             newer.document = self.document;
