@@ -39,7 +39,6 @@ use state::OverlayStateHandle;
 use web_lyrics::{UiSurface, WebLyricsView, font_family, lyric_content_width};
 
 const PANEL_HORIZONTAL_GUTTER: i32 = 32;
-const PANEL_CHROME_WIDTH: i32 = 28;
 const PANEL_HEADER_HEIGHT: i32 = 42;
 const PANEL_ACTIONS_WIDTH: i32 = 232;
 
@@ -129,26 +128,15 @@ pub(super) fn build(
         window.set_margin(
             Edge::Left,
             initial_placement
-                .and_then(|placement| {
-                    left_position_for_width(
-                        window,
-                        &placement,
-                        panel_width.saturating_add(PANEL_CHROME_WIDTH),
-                    )
-                })
-                .or_else(|| initial_x(panel_width.saturating_add(PANEL_CHROME_WIDTH)))
+                .and_then(|placement| left_position_for_width(window, &placement, panel_width))
+                .or_else(|| initial_x(panel_width))
                 .unwrap_or_default(),
         );
         window.set_margin(
             Edge::Bottom,
             initial_placement
                 .and_then(|placement| {
-                    bottom_margin_from_placement(
-                        window,
-                        &placement,
-                        panel_width.saturating_add(PANEL_CHROME_WIDTH),
-                        fallback_height,
-                    )
+                    bottom_margin_from_placement(window, &placement, panel_width, fallback_height)
                 })
                 .unwrap_or_else(|| effective_bottom_margin(config)),
         );
@@ -200,7 +188,7 @@ pub(super) fn build(
         &drag_handle,
         FloatingDragLayout {
             stage: stage.clone(),
-            fallback_width: panel_width.saturating_add(PANEL_CHROME_WIDTH),
+            fallback_width: panel_width,
             fallback_height,
             initial_placement,
             initial_bottom_margin: effective_bottom_margin(config),
@@ -241,7 +229,7 @@ pub(super) fn build(
                 &stage,
                 &content,
                 &placement,
-                panel_width.saturating_add(PANEL_CHROME_WIDTH),
+                panel_width,
                 fallback_height,
             );
             setup_input_region(window, &content);
@@ -298,13 +286,7 @@ fn apply_panel_width(
 ) {
     content.set_width_request(width);
     lyrics_viewport.set_width_request(width);
-    reposition_for_width(
-        window,
-        stage,
-        content,
-        placement,
-        width.saturating_add(PANEL_CHROME_WIDTH),
-    );
+    reposition_for_width(window, stage, content, placement, width);
     setup_input_region(window, content);
 }
 
@@ -378,7 +360,7 @@ impl OverlayView {
                 &self.stage,
                 &self.content,
                 &self.placement,
-                width.saturating_add(PANEL_CHROME_WIDTH),
+                width,
                 fallback_height,
             );
         } else {
@@ -387,7 +369,7 @@ impl OverlayView {
                 bottom_margin_from_placement(
                     &self.window,
                     &self.placement.current(),
-                    width.saturating_add(PANEL_CHROME_WIDTH),
+                    width,
                     fallback_height,
                 )
                 .unwrap_or_else(|| effective_bottom_margin(config)),
@@ -398,7 +380,7 @@ impl OverlayView {
             &self.stage,
             &self.content,
             &self.placement,
-            width.saturating_add(PANEL_CHROME_WIDTH),
+            width,
         );
         self.lyrics_viewport.set_height_request(viewport_h);
         self.content.set_height_request(fallback_height);
@@ -420,15 +402,12 @@ impl OverlayView {
                     &stage,
                     &content,
                     &placement,
-                    width.saturating_add(PANEL_CHROME_WIDTH),
+                    width,
                     fallback_height,
                 );
-            } else if let Some(bottom_margin) = bottom_margin_from_placement(
-                &window,
-                &placement.current(),
-                width.saturating_add(PANEL_CHROME_WIDTH),
-                fallback_height,
-            ) {
+            } else if let Some(bottom_margin) =
+                bottom_margin_from_placement(&window, &placement.current(), width, fallback_height)
+            {
                 window.set_margin(Edge::Bottom, bottom_margin);
             }
             setup_input_region(&window, &content);
@@ -465,8 +444,7 @@ impl OverlayView {
     fn resize_to_measured_width(&self, measured_width: i32, animate: bool) {
         let metrics = self.state.metrics();
         let available_width = available_panel_width(&self.window, PANEL_HORIZONTAL_GUTTER)
-            .unwrap_or(MAX_EXPANDED_PANEL_WIDTH)
-            .saturating_sub(PANEL_CHROME_WIDTH);
+            .unwrap_or(MAX_EXPANDED_PANEL_WIDTH);
         let available_width = maximum_lyrics_width(available_width, metrics.apple_music_style);
         let width = expanded_panel_width(metrics.compact_width, measured_width, available_width);
         if animate {

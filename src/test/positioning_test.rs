@@ -90,6 +90,16 @@ fn anchored_resize_uses_expected_expansion_direction() {
 }
 
 #[test]
+fn right_anchored_panel_stays_flush_during_width_changes() {
+    let viewport_width = 1_920;
+
+    for panel_width in [320, 640, 960] {
+        let left = position_for_anchor(AxisAnchor::End, viewport_width, panel_width);
+        assert_eq!(left + panel_width, viewport_width);
+    }
+}
+
+#[test]
 fn converts_between_top_y_and_bottom_margin() {
     assert_eq!(y_from_bottom_margin(0, geometry()), 500);
     assert_eq!(y_from_bottom_margin(500, geometry()), 0);
