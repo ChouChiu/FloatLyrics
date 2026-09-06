@@ -120,12 +120,12 @@ pub(super) fn apply_lyrics_cache_event(
     };
     if generation != ctx.current_generation
         || ctx.state.track_fingerprint.as_deref() != Some(track_fingerprint)
-        || !ctx
+        || ctx
             .snapshot
             .state
             .track
             .as_ref()
-            .is_some_and(|track| track.fingerprint() == *track_fingerprint)
+            .is_none_or(|track| track.fingerprint() != *track_fingerprint)
     {
         return false;
     }
