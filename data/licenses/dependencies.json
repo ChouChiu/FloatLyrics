@@ -292,17 +292,17 @@
     },
     {
       "name": "floatlyrics",
-      "version": "1.1.2",
+      "version": "1.2.0",
       "license": "AGPL-3.0-only"
     },
     {
       "name": "floatlyrics-core",
-      "version": "1.1.2",
+      "version": "1.2.0",
       "license": "AGPL-3.0-only"
     },
     {
       "name": "floatlyrics-lyrics",
-      "version": "1.1.2",
+      "version": "1.2.0",
       "license": "AGPL-3.0-only"
     },
     {

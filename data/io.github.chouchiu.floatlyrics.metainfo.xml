@@ -47,6 +47,11 @@
   </screenshots>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="1.2.0" date="2026-09-06">
+      <description>
+        <p>Follows any MPRIS player with automatic active-player selection, adds per-track lyric timing offsets and exact provider track hints, rebuilds the overlay and settings interface, and refreshes the application icon.</p>
+      </description>
+    </release>
     <release version="1.1.2" date="2026-07-21">
       <description>
         <p>Adds click-through lyrics, improves Apple Music-style line transitions, and updates dependencies.</p>
