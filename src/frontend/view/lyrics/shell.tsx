@@ -3,7 +3,17 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { LyricsApp } from "./app";
-import { Button, Card, Icon, Input, Select, SettingRow, Slider, Switch } from "./components/ui";
+import {
+  AppIcon,
+  Button,
+  Card,
+  Icon,
+  Input,
+  Select,
+  SettingRow,
+  Slider,
+  Switch,
+} from "./components/ui";
 import type { AppConfig, ControlPage, SearchState } from "./types";
 import { sendUiAction, type UiState, uiStore } from "./ui-store";
 
@@ -562,9 +572,7 @@ function AboutPage({ state }: { state: UiState }) {
   return (
     <div className="page-stack about-content">
       <Card className="hero-card">
-        <div className="app-mark">
-          <Icon name="music" />
-        </div>
+        <AppIcon className="app-mark" />
         <h1>FloatLyrics</h1>
         <p>{t("AppSummary")}</p>
         <span>
@@ -633,9 +641,7 @@ export function ControlCenter({ state }: { state: UiState }) {
   return (
     <div className="control-center">
       <aside className="sidebar">
-        <div className="sidebar-title">
-          FloatLyrics <span>React</span>
-        </div>
+        <div className="sidebar-title">FloatLyrics</div>
         <nav>
           {(
             [

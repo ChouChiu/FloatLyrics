@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { currentAmllLines, documentToAmllLines, resolvedLineEnd } from "./amll";
 import { installLyricsBridge } from "./bridge";
-import { Icon, Slider } from "./components/ui";
+import { AppIcon, Icon, Slider } from "./components/ui";
 import { findSyllableRanges, syllableProgress } from "./karaoke";
 import { advanceLyricsViewState, initialLyricsViewState } from "./store";
 import type {
@@ -417,7 +417,6 @@ describe("React markup", () => {
       "remove",
       "x",
       "info",
-      "music",
     ] as const) {
       const html = renderToStaticMarkup(<Icon name={name} />);
       expect(html).toContain("<svg");
@@ -425,6 +424,14 @@ describe("React markup", () => {
       expect(html).toContain('class="remixicon icon"');
       expect(html).toContain('fill="currentColor"');
     }
+  });
+
+  test("renders the application icon mark", () => {
+    const html = renderToStaticMarkup(<AppIcon className="app-mark" />);
+    expect(html).toContain('class="app-mark"');
+    expect(html).toContain('aria-label="FloatLyrics"');
+    expect(html).toContain("url(#app-icon-backdrop)");
+    expect(html).toContain("url(#app-icon-accent)");
   });
 
   test("renders plain lyrics and secondary text", () => {

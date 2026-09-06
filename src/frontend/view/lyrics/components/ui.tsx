@@ -11,7 +11,6 @@ import {
   RiDeleteBin6Line,
   RiInformationLine,
   RiLayoutLine,
-  RiMusic2Line,
   RiSearchLine,
   RiSettings3Line,
   RiSubtractLine,
@@ -189,8 +188,7 @@ type IconName =
   | "down"
   | "remove"
   | "x"
-  | "info"
-  | "music";
+  | "info";
 
 const icons: Record<IconName, RemixiconComponentType> = {
   minus: RiSubtractLine,
@@ -204,10 +202,53 @@ const icons: Record<IconName, RemixiconComponentType> = {
   remove: RiDeleteBin6Line,
   x: RiCloseLine,
   info: RiInformationLine,
-  music: RiMusic2Line,
 };
 
 export function Icon({ name }: { name: IconName }) {
   const RemixIcon = icons[name];
   return <RemixIcon aria-hidden="true" className="icon" />;
+}
+
+export function AppIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 512 512"
+      xmlns="http://www.w3.org/2000/svg"
+      role="img"
+      aria-label="FloatLyrics"
+    >
+      <defs>
+        <linearGradient
+          id="app-icon-accent"
+          gradientUnits="userSpaceOnUse"
+          x1="140"
+          y1="300"
+          x2="380"
+          y2="180"
+        >
+          <stop offset="0" stopColor="#2ee0ff" />
+          <stop offset="0.5" stopColor="#7a6bff" />
+          <stop offset="1" stopColor="#e34bff" />
+        </linearGradient>
+        <linearGradient
+          id="app-icon-backdrop"
+          gradientUnits="userSpaceOnUse"
+          x1="40"
+          y1="40"
+          x2="400"
+          y2="472"
+        >
+          <stop offset="0" stopColor="#1b2057" />
+          <stop offset="1" stopColor="#0b0d24" />
+        </linearGradient>
+      </defs>
+      <rect x="40" y="40" width="432" height="432" rx="108" fill="url(#app-icon-backdrop)" />
+      <g fill="none" strokeLinecap="round">
+        <path d="M150 170h150" stroke="#5b638f" strokeWidth="24" />
+        <path d="M150 256h212" stroke="url(#app-icon-accent)" strokeWidth="42" />
+        <path d="M150 342h124" stroke="#5b638f" strokeWidth="24" />
+      </g>
+    </svg>
+  );
 }

@@ -323,16 +323,6 @@ button {
   font-weight: 700;
   letter-spacing: -0.02em;
 }
-.sidebar-title span {
-  margin-left: 5px;
-  padding: 2px 5px;
-  border-radius: 4px;
-  background: var(--muted);
-  color: var(--muted-foreground);
-  font-size: 9px;
-  text-transform: uppercase;
-  vertical-align: middle;
-}
 .sidebar nav {
   display: flex;
   flex-direction: column;
@@ -657,17 +647,8 @@ button {
   font-size: 12px;
 }
 .app-mark {
-  display: grid;
-  width: 68px;
-  height: 68px;
-  place-items: center;
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background: linear-gradient(145deg, #27272a, #111114);
-}
-.app-mark .icon {
-  width: 34px;
-  height: 34px;
+  width: 76px;
+  height: 76px;
 }
 .dependency-grid {
   display: grid;
