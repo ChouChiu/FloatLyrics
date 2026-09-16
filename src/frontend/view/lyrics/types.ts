@@ -167,6 +167,7 @@ export type UiAction =
   | { type: "quit" }
   | { type: "adjust-track-offset"; delta_ms: number }
   | { type: "reset-track-offset" }
+  | { type: "reload-lyrics" }
   | { type: "save-config"; config: AppConfig }
   | { type: "search-lyrics"; title: string; artist: string }
   | { type: "preview-lyrics"; index: number }

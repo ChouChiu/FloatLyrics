@@ -14,6 +14,7 @@ mod manual_search;
 mod manual_search_window;
 mod settings;
 mod style;
+mod tray;
 mod view;
 
 use anyhow::Result;
@@ -69,6 +70,7 @@ struct AppModel {
     track_offset_ms: i64,
     lyrics: LyricsPresentation,
     lyrics_document: Option<LyricsDocument>,
+    tray: Option<tray::TrayHandle>,
     _backend: backend::Backend,
 }
 
@@ -108,6 +110,7 @@ enum UiAction {
     Quit,
     AdjustTrackOffset { delta_ms: i64 },
     ResetTrackOffset,
+    ReloadLyrics,
     SaveConfig { config: Box<AppConfig> },
     SearchLyrics { title: String, artist: String },
     PreviewLyrics { index: usize },
@@ -247,6 +250,7 @@ impl SimpleComponent for AppModel {
             track_offset_ms: 0,
             lyrics: LyricsPresentation::Status(floatlyrics_core::i18n::Text::OpenPlayer),
             lyrics_document: None,
+            tray,
             _backend: backend,
         };
         let widgets = view_output!();
@@ -331,6 +335,7 @@ impl AppModel {
                 self.controller.handle().adjust_track_offset(delta_ms)
             }
             UiAction::ResetTrackOffset => self.controller.handle().reset_track_offset(),
+            UiAction::ReloadLyrics => self.controller.handle().reload_lyrics(),
             UiAction::SaveConfig { config } => self.save_config(*config, sender),
             UiAction::SearchLyrics { title, artist } => {
                 self.manual_search.search(title, artist, sender);
@@ -409,8 +414,13 @@ impl AppModel {
 
     fn apply_config(&mut self, next_config: AppConfig) {
         let reload_lyrics = should_reload_lyrics(&self.config, &next_config);
-        self.overlay.apply_config(&next_config);
+        if let Some(overlay) = &self.overlay {
+            overlay.apply_config(&next_config);
+        }
         self.i18n.set_language(next_config.general.language);
+        if let Some(tray) = &self.tray {
+            tray.set_language(next_config.general.language);
+        }
         self.controller
             .update_config(LyricsRuntimeConfig::from(&next_config));
         self.config = next_config;
