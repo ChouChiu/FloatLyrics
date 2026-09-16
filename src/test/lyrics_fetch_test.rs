@@ -7,14 +7,14 @@ use crate::{
         controller::loading::{
             LyricsCacheApplyContext, LyricsCacheEvent, apply_lyrics_cache_event,
         },
-        mpris::{PlaybackStatus, SpotifyPlayerState},
+        mpris::{PlaybackStatus, PlayerState},
     },
-    shared::config::AppConfig,
+    shared::{config::AppConfig, presentation::PlayerControl},
 };
 use floatlyrics_core::{i18n::Message, track::TrackMetadata};
 use floatlyrics_lyrics::{
     cache::CachedLyrics,
-    lyrics::{FetchedLyrics, LyricsLookupHint, LyricsProvider, TimedLine},
+    lyrics::{FetchedLyrics, LyricsLookupHint, LyricsProvider, TimedLine, Voice},
 };
 
 #[test]

@@ -10,8 +10,10 @@ use zvariant::{OwnedObjectPath, OwnedValue, Value};
 
 use floatlyrics_core::track::TrackMetadata;
 
+use crate::shared::presentation::PlayerControl;
+
 /// State change emitted by the background MPRIS watcher.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PlayerWatcherEvent {
     /// A matching player appeared with its initial state.
     Connected(PlayerState),
@@ -33,7 +35,7 @@ pub enum PlayerWatcherEvent {
 }
 
 /// Latest known state for one MPRIS player.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PlayerState {
     /// D-Bus well-known name of the player instance.
     pub bus_name: String,
@@ -43,6 +45,8 @@ pub struct PlayerState {
     pub position_ms: Option<u64>,
     /// Current track metadata, when known.
     pub track: Option<TrackMetadata>,
+    /// Volume, playback modes, and capabilities of the player.
+    pub(crate) control: PlayerControl,
 }
 
 /// Typed subset of MPRIS metadata used by FloatLyrics.

@@ -41,13 +41,8 @@ impl Backend {
         sender: mpsc::Sender<mpris::PlayerWatcherEvent>,
         hint_sender: mpsc::Sender<mpris::PlayerLyricsHintEvent>,
         selection: mpris::PlayerSelection,
-    ) {
-        mpris::spawn_player_watcher_with_hints(
-            self.runtime.handle(),
-            sender,
-            hint_sender,
-            selection,
-        );
+    ) -> mpris::MediaControlHandle {
+        mpris::spawn_player_watcher(self.runtime.handle(), sender, hint_sender, selection)
     }
 
     pub(crate) fn controller(

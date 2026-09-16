@@ -1,4 +1,5 @@
 use super::*;
+
 use crate::backend::mpris::PlayerState;
 use crate::shared::config::AppConfig;
 use crate::shared::presentation::PlayerControl;
@@ -205,6 +206,7 @@ fn player_state_with_status(
         bus_name: "org.mpris.MediaPlayer2.spotify".to_string(),
         playback_status,
         position_ms: Some(position_ms),
+        control: PlayerControl::default(),
         track: Some(TrackMetadata {
             title: title.to_string(),
             artists: vec!["Artist".to_string()],

@@ -7,7 +7,7 @@ use crate::{
     },
     shared::{
         config::AppConfig,
-        presentation::{LyricsDocument, LyricsFrame},
+        presentation::{LyricsDocument, LyricsFrame, PlayerControl},
     },
 };
 use floatlyrics_lyrics::lyrics::{LyricsLookupHint, LyricsProvider, TimedLine, Voice};
@@ -272,6 +272,7 @@ fn snapshot(title: &str) -> PlaybackSnapshot {
             bus_name: "org.mpris.MediaPlayer2.spotify".to_string(),
             playback_status: PlaybackStatus::Paused,
             position_ms: Some(1_000),
+            control: PlayerControl::default(),
             track: Some(TrackMetadata {
                 title: title.to_string(),
                 artists: vec!["Artist".to_string()],
