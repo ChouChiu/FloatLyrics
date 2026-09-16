@@ -7,6 +7,7 @@ use gtk::prelude::*;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
+    sync::Arc,
 };
 use webkit6::prelude::*;
 
@@ -141,13 +142,13 @@ impl WebLyricsView {
         };
         renderer.bootstrap(config);
         renderer.apply_config(config);
-        renderer.show(LyricsFrame {
+        renderer.show(Arc::new(LyricsFrame {
             key: "initial".to_string(),
             content: LyricSlotText::message(initial_text),
             position_ms: None,
             playing: false,
             seeking: false,
-        });
+        }));
         renderer
     }
 
@@ -227,7 +228,7 @@ impl WebLyricsView {
         self.submit(CommandSlot::Document, command::document_script(document));
     }
 
-    pub(super) fn show(&self, frame: LyricsFrame) {
+    pub(super) fn show(&self, frame: Arc<LyricsFrame>) {
         self.submit(
             CommandSlot::Frame {
                 seeking: frame.seeking,

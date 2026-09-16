@@ -20,7 +20,12 @@ use anyhow::Result;
 use gtk::prelude::*;
 use relm4::{ComponentParts, ComponentSender, MessageBroker, RelmApp, SimpleComponent};
 use serde::Deserialize;
-use std::{ffi::OsStr, rc::Rc, sync::mpsc};
+use std::{
+    ffi::OsStr,
+    rc::Rc,
+    sync::{Arc, mpsc},
+    time::Duration,
+};
 
 use crate::{
     backend::{self},
@@ -60,7 +65,7 @@ struct AppModel {
 
 #[derive(Debug, Clone)]
 enum LyricsPresentation {
-    Content(LyricsFrame),
+    Content(Arc<LyricsFrame>),
     Status(floatlyrics_core::i18n::Text),
 }
 
@@ -70,7 +75,7 @@ enum AppMsg {
     SetSongInfo(String),
     SetTrackOffset(i64),
     SetLyricsDocument(LyricsDocument),
-    ShowLyrics(LyricsFrame),
+    ShowLyrics(Arc<LyricsFrame>),
     ShowStatus(floatlyrics_core::i18n::Text),
     OpenSettings,
     OpenManualSearch,
@@ -260,7 +265,7 @@ impl SimpleComponent for AppModel {
         }
         match &self.lyrics {
             LyricsPresentation::Content(frame) => {
-                self.overlay.show_lyrics(frame.clone());
+                overlay.show_lyrics(Arc::clone(frame));
             }
             LyricsPresentation::Status(key) => self.overlay.show_status(*key),
         }

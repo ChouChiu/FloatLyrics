@@ -6,13 +6,13 @@ import { type CSSProperties, useLayoutEffect, useMemo, useRef, useSyncExternalSt
 import { currentAmllLines, documentToAmllLines } from "./amll";
 import { karaokeFill } from "./karaoke";
 import { type LyricsViewState, lyricsStore, type SlotSnapshot } from "./store";
+import type { LyricsStyle } from "./types";
 
 type LyricsCssProperties = CSSProperties & Record<`--${string}`, string>;
 
 export const AMLL_WORD_FADE_WIDTH = 0;
 
-function cssVariables(state: LyricsViewState): LyricsCssProperties | undefined {
-  const style = state.style;
+function cssVariables(style: LyricsStyle | null): LyricsCssProperties | undefined {
   if (!style) return undefined;
   return {
     "--font-family": style.font_family,
@@ -26,8 +26,7 @@ function cssVariables(state: LyricsViewState): LyricsCssProperties | undefined {
   };
 }
 
-function appleMusicCssVariables(state: LyricsViewState): LyricsCssProperties | undefined {
-  const style = state.style;
+function appleMusicCssVariables(style: LyricsStyle | null): LyricsCssProperties | undefined {
   if (!style) return undefined;
   return {
     "--amll-lp-font-family": style.font_family,
@@ -163,9 +162,11 @@ function AppleMusicSlot({
 
 export function LyricsViewport({ state }: { state: LyricsViewState }) {
   const slotRefs = useSlotTransition(state);
+  // Rebuilt only with the style: the viewport re-renders on every frame.
+  const style = useMemo(() => cssVariables(state.style), [state.style]);
 
   return (
-    <main id="viewport" aria-live="off" style={cssVariables(state)}>
+    <main id="viewport" aria-live="off" style={style}>
       <LyricSlot
         snapshot={state.slots[0]}
         setSlotRef={(element) => {
@@ -190,7 +191,7 @@ export function AppleMusicLyrics({ state }: { state: LyricsViewState }) {
     [documentLines, frame?.key],
   );
   const slotRefs = useSlotTransition(state);
-  const style = appleMusicCssVariables(state);
+  const style = useMemo(() => appleMusicCssVariables(state.style), [state.style]);
   if (!frame || frame.position_ms === null || !hasCurrentLine) {
     return <LyricsViewport state={state} />;
   }
