@@ -157,20 +157,6 @@ impl MprisMetadata {
     }
 }
 
-/// Compatibility alias for the former Spotify-specific event name.
-pub type SpotifyWatcherEvent = PlayerWatcherEvent;
-/// Compatibility alias for the former Spotify-specific player-state name.
-pub type SpotifyPlayerState = PlayerState;
-/// Compatibility alias for the former Spotify-specific metadata name.
-pub type SpotifyMetadata = MprisMetadata;
-
-/// Compatibility wrapper for the former Spotify-specific conversion function.
-pub fn spotify_metadata_from_mpris(
-    metadata: &HashMap<String, OwnedValue>,
-) -> Option<MprisMetadata> {
-    metadata_from_mpris(metadata)
-}
-
 /// Normalized MPRIS playback status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaybackStatus {

@@ -32,8 +32,6 @@ use super::{
 
 /// Prefix shared by all standard MPRIS well-known bus names.
 pub const MPRIS_BUS_PREFIX: &str = "org.mpris.MediaPlayer2.";
-/// Default D-Bus well-known-name prefix used by Spotify for Linux.
-pub const SPOTIFY_MPRIS_PREFIX: &str = "org.mpris.MediaPlayer2.spotify";
 const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
 const ROOT_IFACE: &str = "org.mpris.MediaPlayer2";
 const PLAYER_IFACE: &str = "org.mpris.MediaPlayer2.Player";
@@ -82,19 +80,6 @@ struct PlayerObservation {
     lyrics_hint: Option<LyricsLookupHint>,
 }
 
-/// Returns whether `name` is the Spotify MPRIS name or one of its instances.
-pub fn is_spotify_mpris_name(name: &str) -> bool {
-    is_mpris_name_with_prefix(name, SPOTIFY_MPRIS_PREFIX)
-}
-
-/// Lists Spotify MPRIS instances currently registered on `connection`.
-///
-/// # Errors
-/// Returns a D-Bus error when names cannot be queried.
-pub async fn spotify_mpris_names(connection: &Connection) -> zbus::Result<Vec<String>> {
-    mpris_names_with_prefix(connection, SPOTIFY_MPRIS_PREFIX).await
-}
-
 /// Lists all standard MPRIS player names currently registered on `connection`.
 ///
 /// # Errors
@@ -109,17 +94,6 @@ pub async fn mpris_player_names(connection: &Connection) -> zbus::Result<Vec<Str
             name.strip_prefix(MPRIS_BUS_PREFIX)
                 .is_some_and(|suffix| !suffix.is_empty())
         })
-        .collect())
-}
-
-async fn mpris_names_with_prefix(
-    connection: &Connection,
-    prefix: &str,
-) -> zbus::Result<Vec<String>> {
-    Ok(mpris_player_names(connection)
-        .await?
-        .into_iter()
-        .filter(|name| is_mpris_name_with_prefix(name, prefix))
         .collect())
 }
 

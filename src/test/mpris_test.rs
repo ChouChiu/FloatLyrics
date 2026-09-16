@@ -9,23 +9,14 @@ fn owned(value: impl Into<Value<'static>>) -> OwnedValue {
 }
 
 #[test]
-fn filters_spotify_mpris_names_only() {
-    assert!(is_spotify_mpris_name("org.mpris.MediaPlayer2.spotify"));
-    assert!(is_spotify_mpris_name(
-        "org.mpris.MediaPlayer2.spotify.instance123"
-    ));
-    assert!(!is_spotify_mpris_name("org.mpris.MediaPlayer2.vlc"));
-    assert!(!is_spotify_mpris_name("org.example.spotify"));
-}
-
-#[test]
-fn converts_spotify_metadata_to_internal_track() {
-    let track = SpotifyMetadata {
+fn converts_mpris_metadata_to_internal_track() {
+    let track = MprisMetadata {
         title: " Track ".to_string(),
         artists: vec![" Alice ".to_string(), "Bob".to_string()],
         album: Some(" Album ".to_string()),
         length_us: Some(215_500_000),
         track_id: Some("/org/mpris/MediaPlayer2/Track/42".to_string()),
+        art_url: Some(" https://i.example.test/cover.jpg ".to_string()),
     }
     .into_track_metadata()
     .unwrap();
@@ -133,7 +124,7 @@ fn parses_mpris_metadata_map() {
     );
     metadata.insert("xesam:url".to_string(), owned("fuo://netease/songs/123"));
 
-    let parsed = spotify_metadata_from_mpris(&metadata).unwrap();
+    let parsed = metadata_from_mpris(&metadata).unwrap();
 
     assert_eq!(parsed.title, "Song");
     assert_eq!(parsed.artists, vec!["Alice", "Bob"]);
