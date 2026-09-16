@@ -10,6 +10,7 @@ mod model;
 mod parsing;
 mod romanization;
 mod search;
+mod segmentation;
 mod timeline;
 
 pub use lyrics_helper::{LineInfo, LyricsData, LyricsTypes, generate_string};
@@ -28,6 +29,7 @@ pub use search::{
     SearchPlan, fetch_candidate_lyrics, search_best_lyrics, search_best_lyrics_with_hint,
     search_lyrics_candidates, simplify_search_text,
 };
+pub use segmentation::segment_lines_into_words;
 pub use timeline::{active_line_index, line_index_at_or_before};
 
 /// Detects and parses a non-XML lyrics document.
