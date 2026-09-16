@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::lyrics::model::Voice;
+
 fn line_at(text: &str, start_ms: u64) -> TimedLine {
     TimedLine {
         start_ms,
@@ -10,6 +12,7 @@ fn line_at(text: &str, start_ms: u64) -> TimedLine {
         romanization: None,
         romanization_segments: Vec::new(),
         background: None,
+        voice: Voice::Primary,
     }
 }
 

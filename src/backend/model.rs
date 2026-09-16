@@ -87,6 +87,7 @@ pub(super) fn lyrics_document(
             .iter()
             .map(|line| {
                 let visible = line_text(Some(line), config);
+                let background = line.background.as_ref();
                 PresentedLyricLine {
                     start_ms: line.start_ms,
                     end_ms: line.end_ms,
@@ -94,13 +95,23 @@ pub(super) fn lyrics_document(
                     syllables: line.syllables.clone(),
                     romanization: visible.romanization,
                     translation: visible.translation,
-                    background: line
-                        .background
-                        .as_deref()
+                    background: background
+                        .map(|sung| sung.text.trim())
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or_default()
+                        .to_string(),
+                    background_translation: background
+                        .and_then(|sung| sung.translation.as_deref())
                         .map(str::trim)
                         .filter(|value| !value.is_empty())
                         .unwrap_or_default()
                         .to_string(),
+                    background_start_ms: background.map_or(line.start_ms, |sung| sung.start_ms),
+                    background_end_ms: background.and_then(|sung| sung.end_ms),
+                    background_syllables: background
+                        .map(|sung| sung.syllables.clone())
+                        .unwrap_or_default(),
+                    voice: line.voice,
                 }
             })
             .collect(),

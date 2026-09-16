@@ -10,7 +10,7 @@ use crate::{
         presentation::{LyricsDocument, LyricsFrame},
     },
 };
-use floatlyrics_lyrics::lyrics::{LyricsLookupHint, LyricsProvider, TimedLine};
+use floatlyrics_lyrics::lyrics::{LyricsLookupHint, LyricsProvider, TimedLine, Voice};
 use std::time::Duration;
 
 #[test]
@@ -295,5 +295,25 @@ fn line(text: &str) -> TimedLine {
         romanization: None,
         romanization_segments: Vec::new(),
         background: None,
+        voice: Voice::Primary,
+    }
+}
+
+/// Records what the listener is told, which is what a listener can observe.
+#[derive(Default)]
+struct RecordingLyricsView {
+    metadata: RefCell<Vec<Vec<String>>>,
+    song_info: RefCell<Vec<String>>,
+}
+
+impl LyricsView for RecordingLyricsView {
+    fn set_song_info(&self, value: &str) {
+        self.song_info.borrow_mut().push(value.to_string());
+    }
+
+    fn set_track_metadata(&self, track: Option<&TrackMetadata>) {
+        if let Some(track) = track {
+            self.metadata.borrow_mut().push(track.artists.clone());
+        }
     }
 }

@@ -301,6 +301,11 @@ describe("AMLL conversion", () => {
     romanization: "hello",
     translation: "你好",
     background: "echo",
+    background_translation: "回声",
+    background_start_ms: 1_000,
+    background_end_ms: null,
+    background_syllables: [],
+    voice: "primary",
   };
 
   test("resolves missing line ends in document order", () => {
@@ -510,6 +515,11 @@ describe("React markup", () => {
           romanization: "",
           translation: "",
           background: "",
+          background_translation: "",
+          background_start_ms: 0,
+          background_end_ms: null,
+          background_syllables: [],
+          voice: "primary",
         },
         {
           start_ms: 2_000,
@@ -519,6 +529,11 @@ describe("React markup", () => {
           romanization: "",
           translation: "",
           background: "",
+          background_translation: "",
+          background_start_ms: 0,
+          background_end_ms: null,
+          background_syllables: [],
+          voice: "primary",
         },
       ],
     };
@@ -552,6 +567,11 @@ describe("React markup", () => {
           romanization: "romanization",
           translation: "translation",
           background: "",
+          background_translation: "",
+          background_start_ms: 0,
+          background_end_ms: null,
+          background_syllables: [],
+          voice: "primary",
         },
       ],
     };

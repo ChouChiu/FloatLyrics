@@ -8,12 +8,16 @@ use lyrics_helper::{
     LineInfo, LyricsData, LyricsTypes, generate_string, parse_auto as parse_helper,
 };
 
-use super::model::{TimedLine, TimedSyllable};
+use super::model::{BackgroundVocal, TimedLine, TimedSyllable, Voice};
 
+mod conventions;
 mod filter;
 mod lrc;
 mod qrc;
 
+use conventions::{
+    apply_speaker_labels, fold_bracketed_echoes, merge_continued_lines, split_background_vocals,
+};
 use lrc::timed_lines_from_lrc;
 use qrc::timed_lines_from_qrc;
 
@@ -42,42 +46,63 @@ pub fn parse_local_lyrics(content: &str) -> Result<LyricsData> {
 
 /// Parses raw provider lyrics into sorted, display-ready lines.
 ///
-/// Translation sections are merged and known metadata or credit lines are
-/// removed. Provider pronunciation is intentionally discarded; call
+/// `artists` are the ones the provider that supplied these lyrics credits, and
+/// are what a speaker label in the payload is matched against. Translation
+/// sections are merged, the conventions of the transcription itself are read into
+/// the lines, and known metadata or credit lines are removed. Provider
+/// pronunciation is intentionally discarded; call
 /// [`super::generate_local_romanization`] when local romanization is wanted.
 ///
 /// # Errors
 /// Returns an error when no supported timed format can be parsed.
-pub fn timed_lines_from_raw(content: &str) -> Result<Vec<TimedLine>> {
+pub fn timed_lines_from_raw(content: &str, artists: &[String]) -> Result<Vec<TimedLine>> {
     let (lyrics, translation) = split_translation_section(content);
-    let mut lines = parse_timed_lines_block(lyrics)?;
+    let mut lines = parse_timed_lines_block(lyrics, artists)?;
     if let Some(translation) = translation {
-        let translation_lines = parse_timed_lines_block(translation)?;
+        // A translation document is written for the track rather than by one of
+        // its performers, so no label in it names a voice.
+        let translation_lines = parse_timed_lines_block(translation, &[])?;
         merge_translation_lines(&mut lines, translation_lines);
     }
-    if lines.is_empty() {
-        Err(anyhow!("lyrics did not include timed lines"))
-    } else {
-        Ok(lines)
-    }
+    // After the translations are paired: an echo is a line of its own until it is
+    // folded away, so it collects the translation timed to it, and each row of a
+    // sentence carries its own translation until the rows are joined.
+    fold_bracketed_echoes(&mut lines);
+    merge_continued_lines(&mut lines);
+    require_lines(lines)
 }
 
-fn parse_timed_lines_block(content: &str) -> Result<Vec<TimedLine>> {
+/// Returns the lines a payload parsed into, or the error for one without any.
+fn require_lines(lines: Vec<TimedLine>) -> Result<Vec<TimedLine>> {
+    if lines.is_empty() {
+        return Err(anyhow!("lyrics did not include timed lines"));
+    }
+    Ok(lines)
+}
+
+fn parse_timed_lines_block(content: &str, artists: &[String]) -> Result<Vec<TimedLine>> {
     let mut lines = timed_lines_from_lrc(content);
     if lines.is_empty() {
         lines = timed_lines_from_qrc(content);
     }
     if !lines.is_empty() {
-        return Ok(lines);
+        return Ok(finish(lines, artists));
     }
 
     let parsed = parse_local_lyrics(content)?;
-    let lines = timed_lines_from_data(&parsed);
-    if lines.is_empty() {
-        Err(anyhow!("lyrics did not include timed lines"))
-    } else {
-        Ok(lines)
-    }
+    require_lines(timed_lines_from_data(&parsed, artists))
+}
+
+/// Reads a provider's own transcription conventions and drops non-lyric rows.
+///
+/// A label may name a performer, so it is read before the filter drops the rows
+/// that look like one; a bracketed tail is only split off a word-timed line, so
+/// this runs before the timed units are split into words.
+fn finish(lines: Vec<TimedLine>, artists: &[String]) -> Vec<TimedLine> {
+    let mut lines = merge_translation_marker_lines(lines);
+    apply_speaker_labels(&mut lines, artists);
+    split_background_vocals(&mut lines);
+    filter_display_lines(lines)
 }
 
 /// Serializes parsed lyrics as `ty`.
@@ -90,9 +115,10 @@ pub fn export_lyrics(data: &LyricsData, ty: LyricsTypes) -> Result<String> {
 
 /// Converts already parsed lyrics to sorted, display-ready lines.
 ///
-/// Provider pronunciation is intentionally discarded; call
-/// [`super::generate_local_romanization`] when local romanization is wanted.
-pub fn timed_lines_from_data(data: &LyricsData) -> Vec<TimedLine> {
+/// `artists` are matched against speaker labels exactly as in
+/// [`timed_lines_from_raw`]. Provider pronunciation is intentionally discarded;
+/// call [`super::generate_local_romanization`] when local romanization is wanted.
+pub fn timed_lines_from_data(data: &LyricsData, artists: &[String]) -> Vec<TimedLine> {
     let Some(lines) = data.lines.as_deref() else {
         return Vec::new();
     };
@@ -102,7 +128,11 @@ pub fn timed_lines_from_data(data: &LyricsData) -> Vec<TimedLine> {
         .filter_map(timed_line_from_info)
         .collect::<Vec<_>>();
     timed_lines.sort_by_key(|line| line.start_ms);
-    filter_display_lines(merge_translation_marker_lines(timed_lines))
+    let mut timed_lines = finish(timed_lines, artists);
+    // A row carries the translation of its own line, so the rows of one sentence are
+    // joined once they have both been paired with it.
+    merge_continued_lines(&mut timed_lines);
+    timed_lines
 }
 
 /// Combines a primary document and optional translation into one parseable payload.
@@ -128,7 +158,16 @@ fn timed_line_from_info(line: &LineInfo) -> Option<TimedLine> {
     let text = line.full_text();
     let syllables = timed_syllables_from_info(line);
     let translation = preferred_translation(line);
-    let background = line.sub_line().map(LineInfo::text_from_any);
+    let background = line.sub_line().map(|sub| BackgroundVocal {
+        text: sub.text_from_any(),
+        // A bracketed phrase is translated inside its brackets, which the
+        // background vocal is already drawn with.
+        translation: preferred_translation(sub)
+            .map(|translation| conventions::unwrap_brackets(&translation)),
+        start_ms: sub.start_time().and_then(ms_i32_to_u64).unwrap_or(start_ms),
+        end_ms: sub.end_time().and_then(ms_i32_to_u64),
+        syllables: timed_syllables_from_info(sub),
+    });
 
     if text.trim().is_empty() && translation.is_none() {
         return None;
@@ -143,6 +182,7 @@ fn timed_line_from_info(line: &LineInfo) -> Option<TimedLine> {
         romanization: None,
         romanization_segments: Vec::new(),
         background,
+        voice: Voice::Primary,
     })
 }
 
@@ -181,15 +221,20 @@ fn merge_translation_marker_lines(lines: Vec<TimedLine>) -> Vec<TimedLine> {
             continue;
         }
 
+        // A background vocal whose text is a translation marker *is* the
+        // translation; any other one stays the background it is.
+        let marker = line
+            .background
+            .as_ref()
+            .and_then(|background| marker_owned(&background.text));
+        if marker.is_some() {
+            line.background = None;
+        }
         line.translation = line
             .translation
-            .take()
-            .and_then(|value| clean_optional_text(&value))
-            .or_else(|| {
-                line.background
-                    .take()
-                    .and_then(|value| marker_owned(&value))
-            });
+            .as_deref()
+            .and_then(clean_optional_text)
+            .or(marker);
         merged.push(line);
     }
 

@@ -28,7 +28,7 @@ pub(super) fn lyrics_state_from_cached(
     runtime: &tokio::runtime::Handle,
     romanization_sender: &mpsc::Sender<RomanizationEvent>,
 ) -> LyricsDisplayState {
-    let lines = match timed_lines_from_raw(&cached.raw_lyrics) {
+    let mut lines = match timed_lines_from_raw(&cached.raw_lyrics, &cached.artists) {
         Ok(lines) => lines,
         Err(error) => {
             return LyricsDisplayState {

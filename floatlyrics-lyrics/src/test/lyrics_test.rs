@@ -11,11 +11,12 @@ fn line(start_ms: u64, end_ms: Option<u64>, text: &str) -> TimedLine {
         romanization: None,
         romanization_segments: Vec::new(),
         background: None,
+        voice: Voice::Primary,
     }
 }
 
 fn romanized_lines(raw: &str) -> Vec<TimedLine> {
-    let mut lines = timed_lines_from_raw(raw).unwrap();
+    let mut lines = timed_lines_from_raw(raw, &[]).unwrap();
     generate_local_romanization(&mut lines);
     lines
 }
@@ -115,7 +116,7 @@ fn maps_track_metadata_for_lyrics_helper_search() {
 #[test]
 fn converts_lyrics_helper_lines_to_timed_lines() {
     let parsed = parse_local_lyrics("[00:01.00]First\n[00:03.00]Second").unwrap();
-    let lines = timed_lines_from_data(&parsed);
+    let lines = timed_lines_from_data(&parsed, &[]);
 
     assert_eq!(lines.len(), 2);
     assert_eq!(lines[0].start_ms, 1_000);
@@ -657,7 +658,7 @@ fn recognizes_japanese_lyrics_written_only_with_kanji() {
 
 #[test]
 fn parsing_does_not_generate_romanization_until_requested() {
-    let lines = timed_lines_from_raw("[00:01.00]¿Cómo estás?").unwrap();
+    let lines = timed_lines_from_raw("[00:01.00]¿Cómo estás?", &[]).unwrap();
 
     assert_eq!(lines[0].romanization, None);
     assert!(lines[0].romanization_segments.is_empty());
@@ -669,7 +670,7 @@ fn combines_translation_lrc_into_timed_lines() {
         "[00:01.00]Hello\n[00:03.00]World",
         Some("[00:01.00]你好\n[00:03.00]世界"),
     );
-    let lines = timed_lines_from_raw(&raw).unwrap();
+    let lines = timed_lines_from_raw(&raw, &[]).unwrap();
 
     assert_eq!(lines.len(), 2);
     assert_eq!(lines[0].text, "Hello");
@@ -684,7 +685,7 @@ fn ignores_placeholder_translation_lines() {
         "[00:01.00]Hello\n[00:03.00]World",
         Some("[00:01.00]//\n[00:03.00]世界"),
     );
-    let lines = timed_lines_from_raw(&raw).unwrap();
+    let lines = timed_lines_from_raw(&raw, &[]).unwrap();
 
     assert_eq!(lines[0].translation, None);
     assert_eq!(lines[1].translation.as_deref(), Some("世界"));
@@ -696,7 +697,7 @@ fn combines_translation_qrc_into_timed_lines() {
         "[1000,2000]Hel(1000,500)lo(1500,500)\n[3000,2000]World",
         Some("[1000,2000]你好\n[3000,2000]世界"),
     );
-    let lines = timed_lines_from_raw(&raw).unwrap();
+    let lines = timed_lines_from_raw(&raw, &[]).unwrap();
 
     assert_eq!(lines.len(), 2);
     assert_eq!(lines[0].start_ms, 1_000);
@@ -734,7 +735,7 @@ fn filters_intro_title_credit_and_speaker_label_lines() {
 [3800,1200]Both：(3800,1200)
 [5000,1600]Camila (5000,500)Cabello：(5500,500)
 [6600,2000]Ooh (6600,600)when (7200,400)your (7600,400)lips(8000,600)";
-    let lines = timed_lines_from_raw(raw).unwrap();
+    let lines = timed_lines_from_raw(raw, &[]).unwrap();
 
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].start_ms, 6_600);
@@ -747,7 +748,7 @@ fn filters_non_lyric_translation_credit_lines() {
         "[0,2000]Song(0,1000) - Artist(1000,1000)\n[2000,2000]Hello(2000,1000)",
         Some("[00:00.00]QQ音乐享有本翻译作品的著作权\n[00:02.00]你好"),
     );
-    let lines = timed_lines_from_raw(&raw).unwrap();
+    let lines = timed_lines_from_raw(&raw, &[]).unwrap();
 
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].text, "Hello");
@@ -756,13 +757,12 @@ fn filters_non_lyric_translation_credit_lines() {
 
 #[test]
 fn filters_chinese_standalone_credit_lines() {
-    // 词：XXX and 曲：XXX should be filtered (standalone single-char credits)
     let raw = "\
 [0,314]BIZNESS(0,157) - XLOV(158,157)
 [315,314]词：(315,157)SCORE(473,157)
 [630,158]曲：(630,158)QSTNMRKS(788,0)
 [789,1000]Dance (789,300)dance(1089,700)";
-    let lines = timed_lines_from_raw(raw).unwrap();
+    let lines = timed_lines_from_raw(raw, &[]).unwrap();
 
     assert_eq!(
         lines.len(),
@@ -775,13 +775,12 @@ fn filters_chinese_standalone_credit_lines() {
 
 #[test]
 fn filters_english_composer_and_arranged_by_lines() {
-    // Composer：XXX and Arranged by：XXX should be filtered
     let raw = "\
 [0,1060]Song(0,400) - Artist(400,660)
 [1060,1060]Composer：(1060,500)Zacharie Raymond(1560,500)
 [2120,1060]Arranged (2120,300)by：(2420,500)Charlie Puth(2920,500)
 [3180,1000]Hello (3180,400)World(3580,600)";
-    let lines = timed_lines_from_raw(raw).unwrap();
+    let lines = timed_lines_from_raw(raw, &[]).unwrap();
 
     assert_eq!(
         lines.len(),
@@ -804,9 +803,138 @@ fn filters_extended_live_performance_header_lines() {
 [16208,622]柳(16208,103)琴(16312,103)：(16416,103)李(16520,103)雨(16624,103)涵(16728,103)
 [16832,623]打(16832,103)击(16936,103)乐(17039,103)：(17143,103)郑(17247,103)瑀(17351,103)
 [17456,3563]滚(17456,186)烫(17642,216)的(17858,284)伤(18142,372)口(18514,233) (18747,233)会(18980,215)冷(19195,291)成(19486,348)月(19834,336)牙(20170,849)";
-    let lines = timed_lines_from_raw(raw).unwrap();
+    let lines = timed_lines_from_raw(raw, &[]).unwrap();
 
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].start_ms, 17_456);
     assert_eq!(lines[0].text, "滚烫的伤口 会冷成月牙");
+}
+
+#[test]
+fn splits_a_bracketed_tail_into_a_background_vocal() {
+    let raw = "[1000,2000]Hold (1000,500)on (oh(1500,1000)yeah)(2500,500)";
+    let lines = timed_lines_from_raw(raw, &[]).unwrap();
+
+    assert_eq!(lines[0].text, "Hold on");
+    assert_eq!(
+        lines[0]
+            .background
+            .as_ref()
+            .map(|background| background.text.as_str()),
+        Some("ohyeah")
+    );
+    assert_eq!(
+        lines[0]
+            .syllables
+            .iter()
+            .map(|syllable| syllable.text.as_str())
+            .collect::<String>()
+            .trim(),
+        lines[0].text
+    );
+}
+
+#[test]
+fn folds_a_bracketed_echo_into_the_line_it_answers() {
+    let raw = "\
+[1000,2000]Know (1000,1000)the way(2000,1000)
+[3000,1000]((3000,100)My (3100,400)way)(3500,500)";
+    let lines = timed_lines_from_raw(raw, &[]).unwrap();
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, "Know the way");
+    assert_eq!(
+        lines[0]
+            .background
+            .as_ref()
+            .map(|background| background.text.as_str()),
+        Some("My way")
+    );
+}
+
+#[test]
+fn a_folded_echo_keeps_its_own_translation_beside_its_parent() {
+    let raw = combine_lyrics_with_translation(
+        "\
+[1000,2000]Know (1000,1000)the way(2000,1000)
+[3000,1000]((3000,100)My (3100,400)way)(3500,500)",
+        Some("[00:01.00]要知道方法\n[00:03.00]（从你身边离开的方法）"),
+    );
+    let lines = timed_lines_from_raw(&raw, &[]).unwrap();
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].translation.as_deref(), Some("要知道方法"));
+    let background = lines[0].background.as_ref().expect("the echo is folded in");
+    assert_eq!(background.text, "My way");
+    assert_eq!(
+        (background.start_ms, background.end_ms),
+        (3_100, Some(4_000)),
+        "the echo keeps the timing its own words were sung with"
+    );
+    assert_eq!(
+        background
+            .syllables
+            .iter()
+            .map(|syllable| (syllable.text.as_str(), syllable.start_ms, syllable.end_ms))
+            .collect::<Vec<_>>(),
+        vec![("My ", 3_100, 3_500), ("way", 3_500, 4_000)],
+        "every word of the echo keeps its own timing, so a listener fills them as it hears them"
+    );
+    assert_eq!(
+        background.translation.as_deref(),
+        Some("从你身边离开的方法"),
+        "the bracket that marked the phrase goes with the phrase"
+    );
+}
+
+#[test]
+fn a_bracketed_line_elsewhere_in_the_song_stays_its_own_line() {
+    let raw = "\
+[1000,1000]Know (1000,500)the way(1500,500)
+[9000,1000]((9000,100)Instrumental)(9100,900)";
+    let lines = timed_lines_from_raw(raw, &[]).unwrap();
+
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[1].text, "(Instrumental)");
+    assert!(lines[0].background.is_none());
+}
+
+#[test]
+fn a_line_timed_source_keeps_a_bracketed_tail_as_sung_text() {
+    let raw = "[00:01.00]Know the way (My way)";
+    let lines = timed_lines_from_raw(raw, &[]).unwrap();
+
+    assert_eq!(lines[0].text, "Know the way (My way)");
+    assert!(lines[0].background.is_none());
+}
+
+#[test]
+fn reads_speaker_labels_against_the_providers_artists() {
+    let artists = vec!["Ariana Grande".to_string(), "Iggy Azalea".to_string()];
+    let raw = "\
+[0,500]Iggy Azalea/Ariana Grande：(0,500)
+[1000,1000]Uh-huh (1000,500)it's Iggy(1500,500)
+[2000,500]Big Sean/Ariana Grande：(2000,500)
+[3000,1000]One (3000,500)less problem(3500,500)
+[12000,1000]Love: it hurts(12000,1000)";
+    let lines = timed_lines_from_raw(raw, &artists).unwrap();
+
+    assert_eq!(lines.len(), 3);
+    assert_eq!(lines[0].text, "Uh-huh it's Iggy");
+    assert_eq!(lines[0].voice, Voice::Secondary);
+    assert_eq!(lines[1].text, "One less problem");
+    assert_eq!(lines[1].voice, Voice::Primary);
+    // A sung line containing a colon names no artist, so it keeps its text.
+    assert_eq!(lines[2].text, "Love: it hurts");
+    assert_eq!(lines[2].voice, Voice::Primary);
+}
+
+#[test]
+fn a_speaker_label_without_provider_artists_is_not_read() {
+    let raw = "[0,500]The Weeknd：(0,500)\n[1000,1000]I can't feel my face(1000,1000)";
+    let lines = timed_lines_from_raw(raw, &[]).unwrap();
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, "I can't feel my face");
+    assert_eq!(lines[0].voice, Voice::Primary);
 }

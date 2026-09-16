@@ -67,6 +67,22 @@ impl std::str::FromStr for LyricsProvider {
 #[error("unsupported lyrics provider: {0}")]
 pub struct LyricsProviderParseError(String);
 
+/// Which vocal part a line belongs to.
+///
+/// A provider that structures its transcription states the performer outright; a
+/// provider that does not divides the lyrics with labelled rows instead, and such
+/// a label is only read when it names an artist of the matched track. Everything
+/// else resolves to [`Voice::Primary`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Voice {
+    /// The main vocal part.
+    #[default]
+    Primary,
+    /// The opposing part of a duet.
+    Secondary,
+}
+
 /// One display line with optional word timing and secondary text.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimedLine {
@@ -86,7 +102,60 @@ pub struct TimedLine {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub romanization_segments: Vec<RomanizationSegment>,
     /// Background-vocal text, when available.
-    pub background: Option<String>,
+    pub background: Option<BackgroundVocal>,
+    /// Which vocal part sings this line.
+    #[serde(default)]
+    pub voice: Voice,
+}
+
+/// A part sung behind the line it belongs to.
+///
+/// A provider that structures its transcription states it outright; a provider
+/// that does not writes it as a bracketed phrase, which the parsers read out of
+/// the text. It carries its own timing, translation, and words because it is sung
+/// at its own time inside the line rather than with it: a listener fills the
+/// words it hears as it hears them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackgroundVocal {
+    /// Text that is sung behind the line.
+    pub text: String,
+    /// Translation of the background vocal, when the provider supplied one.
+    pub translation: Option<String>,
+    /// Start of the background vocal relative to the track, in milliseconds.
+    pub start_ms: u64,
+    /// Exclusive end of the background vocal, when the provider timed one.
+    pub end_ms: Option<u64>,
+    /// Words of the background vocal, when the provider timed them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub syllables: Vec<TimedSyllable>,
+}
+
+impl TimedLine {
+    /// Returns whether the line carries usable word-level timing.
+    #[must_use]
+    pub fn is_word_timed(&self) -> bool {
+        self.syllables
+            .iter()
+            .any(|syllable| !syllable.text.trim().is_empty())
+    }
+
+    /// Returns the latest time the line refers to.
+    ///
+    /// A line without an explicit end is bounded by its last timed word, so an
+    /// echo timed to start where its parent runs out can be recognized.
+    #[must_use]
+    pub fn latest_time_ms(&self) -> u64 {
+        let from_syllables = self
+            .syllables
+            .iter()
+            .map(|syllable| syllable.end_ms)
+            .max()
+            .unwrap_or(self.start_ms);
+        self.end_ms
+            .unwrap_or(self.start_ms)
+            .max(from_syllables)
+            .max(self.start_ms)
+    }
 }
 
 /// A source-text fragment and the reading displayed directly below it.

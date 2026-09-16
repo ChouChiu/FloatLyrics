@@ -3,9 +3,13 @@
 
 //! Focused parser for timestamped LRC lines.
 
-use super::super::model::TimedLine;
-use super::{filter_display_lines, merge_translation_marker_lines};
+use super::super::model::{TimedLine, Voice};
 
+/// Parses timestamped LRC lines without interpreting what they say.
+///
+/// The rows are returned in start order as the payload wrote them; the
+/// conventions a transcription uses are read once for every provider format, in
+/// [`super::finish`].
 pub(super) fn timed_lines_from_lrc(content: &str) -> Vec<TimedLine> {
     let mut lines = Vec::new();
 
@@ -29,13 +33,14 @@ pub(super) fn timed_lines_from_lrc(content: &str) -> Vec<TimedLine> {
                     romanization: None,
                     romanization_segments: Vec::new(),
                     background: None,
+                    voice: Voice::Primary,
                 });
             }
         }
     }
 
     lines.sort_by_key(|line| line.start_ms);
-    filter_display_lines(merge_translation_marker_lines(lines))
+    lines
 }
 
 fn timestamps_in(tags: &str) -> impl Iterator<Item = &str> {

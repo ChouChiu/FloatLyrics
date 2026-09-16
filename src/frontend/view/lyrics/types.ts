@@ -42,6 +42,16 @@ export interface PresentedLyricLine {
   romanization: string;
   translation: string;
   background: string;
+  /** Translation of the background vocal, empty when it has none. */
+  background_translation: string;
+  /** Where the background vocal is sung within the track. */
+  background_start_ms: number;
+  /** Exclusive end of the background vocal, when the provider timed one. */
+  background_end_ms: number | null;
+  /** Words of the background vocal, when the provider timed them. */
+  background_syllables: TimedSyllable[];
+  /** Vocal part the line belongs to; the AMLL sender writes it as the TTML agent. */
+  voice: "primary" | "secondary";
 }
 
 export interface LyricsDocument {

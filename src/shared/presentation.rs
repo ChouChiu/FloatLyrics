@@ -5,7 +5,7 @@
 
 use serde::Serialize;
 
-use floatlyrics_lyrics::lyrics::TimedSyllable;
+use floatlyrics_lyrics::lyrics::{TimedSyllable, Voice};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub(crate) struct KaraokeRenderState {
@@ -46,6 +46,26 @@ pub(crate) struct PresentedLyricLine {
     pub(crate) romanization: String,
     pub(crate) translation: String,
     pub(crate) background: String,
+    /// Translation of the background vocal, empty when it has none.
+    ///
+    /// Only the AMLL sender reads it, writing it inside the span of the
+    /// background vocal it belongs to.
+    pub(crate) background_translation: String,
+    /// Where the background vocal is sung within the track.
+    pub(crate) background_start_ms: u64,
+    /// Exclusive end of the background vocal, when the provider timed one.
+    pub(crate) background_end_ms: Option<u64>,
+    /// Words of the background vocal, when the provider timed them.
+    ///
+    /// The AMLL sender writes them as the spans inside the background vocal, so
+    /// a listener fills the words it hears as it hears them rather than one long
+    /// span.
+    pub(crate) background_syllables: Vec<TimedSyllable>,
+    /// Which vocal part sings this line.
+    ///
+    /// Only the AMLL sender reads it, to write the performer each line belongs to
+    /// into the TTML document it streams.
+    pub(crate) voice: Voice,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

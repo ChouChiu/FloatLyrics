@@ -428,6 +428,7 @@ fn line(text: &str) -> TimedLine {
         romanization: None,
         romanization_segments: Vec::new(),
         background: None,
+        voice: Voice::Primary,
     }
 }
 

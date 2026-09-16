@@ -14,8 +14,8 @@ mod timeline;
 
 pub use lyrics_helper::{LineInfo, LyricsData, LyricsTypes, generate_string};
 pub use model::{
-    FetchedLyrics, LyricsCandidate, LyricsLookupHint, LyricsProvider, LyricsProviderParseError,
-    RomanizationSegment, TimedLine, TimedSyllable,
+    BackgroundVocal, FetchedLyrics, LyricsCandidate, LyricsLookupHint, LyricsProvider,
+    LyricsProviderParseError, RomanizationSegment, TimedLine, TimedSyllable, Voice,
 };
 pub use parsing::{
     combine_lyrics_with_translation, export_lyrics, parse_local_lyrics, timed_lines_from_data,
