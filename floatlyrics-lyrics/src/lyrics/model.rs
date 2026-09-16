@@ -96,9 +96,18 @@ pub struct RomanizationSegment {
     pub text: String,
     /// Locally generated Latin-script reading, or an empty string for punctuation.
     pub romanization: String,
+    /// Locally generated kana reading, for fragments written with characters
+    /// that are read rather than spelled — empty for everything else.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub furigana: String,
 }
 
 /// Timed fragment within a [`TimedLine`].
+///
+/// The optional reading in [`TimedSyllable::romanization`] and the kana in
+/// [`TimedSyllable::furigana`] are generated locally by
+/// [`super::generate_local_romanization`]; fragments of the source text that have
+/// no reading of their own keep them empty.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimedSyllable {
     /// Fragment start time relative to the track, in milliseconds.
@@ -107,6 +116,13 @@ pub struct TimedSyllable {
     pub end_ms: u64,
     /// Fragment text.
     pub text: String,
+    /// Locally generated reading for this fragment, or an empty string when the fragment has none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub romanization: String,
+    /// Kana this fragment is read with, for fragments written with characters
+    /// that are read rather than spelled — empty for everything else.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub furigana: String,
 }
 
 /// Successfully downloaded lyrics and their provider metadata.

@@ -87,6 +87,8 @@ fn romanization_is_shown_with_translation_and_karaoke() {
         start_ms: 1_000,
         end_ms: 2_000,
         text: "Hello".to_string(),
+        romanization: String::new(),
+        furigana: String::new(),
     });
     let mut config = runtime_config();
     config.show_romanization = true;

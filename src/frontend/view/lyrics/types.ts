@@ -5,6 +5,8 @@ export interface TimedSyllable {
   start_ms: number;
   end_ms: number;
   text: string;
+  /** Locally generated reading for this syllable; absent when it has none. */
+  romanization?: string;
 }
 
 export interface KaraokeContent {

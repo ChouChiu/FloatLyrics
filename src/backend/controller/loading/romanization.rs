@@ -51,15 +51,29 @@ pub(in crate::backend::controller) fn apply_romanization_event(
     }
 }
 
+/// Compares the source identity of two documents.
+///
+/// The generated document is a clone of the current one that the romanization
+/// task extended in place, so the locally generated readings and romanization
+/// must not take part in the comparison.
 fn same_lyrics_document(current: &[TimedLine], generated: &[TimedLine]) -> bool {
     current.len() == generated.len()
         && current.iter().zip(generated).all(|(current, generated)| {
             current.start_ms == generated.start_ms
                 && current.end_ms == generated.end_ms
                 && current.text == generated.text
-                && current.syllables == generated.syllables
                 && current.translation == generated.translation
                 && current.background == generated.background
+                && current.syllables.len() == generated.syllables.len()
+                && current
+                    .syllables
+                    .iter()
+                    .zip(&generated.syllables)
+                    .all(|(current, generated)| {
+                        current.start_ms == generated.start_ms
+                            && current.end_ms == generated.end_ms
+                            && current.text == generated.text
+                    })
         })
 }
 

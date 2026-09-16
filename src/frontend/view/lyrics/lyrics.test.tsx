@@ -333,6 +333,47 @@ describe("AMLL conversion", () => {
     expect(lines[1]).toMatchObject({ isBG: true, words: [{ word: "echo" }] });
   });
 
+  test("attaches syllable readings to their own word", () => {
+    const document: LyricsDocument = {
+      revision: 1,
+      duration_ms: 4_000,
+      lines: [
+        {
+          ...line,
+          romanization: "annyeong segye",
+          syllables: [
+            { text: "안녕", start_ms: 1_000, end_ms: 1_500, romanization: "annyeong" },
+            { text: " ", start_ms: 1_500, end_ms: 1_600 },
+            { text: "세계", start_ms: 1_600, end_ms: 2_000, romanization: "segye" },
+          ],
+        },
+      ],
+    };
+    const lines = documentToAmllLines(document);
+
+    expect(lines[0]?.words.map((word) => word.romanWord)).toEqual(["annyeong", "", "segye"]);
+    // Per-word readings replace the line-level romanization in AMLL.
+    expect(lines[0]?.romanLyric).toBe("");
+  });
+
+  test("keeps the line-level romanization when no word has a reading", () => {
+    const document: LyricsDocument = {
+      revision: 1,
+      duration_ms: 4_000,
+      lines: [
+        {
+          ...line,
+          romanization: "konnichiha",
+          syllables: [{ text: "こんにちは", start_ms: 1_000, end_ms: 2_000 }],
+        },
+      ],
+    };
+    const lines = documentToAmllLines(document);
+
+    expect(lines[0]?.words[0]?.romanWord).toBe("");
+    expect(lines[0]?.romanLyric).toBe("konnichiha");
+  });
+
   test("selects only the current primary line and its background vocal", () => {
     const document: LyricsDocument = {
       revision: 1,

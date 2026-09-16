@@ -26,13 +26,24 @@ export function findSyllableRanges(
 export function syllableProgress(syllable: TimedSyllable, positionMs: number): number {
   if (positionMs < syllable.start_ms) return 0;
   if (positionMs >= syllable.end_ms) return 1;
-  const duration = Math.max(0, syllable.end_ms - syllable.start_ms);
-  if (duration === 0) return 1;
-  return Math.min(1, Math.max(0, (positionMs - syllable.start_ms) / duration));
+  return (positionMs - syllable.start_ms) / (syllable.end_ms - syllable.start_ms);
+}
+
+let measurementRange: Range | null = null;
+
+/**
+ * Range reused for every measurement.
+ *
+ * The fill is recomputed on every frame, and the range is never observed while
+ * it is being moved, so allocating a new one per measurement is pure churn.
+ */
+function measurementTextRange(): Range {
+  measurementRange ??= document.createRange();
+  return measurementRange;
 }
 
 function xAtOffset(textNode: Text, offset: number, lineRect: DOMRect): number {
-  const range = document.createRange();
+  const range = measurementTextRange();
   const boundedOffset = Math.min(offset, textNode.length);
   range.setStart(textNode, boundedOffset);
   range.setEnd(textNode, boundedOffset);

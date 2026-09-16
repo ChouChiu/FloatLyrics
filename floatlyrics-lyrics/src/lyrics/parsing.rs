@@ -156,6 +156,8 @@ fn timed_syllables_from_info(line: &LineInfo) -> Vec<TimedSyllable> {
                         start_ms: ms_i32_to_u64(syllable.start_time)?,
                         end_ms: ms_i32_to_u64(syllable.end_time)?,
                         text: syllable.text.clone(),
+                        romanization: String::new(),
+                        furigana: String::new(),
                     })
                 })
                 .collect()
