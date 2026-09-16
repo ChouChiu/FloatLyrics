@@ -6,7 +6,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, time::Instant};
-use zvariant::{OwnedObjectPath, OwnedValue};
+use zvariant::{OwnedObjectPath, OwnedValue, Value};
 
 use floatlyrics_core::track::TrackMetadata;
 
@@ -93,8 +93,20 @@ fn string_vec_value(value: &OwnedValue) -> Option<Vec<String>> {
     Vec::<String>::try_from(value.try_clone().ok()?).ok()
 }
 
+/// Reads an unsigned integer whichever integer type the player sent.
+///
+/// The specification types `mpris:length` as an `int64`, but Spotify and other
+/// players send a `uint64`, and zbus converts to the exact variant only — a
+/// strict `i64` read silently drops the length, which is what sizes a listener's
+/// progress bar against the playback clock.
 fn u64_value(value: &OwnedValue) -> Option<u64> {
-    i64::try_from(value.try_clone().ok()?).ok()?.try_into().ok()
+    match &**value {
+        Value::I64(number) => u64::try_from(*number).ok(),
+        Value::U64(number) => Some(*number),
+        Value::I32(number) => u64::try_from(*number).ok(),
+        Value::U32(number) => Some(u64::from(*number)),
+        _ => None,
+    }
 }
 
 fn object_path_value(value: &OwnedValue) -> Option<String> {

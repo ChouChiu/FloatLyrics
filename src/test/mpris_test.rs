@@ -149,6 +149,29 @@ fn parses_mpris_metadata_map() {
     );
 }
 
+/// Spotify types `mpris:length` as a `uint64` where the specification calls for
+/// an `int64`. The length has to survive either way: a listener sizes its
+/// progress bar against it, and a missing length leaves the bar with a zero
+/// duration to divide by.
+#[test]
+fn reads_a_track_length_typed_as_uint64() {
+    let mut metadata = HashMap::new();
+    metadata.insert("xesam:title".to_string(), owned("Song"));
+    metadata.insert("mpris:length".to_string(), owned(199_173_000_u64));
+
+    let parsed = metadata_from_mpris(&metadata).unwrap();
+
+    assert_eq!(parsed.length_us, Some(199_173_000));
+    assert_eq!(
+        parsed.into_track_metadata().unwrap().duration_ms,
+        Some(199_173)
+    );
+
+    // A malformed negative length is skipped rather than reinterpreted.
+    metadata.insert("mpris:length".to_string(), owned(-1_i64));
+    assert_eq!(metadata_from_mpris(&metadata).unwrap().length_us, None);
+}
+
 #[test]
 fn accepts_string_track_ids_from_nonconforming_players() {
     let mut metadata = HashMap::new();
