@@ -85,6 +85,8 @@ floatlyrics (src/)              CLI 与应用层
 | `src/lib.rs` | CLI 参数与应用启动流程 |
 | `src/frontend.rs`、`src/frontend/` | Relm4 应用、GTK/WebKit 视图、设置页和 UI 适配器 |
 | `src/backend.rs`、`src/backend/` | 播放控制、歌词与搜索服务、缓存协调和 MPRIS |
+| `src/backend/amll/` | AMLL WebSocket 协议发送端（协议报文、连接任务与发送端 `LyricsView` 实现） |
+| `src/frontend/tray.rs` | StatusNotifierItem 托盘图标与多语言菜单 |
 | `src/shared.rs`、`src/shared/` | 配置模型与跨层展示协议 |
 | `floatlyrics-lyrics/src/` | 歌词解析、时间轴、搜索提供方与缓存 |
 | `floatlyrics-core/src/` | 跨 crate 的基础能力与稳定领域类型 |
@@ -250,6 +252,8 @@ packaging/build-aur.sh --cleanbuild
 源码版和预编译版 AUR 元数据分别位于 `packaging/aur/floatlyrics/` 与
 `packaging/aur/floatlyrics-bin/`。构建产物会写入仓库根目录；脚本使用独立的
 makepkg 工作目录，避免与 Rust 的 `src/` 冲突。
+
+源码包的 `source` 数组除了源码归档，还包含 IPADIC 与 CC-CEDICT 两个词典归档：`lindera-ipadic` 与 `lindera-cc-cedict` 会在构建期把它们编译成二进制内嵌的词典，`prepare()` 把归档放进 `LINDERA_BUILD_DICTIONARY_CACHE_DIR` 指向的目录，这样 `cargo --frozen` 就不会尝试自行下载。升级 lindera 依赖时请同步更新该目录名里的版本号，以及两个归档的名称与校验和。
 
 只准备并校验两个 AUR 包的本地文件：
 

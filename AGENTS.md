@@ -45,7 +45,7 @@ application-layer concern from a higher crate.
 | Area | Owner | Boundary |
 |---|---|---|
 | Stable metadata, paths, i18n, fingerprints, telemetry | `floatlyrics-core` | No lyrics, GTK, D-Bus, provider, or SQLite concerns |
-| Lyrics models, parsing, filtering, romanization, timeline, provider search, cache | `floatlyrics-lyrics` | No application UI, configuration, or MPRIS concerns |
+|Lyrics models, parsing, filtering, romanization, karaoke word segmentation, timeline, provider search, cache|`floatlyrics-lyrics`|No application UI, configuration, or MPRIS concerns|
 | CLI, startup, persisted configuration, MPRIS, GTK/Relm4 UI | root crate | May compose both lower crates |
 
 `floatlyrics-lyrics` depends on the external [`lyrics-helper`]
@@ -71,10 +71,13 @@ behavior belongs in `src/lib.rs` or a focused module.
 | `src/lib.rs` | CLI arguments, environment defaults, and application startup |
 | `src/frontend.rs`, `src/frontend/` | Relm4 composition, GTK/WebKit views, settings, and UI adapters |
 | `src/backend.rs`, `src/backend/` | playback controller, lyrics/search services, cache coordination, and MPRIS |
+| `src/backend/amll.rs`, `src/backend/amll/` | AMLL WebSocket protocol sender (wire types, connection task, inbound control commands, the `LyricsView` implementation used in sender mode) |
+| `src/backend/mpris/control.rs` | outbound MPRIS control: command-to-operation resolution, volume and playback mode properties |
+| `src/frontend/tray.rs` | StatusNotifierItem tray icon and its language-aware menu |
 | `src/shared.rs`, `src/shared/` | persisted TOML model and cross-layer presentation contracts |
 | `src/shared/config/` | config persistence, recovery, and validation submodules |
 | `floatlyrics-lyrics/src/lyrics.rs` | lyrics domain facade; re-exports lyrics-helper types (`LineInfo`, `LyricsData`, `LyricsTypes`) |
-| `floatlyrics-lyrics/src/lyrics/` | provider-neutral models, parsing, filtering, romanization, timeline, search |
+|`floatlyrics-lyrics/src/lyrics/`|provider-neutral models, parsing, filtering, romanization, karaoke word segmentation, timeline, search|
 | `floatlyrics-lyrics/src/cache.rs`, `src/cache/` | cache boundary, SQLite access, and schema |
 | `floatlyrics-core/src/i18n.rs` | locale selection, typed text keys, catalogue validation |
 | `src/frontend/view/lyrics/` | React + PixiJS embedded lyrics view (TypeScript, built by Bun) |
@@ -227,6 +230,23 @@ without a full Cargo rebuild. `build.rs` monitors `package.json`, `bun.lock`,
 `tsconfig.json`, `src/frontend/view/lyrics/`, and `data/licenses/frontend/` for
 changes via `cargo:rerun-if-changed`.
 
+`floatlyrics-lyrics` embeds two morphological dictionaries for local CJK
+readings: IPADIC through `lindera-ipadic` for Japanese and CC-CEDICT through
+`lindera-cc-cedict` for Mandarin, plus the JmdictFurigana data through
+`jmdict-furigana` for the kana of each Japanese character. The lindera crates'
+`build.rs` downloads a pinned archive from `lindera.dev` and compiles it into a
+dictionary that is linked into the binary, so a first build needs network access
+and the three together add roughly 85 MB to the release binary. To build without that download, point
+Loading the furigana data parses the whole JmdictFurigana archive, which costs
+about 85 MB of resident memory once a Japanese word needs it; the dictionaries
+themselves are memory-mapped and only cost what is read from them.
+
+`LINDERA_BUILD_DICTIONARY_CACHE_DIR` at a directory holding the archives under
+`<crate version>-fmt<dictionary format version>` — the version numbers are
+pinned by `Cargo.lock`, and the AUR `PKGBUILD` seeds exactly that directory from
+its `source` array. A cache that does not match makes the build download again
+rather than fail.
+
 ## Rust and public API conventions
 
 - Use default `rustfmt` and standard Rust naming conventions.
@@ -342,6 +362,130 @@ between MPRIS events, lyrics fetching, caching, and presentation:
 
 The `CacheWorker` in `src/backend/cache.rs` wraps `floatlyrics_lyrics::cache::Cache`
 behind an `mpsc` channel to keep blocking SQLite operations off the GTK thread.
+
+Playback control is AMLL-only: the control commands an AMLL client sends queue a
+`MediaCommand` on the watcher's channel, because only the watcher task owns the
+D-Bus connection and knows which player is active. Neither the floating overlay
+nor the tray renders playback controls. Reads happen the other way round: the
+watcher publishes the volume, playback modes, and capabilities it observes, the
+controller reports them through `LyricsView::set_player_control`, and the AMLL
+sender republishes them as protocol updates.
+
+Every lyrics document enters the application through
+`loading/cache.rs::lyrics_state_from_cached`, which parses the cached raw payload
+and then runs the karaoke word segmentation from
+`floatlyrics_lyrics::lyrics::segment_lines_into_words` before the background
+romanization worker starts, so readings are aligned to the tokens the views
+render. New presentation behavior that depends on word timing belongs in that
+order, not in the parsers.
+
+Neither QRC nor plain LRC has a field for a duet part, a background vocal, or a
+sentence the transcriber broke across rows, so all three are read from the
+conventions the transcriber wrote the lyrics with, in
+`floatlyrics-lyrics/src/lyrics/parsing/conventions.rs`, and nothing beyond them:
+
+- **A speaker label must name an artist the provider listed.** A row such as
+  `Doja Cat:` or `The Weeknd：` sets `TimedLine::voice`; a sung line containing a
+  colon is left alone. A label may credit several performers at once, and the
+  first name in it that the provider also lists decides the side, because joint
+  credits are written lead-first — one match is enough, so a featured performer
+  the provider omits from its artist list rides along on the name beside them.
+  The list matched against is the one the lyrics were resolved with, which is why
+  `timed_lines_from_raw` takes it as an argument.
+- **A background vocal is bracketed.** NetEase writes it as a bracketed tail on
+  the line it answers, with sung text in front of it, and that tail becomes
+  `TimedLine::background`. QQ Music writes it as rows of its own, wholly
+  bracketed, which are folded into the line before them: the phrase may open on
+  one row and close several rows later, and it answers after whatever rest the
+  line leaves rather than always at its parent's last word. Both forms need a
+  letter or digit inside the brackets, so `(...)` is left alone, and a line-timed
+  source is left alone entirely: there is no timing to split off with. Folding
+  runs after translations are paired, because the echo
+  is translated where it is sung rather than where the line it answers is: it
+  keeps its own timing, its own words, and its own translation in
+  `BackgroundVocal`: the AMLL sender writes them as the spans inside the `x-bg`
+  span, so the listener fills the words it hears as it hears them instead of one
+  span crawling over the whole echo, and draws the translation the phrase was
+  sung with. The brackets that marked the phrase are stripped from the words and
+  from the translation, and are written back on the words at the edges of the
+  span, which is the shape a listener strips them from again.
+- **A sentence broken across rows is one line.** A transcriber who runs out of
+  room writes the rest of a sentence on the row after the one that begins it —
+  Saddle Up writes `Put your money` then `where your mouth is`, and `But I had
+  enough,` then `so I move onto the next thing` — and the rows are joined by
+  `merge_continued_lines` into the line the renderer draws, their words and their
+  translations with it, once each row has collected its own translation and after
+  a bracketed echo has been folded away. What decides the join is the row after: a
+  lowercase word carries the sentence on, a capitalized one begins a new line, and
+  the English pronoun, which is written uppercase while it carries the rest of a
+  sentence, counts as a continuation only when the row before it left its
+  punctuation open. The row before has to be able to say so: a row the punctuation
+  closed keeps its own line, and a row ending in a script without letter case — or
+  in a digit — says nothing either way, because there the transcriber broke where
+  the line ran out rather than where a sentence did.
+
+Do not widen this past what the transcription states: overlapping timings and an
+unmatched label are not evidence of a second voice. The resulting voice is
+written to the AMLL listener as the `ttm:agent` of the line, which is what tells
+it to alternate the two sides; the floating overlay renders `background` only.
+
+A resolved lookup also carries the artists the provider credits as
+`LyricsDisplayState::credited_artists`. When they name a performer the player's
+own metadata omits — Spotify reports "Problem" as Ariana Grande alone — the
+controller restates the track through `LyricsView::set_track_metadata`, which
+only the AMLL sender renders, and never through `set_song_info`. That is a
+mid-track track-info message, so the clock has to follow it: `AmllSender`'s
+client restates playback once after every music change, because the listener
+zeroes its position on one and a paused track would otherwise leave the lyrics at
+the top of the song.
+
+The same document carries the kana of a Japanese word: `TimedSyllable::furigana`
+holds what the furigana dictionary gives each character, and the AMLL sender
+(`src/backend/amll/ttml.rs`) writes it as the `tts:ruby` spans of a TTML document
+— the format in which a listener draws a reading above the characters it belongs
+to. Per-word readings go into that document's metadata, because that is where the
+player matches them to the words by time.
+
+The readings themselves come from `floatlyrics-lyrics/src/lyrics/romanization/`:
+Japanese and Mandarin segment their text with the embedded lindera dictionaries
+and read each word in context — Japanese then splits a word's reading across its
+characters with the JmdictFurigana data — Cantonese annotates through
+`rust-canto`, and
+Korean applies the Revised Romanization pronunciation rules to a run of Hangul
+syllables. All of them emit one segment per character, which is the shape
+`assign_syllable_readings` aligns with the karaoke tokens, and Japanese and
+Korean decline to read text their rules cannot cover rather than guessing.
+
+## Run modes and the tray
+
+`general.mode` selects exactly one lyrics output, and the choice is made once,
+in `AppModel::init`:
+
+- `floating` (default) — the Relm4 root window is initialized as the
+  layer-shell overlay and `view::OverlaySender` is the `LyricsView`.
+- `amll` — no layer-shell surface and no WebKit lyrics view are created
+  (`RelmApp::visible_on_activate(false)` keeps the root window hidden);
+  `backend::amll::AmllSender` becomes the `LyricsView` and streams the AMLL
+  WebSocket protocol to `amll.address`.
+
+Everything else — MPRIS watching, lyrics search, caching, romanization,
+configuration, and the settings windows — is shared by both modes.
+
+- The overlay supplies the controller's frame clock through
+  `OverlayView::tick_widget`; without it, `AppModel::init` installs a
+  `glib::timeout_add_local` pump instead. Do not remove one without keeping the
+  other, or `Controller::tick()` stops running in that mode.
+- Mode, `amll.address`, and `tray.enabled` are read at startup, so changing them
+  requires a restart; the settings UI says so.
+- `src/frontend/tray.rs` publishes a StatusNotifierItem whose callbacks only
+  forward `UiAction` values through `APP_BROKER`. Tray callbacks run on the
+  D-Bus service loop: never touch GTK state from them. Registration failure is
+  logged and ignored, so the app still starts without a tray host.
+- Adding a `LyricsView` implementation means implementing every trait method,
+  including `set_track_metadata`, which carries the structured track metadata
+  the token-based text boundary does not, and `set_playback`, which publishes
+  the playback clock for every frame of a playing track — independently of the
+  lyrics, so a listener with no lyrics still gets progress.
 
 ## Tests
 
