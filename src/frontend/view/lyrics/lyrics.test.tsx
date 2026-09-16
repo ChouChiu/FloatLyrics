@@ -21,6 +21,7 @@ import { advanceUiState, type UiState } from "./ui-store";
 if (!("MouseEvent" in globalThis)) {
   Object.assign(globalThis, { MouseEvent: class MouseEvent extends Event {} });
 }
+
 const { AppleMusicLyrics, LyricSlot, LyricsViewport } = await import("./app");
 const {
   addFontFamily,
@@ -108,7 +109,7 @@ describe("WebKit bridge", () => {
 
 describe("React application shell", () => {
   const config: AppConfig = {
-    general: { language: "en" },
+    general: { language: "en", mode: "floating" },
     window: {
       anchor: "bottom-center",
       remember_position: true,
@@ -135,6 +136,8 @@ describe("React application shell", () => {
       romanization_color: "#B8D8F0E6",
     },
     player: { preferred_players: ["spotify"], ignored_players: [] },
+    amll: { address: "localhost:11444" },
+    tray: { enabled: true },
   };
   const initial: UiState = {
     surface: null,
@@ -203,6 +206,64 @@ describe("React application shell", () => {
     expect(html).toContain(">Panel<");
     expect(html).toContain(">Fonts<");
     expect(html).toContain(">Colors<");
+  });
+
+  test("renders the integration page with mode, address, and tray controls", () => {
+    const strings = {
+      Integration: "Integration",
+      RunMode: "Run mode",
+      RunModeDescription: "The floating overlay and the AMLL sender cannot run at the same time",
+      RunModeFloating: "Floating overlay",
+      RunModeAmll: "AMLL WebSocket sender",
+      RunModeRestartHint: "Restart FloatLyrics to apply this change",
+      AmllAddress: "AMLL player address",
+      AmllAddressDescription: "Host and port",
+      TrayIcon: "System tray icon",
+      TrayIconDescription: "Show the icon",
+      ChangesSavedAutomatically: "Changes are saved automatically",
+    };
+    const bootstrapped = (incoming: AppConfig) =>
+      advanceUiState(initial, {
+        type: "bootstrap",
+        surface: "control-center",
+        config: incoming,
+        strings,
+        version: "1.2.0",
+        about: { dependencies: [], licenses: [] },
+        available_fonts: [],
+      });
+    const integration = advanceUiState(bootstrapped(config), {
+      type: "navigate",
+      page: "integration",
+    });
+
+    const html = renderToStaticMarkup(<ControlCenter state={integration} />);
+    expect(html).toContain("Run mode");
+    expect(html).toContain('value="localhost:11444"');
+    expect(html).toContain("disabled");
+    expect(html).toContain('role="switch"');
+    expect(html).toContain("Restart FloatLyrics to apply this change");
+
+    const amll = advanceUiState(
+      bootstrapped({ ...config, general: { language: "en", mode: "amll" } }),
+      { type: "navigate", page: "integration" },
+    );
+    const amllHtml = renderToStaticMarkup(<ControlCenter state={amll} />);
+    expect(amllHtml).not.toContain("disabled");
+  });
+
+  test("offers a quit action from the settings sidebar", () => {
+    const state = advanceUiState(initial, {
+      type: "bootstrap",
+      surface: "control-center",
+      config,
+      strings: { Quit: "Quit FloatLyrics" },
+      version: "1.2.0",
+      about: { dependencies: [], licenses: [] },
+      available_fonts: [],
+    });
+
+    expect(renderToStaticMarkup(<ControlCenter state={state} />)).toContain("Quit FloatLyrics");
   });
 
   test("renders manual search as a standalone window without the settings sidebar", () => {

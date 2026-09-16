@@ -70,6 +70,7 @@ export interface LyricsFrame {
 
 export type Language = "en" | "zh-CN" | "zh-TW";
 export type LyricsProvider = "qq-music" | "netease";
+export type AppMode = "floating" | "amll";
 export type ChineseRomanizationMode =
   | "auto"
   | "mandarin-pinyin"
@@ -77,7 +78,7 @@ export type ChineseRomanizationMode =
   | "cantonese-jyutping-no-tones";
 
 export interface AppConfig {
-  general: { language: Language };
+  general: { language: Language; mode: AppMode };
   window: {
     anchor: "bottom-center";
     remember_position: boolean;
@@ -104,6 +105,8 @@ export interface AppConfig {
     romanization_color: string;
   };
   player: { preferred_players: string[]; ignored_players: string[] };
+  amll: { address: string };
+  tray: { enabled: boolean };
 }
 
 export interface LicenseData {
@@ -132,7 +135,7 @@ export interface SearchState {
   candidates: SearchCandidate[];
 }
 
-export type ControlPage = "general" | "display" | "sources" | "about";
+export type ControlPage = "general" | "display" | "integration" | "sources" | "about";
 export type SnapClass = "snapped-left" | "snapped-right" | "snapped-top" | "snapped-bottom";
 
 export type LyricsCommand =

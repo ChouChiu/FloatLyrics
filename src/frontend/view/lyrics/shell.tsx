@@ -94,7 +94,30 @@ function cloneConfig(config: AppConfig): AppConfig {
   return structuredClone(config);
 }
 
-type SettingsPageName = Exclude<ControlPage, "about">;
+/**
+ * Draft of the configuration a page edits.
+ *
+ * The page sends the whole configuration on every change, so the draft follows
+ * the one the backend reports back and is `null` until the first state arrives.
+ */
+function useDraftConfig(
+  state: UiState,
+): [AppConfig | null, (change: (next: AppConfig) => void) => void] {
+  const incoming = state.config;
+  const [draft, setDraft] = useState<AppConfig | null>(incoming);
+  useEffect(() => setDraft(incoming), [incoming]);
+
+  const update = (change: (next: AppConfig) => void) => {
+    if (!draft) return;
+    const next = cloneConfig(draft);
+    change(next);
+    setDraft(next);
+    sendUiAction({ type: "save-config", config: next });
+  };
+  return [draft, update];
+}
+
+type SettingsPageName = Exclude<ControlPage, "about" | "integration">;
 type SettingsSubpage = "language" | "lyrics" | "panel" | "fonts" | "colors" | "sources";
 
 const settingsPages: Record<
@@ -134,19 +157,10 @@ const settingsPages: Record<
 };
 
 function SettingsPage({ state, page }: { state: UiState; page: SettingsPageName }) {
-  const incoming = state.config;
-  const [draft, setDraft] = useState<AppConfig | null>(incoming);
+  const [draft, update] = useDraftConfig(state);
   const metadata = settingsPages[page];
   const [subpage, setSubpage] = useState<SettingsSubpage>(metadata.defaultSubpage);
-  useEffect(() => setDraft(incoming), [incoming]);
   if (!draft) return null;
-
-  const update = (change: (next: AppConfig) => void) => {
-    const next = cloneConfig(draft);
-    change(next);
-    setDraft(next);
-    sendUiAction({ type: "save-config", config: next });
-  };
   const t = (key: string) => text(state, key);
 
   return (
@@ -468,6 +482,72 @@ function SettingsPage({ state, page }: { state: UiState; page: SettingsPageName 
   );
 }
 
+export function IntegrationPage({ state }: { state: UiState }) {
+  const [draft, update] = useDraftConfig(state);
+  if (!draft) return null;
+  const t = (key: string) => text(state, key);
+
+  return (
+    <div className="page-stack">
+      <div className="page-heading">
+        <div>
+          <h1>{t("Integration")}</h1>
+          <p>{t("RunModeDescription")}</p>
+        </div>
+        <div className={state.saveError ? "save-state error" : "save-state"}>
+          {state.saveError
+            ? `${t("SaveFailed")}: ${state.saveError}`
+            : state.saved
+              ? t("Saved")
+              : t("ChangesSavedAutomatically")}
+        </div>
+      </div>
+      <Card>
+        <SettingRow title={t("RunMode")} description={t("RunModeDescription")}>
+          <Select
+            value={draft.general.mode}
+            onChange={(event) =>
+              update((next) => {
+                next.general.mode = event.currentTarget.value as AppConfig["general"]["mode"];
+              })
+            }
+          >
+            <option value="floating">{t("RunModeFloating")}</option>
+            <option value="amll">{t("RunModeAmll")}</option>
+          </Select>
+        </SettingRow>
+        <SettingRow title={t("AmllAddress")} description={t("AmllAddressDescription")}>
+          <Input
+            aria-label={t("AmllAddress")}
+            value={draft.amll.address}
+            placeholder="localhost:11444"
+            disabled={draft.general.mode !== "amll"}
+            onChange={(event) =>
+              update((next) => {
+                next.amll.address = event.currentTarget.value;
+              })
+            }
+          />
+        </SettingRow>
+        <SettingRow title={t("TrayIcon")} description={t("TrayIconDescription")}>
+          <Switch
+            label={t("TrayIcon")}
+            checked={draft.tray.enabled}
+            onCheckedChange={(value) =>
+              update((next) => {
+                next.tray.enabled = value;
+              })
+            }
+          />
+        </SettingRow>
+        <div className="card-intro">
+          <p>{t("RunModeRestartHint")}</p>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 function formatDuration(duration: number | null): string {
   if (duration === null) return "—";
   const seconds = Math.round(duration / 1000);
@@ -647,6 +727,7 @@ export function ControlCenter({ state }: { state: UiState }) {
             [
               ["general", "settings", "General"],
               ["display", "display", "Display"],
+              ["integration", "integration", "Integration"],
               ["sources", "sources", "LyricsSources"],
               ["about", "info", "About"],
             ] as const
@@ -662,10 +743,16 @@ export function ControlCenter({ state }: { state: UiState }) {
           ))}
         </nav>
         <div className="sidebar-version">v{state.version}</div>
+        <Button variant="ghost" onClick={() => sendUiAction({ type: "quit" })}>
+          <Icon name="x" />
+          {t("Quit")}
+        </Button>
       </aside>
       <main className="control-content">
         {state.page === "about" ? (
           <AboutPage state={state} />
+        ) : state.page === "integration" ? (
+          <IntegrationPage key={state.page} state={state} />
         ) : (
           <SettingsPage key={state.page} state={state} page={state.page} />
         )}

@@ -11,6 +11,7 @@ import {
   RiDeleteBin6Line,
   RiInformationLine,
   RiLayoutLine,
+  RiLinkM,
   RiSearchLine,
   RiSettings3Line,
   RiSubtractLine,
@@ -183,6 +184,7 @@ type IconName =
   | "search"
   | "settings"
   | "display"
+  | "integration"
   | "sources"
   | "up"
   | "down"
@@ -196,6 +198,7 @@ const icons: Record<IconName, RemixiconComponentType> = {
   search: RiSearchLine,
   settings: RiSettings3Line,
   display: RiLayoutLine,
+  integration: RiLinkM,
   sources: RiDatabase2Line,
   up: RiArrowUpLine,
   down: RiArrowDownLine,

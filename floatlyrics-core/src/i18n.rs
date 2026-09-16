@@ -342,6 +342,20 @@ define_text_keys!(
     CandidatesFoundMany,
     ProviderNameQqMusic,
     ProviderNameNetEase,
+    Integration,
+    RunMode,
+    RunModeDescription,
+    RunModeFloating,
+    RunModeAmll,
+    RunModeRestartHint,
+    AmllAddress,
+    AmllAddressDescription,
+    TrayIcon,
+    TrayIconDescription,
+    OpenSettings,
+    SearchLyrics,
+    ReloadLyrics,
+    Quit,
 );
 
 #[derive(Debug, Clone, PartialEq, Eq)]

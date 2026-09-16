@@ -83,9 +83,10 @@ impl ControlCenterView {
 
 fn window_title(language: Language, page: ControlPage) -> &'static str {
     language.text(match page {
-        ControlPage::General | ControlPage::Display | ControlPage::Sources => {
-            Text::SettingsWindowTitle
-        }
+        ControlPage::General
+        | ControlPage::Display
+        | ControlPage::Integration
+        | ControlPage::Sources => Text::SettingsWindowTitle,
         ControlPage::About => Text::AboutWindowTitle,
     })
 }
