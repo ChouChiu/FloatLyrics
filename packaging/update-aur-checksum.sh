@@ -56,8 +56,18 @@ if [[ $package_selection == all || $package_selection == floatlyrics ]]; then
         --output "$source_archive" \
         "https://github.com/ChouChiu/FloatLyrics/archive/refs/tags/v$version.tar.gz"
     source_checksum=$(sha256sum "$source_archive" | cut -d ' ' -f 1)
-    sed -i -E "s/^sha256sums=\('[^']*'\)$/sha256sums=('$source_checksum')/" "$source_pkgbuild"
-    grep -Fxq "sha256sums=('$source_checksum')" "$source_pkgbuild"
+    # The checksum array holds the source archive first and the archive of the
+    # dictionary `lindera-ipadic` embeds after it, so only the first checksum in
+    # the file is replaced.
+    awk -v checksum="$source_checksum" '
+        !replaced && match($0, /[0-9a-f]{64}/) {
+            $0 = substr($0, 1, RSTART - 1) checksum substr($0, RSTART + RLENGTH)
+            replaced = 1
+        }
+        { print }
+    ' "$source_pkgbuild" > "$source_pkgbuild.checksum"
+    mv "$source_pkgbuild.checksum" "$source_pkgbuild"
+    grep -Fq "$source_checksum" "$source_pkgbuild"
     if [[ $generate_srcinfo == true ]]; then
         source_srcinfo_temp="$temp_dir/floatlyrics.SRCINFO"
         (cd "$source_dir" && makepkg --printsrcinfo) > "$source_srcinfo_temp"
