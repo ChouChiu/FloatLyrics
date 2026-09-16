@@ -278,6 +278,7 @@ fn snapshot(title: &str) -> PlaybackSnapshot {
                 album: None,
                 duration_ms: Some(60_000),
                 mpris_track_id: None,
+                art_url: None,
             }),
         },
         received_at: Instant::now(),

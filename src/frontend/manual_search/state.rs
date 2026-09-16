@@ -36,6 +36,7 @@ pub(super) fn build_search_track(
         album: None,
         duration_ms: target.duration_ms,
         mpris_track_id: None,
+        art_url: None,
     })
 }
 

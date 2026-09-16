@@ -38,6 +38,7 @@ fn search_input_is_normalized_without_copying_playback_identity() {
         album: Some("Playing album".to_string()),
         duration_ms: Some(180_000),
         mpris_track_id: Some("spotify:track:playing".to_string()),
+        art_url: None,
     };
 
     let query = build_search_track(&target, "  Query title  ", " First, , Second ").unwrap();
@@ -148,6 +149,7 @@ fn track(title: &str) -> TrackMetadata {
         album: None,
         duration_ms: Some(60_000),
         mpris_track_id: None,
+        art_url: None,
     }
 }
 

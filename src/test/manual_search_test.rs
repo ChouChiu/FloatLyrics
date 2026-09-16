@@ -8,6 +8,7 @@ fn manual_search_fields_convert_spotify_metadata_to_simplified_chinese() {
         album: None,
         duration_ms: None,
         mpris_track_id: None,
+        art_url: None,
     };
 
     assert_eq!(

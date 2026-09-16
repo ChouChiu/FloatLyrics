@@ -7,6 +7,7 @@ fn track() -> TrackMetadata {
         album: Some("Record".to_string()),
         duration_ms: Some(123_000),
         mpris_track_id: Some("/org/mpris/MediaPlayer2/Track/1".to_string()),
+        art_url: None,
     }
 }
 

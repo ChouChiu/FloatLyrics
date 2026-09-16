@@ -67,6 +67,7 @@ fn provider_metadata_converts_traditional_chinese_for_search() {
         album: Some("喜歡你".to_string()),
         duration_ms: Some(235_000),
         mpris_track_id: Some("spotify:track:example".to_string()),
+        art_url: None,
     };
 
     let metadata = lyrics_helper_metadata(&track);

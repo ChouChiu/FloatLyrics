@@ -58,6 +58,9 @@ pub struct MprisMetadata {
     pub length_us: Option<u64>,
     /// MPRIS track object path, when supplied.
     pub track_id: Option<String>,
+    /// Album cover URL supplied by the player, when available.
+    #[serde(default)]
+    pub art_url: Option<String>,
 }
 
 /// Extracts the metadata fields used by FloatLyrics from MPRIS properties.
@@ -74,6 +77,7 @@ pub fn metadata_from_mpris(metadata: &HashMap<String, OwnedValue>) -> Option<Mpr
         album: metadata.get("xesam:album").and_then(string_value),
         length_us: metadata.get("mpris:length").and_then(u64_value),
         track_id: metadata.get("mpris:trackid").and_then(track_id_value),
+        art_url: metadata.get("mpris:artUrl").and_then(string_value),
     })
 }
 
@@ -127,6 +131,10 @@ impl MprisMetadata {
                 .filter(|album| !album.is_empty()),
             duration_ms: self.length_us.map(|value| value / 1_000),
             mpris_track_id: self.track_id,
+            art_url: self
+                .art_url
+                .map(|url| url.trim().to_string())
+                .filter(|url| !url.is_empty()),
         };
 
         Ok(track)

@@ -79,6 +79,7 @@ fn maps_track_metadata_for_lyrics_helper_search() {
         album: Some("Album".to_string()),
         duration_ms: Some(123_000),
         mpris_track_id: None,
+        art_url: None,
     };
 
     let metadata = lyrics_helper_metadata(&track);

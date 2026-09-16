@@ -177,5 +177,6 @@ fn hint_metadata(track_id: Option<&str>) -> MprisMetadata {
         album: None,
         length_us: None,
         track_id: track_id.map(str::to_string),
+        art_url: None,
     }
 }

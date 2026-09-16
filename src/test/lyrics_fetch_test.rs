@@ -442,6 +442,7 @@ fn player_state(title: &str, position_ms: u64) -> SpotifyPlayerState {
             album: None,
             duration_ms: Some(60_000),
             mpris_track_id: None,
+            art_url: None,
         }),
     }
 }
