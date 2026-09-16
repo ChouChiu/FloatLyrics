@@ -25,6 +25,12 @@ pub(super) struct LyricsDisplayState {
     pub(super) track_fingerprint: Option<String>,
     pub(super) lines: Vec<TimedLine>,
     pub(super) status_message: Option<Message>,
+    /// Artists as the provider that supplied these lyrics credits them.
+    ///
+    /// A provider matches a release rather than a playback session, so its
+    /// billing can name featured performers the playback source omits. Empty for
+    /// lyrics resolved from a provider identifier the player itself suggested.
+    pub(super) credited_artists: Vec<String>,
 }
 
 #[derive(Clone)]

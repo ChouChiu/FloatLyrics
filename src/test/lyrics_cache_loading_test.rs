@@ -21,6 +21,7 @@ fn manual_lyrics_without_translation_do_not_trigger_provider_refresh() {
         track_fingerprint: Some("track".to_string()),
         lines: vec![line("manual lyrics")],
         status_message: None,
+        credited_artists: Vec::new(),
     };
 
     assert!(!should_refresh_translation(

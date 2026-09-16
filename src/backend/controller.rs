@@ -6,12 +6,17 @@
 mod loading;
 mod presentation;
 
-use std::{cell::RefCell, rc::Rc, sync::mpsc, time::Instant};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    sync::{Arc, mpsc},
+    time::Instant,
+};
 
 use floatlyrics_core::{i18n::Text, track::TrackMetadata};
 use floatlyrics_lyrics::cache::{TRACK_OFFSET_MS_MAX, TRACK_OFFSET_MS_MIN};
 
-use crate::shared::runtime::LyricsRuntimeConfig;
+use crate::shared::{presentation::PlayerControl, runtime::LyricsRuntimeConfig};
 
 use super::{
     cache::CacheService,
@@ -19,20 +24,23 @@ use super::{
         LyricsDisplayState, PlaybackSnapshot, apply_position_sample, effective_position_ms,
         lyrics_document, playback_jump_detected,
     },
-    mpris::{PlayerLyricsHintEvent, PlayerState, PlayerWatcherEvent},
+    mpris::{PlaybackStatus, PlayerLyricsHintEvent, PlayerState, PlayerWatcherEvent},
 };
 use loading::{
     LyricsCacheApplyContext, LyricsCacheEvent, LyricsFetchApplyContext, LyricsFetchEvent,
     LyricsLoadContext, RomanizationEvent, apply_lyrics_cache_event, apply_lyrics_fetch_event,
     apply_romanization_event, load_lyrics_for_track,
 };
-use presentation::{refresh_lyrics_display, update_track_display};
+use presentation::{publish_song_info, refresh_lyrics_display, update_track_display};
 
 pub(crate) use presentation::LyricsView;
 
 #[derive(Default)]
 struct ControllerState {
-    latest: Option<PlaybackSnapshot>,
+    latest: Option<Arc<PlaybackSnapshot>>,
+    /// Fingerprint of the current track, recomputed when the track changes so
+    /// the tick does not hash the metadata again.
+    current_fingerprint: Option<String>,
     lyrics: LyricsDisplayState,
     lyrics_generation: u64,
     document_dirty: bool,
@@ -42,6 +50,14 @@ struct ControllerState {
     track_offset_fingerprint: Option<String>,
     track_offset_generation: u64,
     lyrics_hint: Option<floatlyrics_lyrics::lyrics::LyricsLookupHint>,
+    /// Last control state published to the view, so it is not resent per tick.
+    player_control: Option<PlayerControl>,
+    /// Track fingerprint and provider billing already reconciled for the view.
+    ///
+    /// Keeps the credited restatement to one per pair rather than one per frame,
+    /// and is forgotten whenever the player's own metadata is published again,
+    /// so the restatement follows that too.
+    credited_billing: Option<(String, Vec<String>)>,
 }
 
 impl ControllerState {
@@ -298,12 +314,9 @@ impl Controller {
             }
         }
 
-        let snapshot = self.state.latest.clone();
-        if let Some(snapshot) = snapshot {
-            if let Some(track) = snapshot.state.track.as_ref() {
-                let lyrics_hint = self.state.lyrics_hint.clone();
-                ensure_lyrics_loaded(track, lyrics_hint.as_ref(), &ctx, &mut self.state);
-            }
+        if let Some(snapshot) = self.state.latest.clone() {
+            ensure_lyrics_loaded(&ctx, &mut self.state);
+            credit_artists(&mut self.state, ctx.floating);
             sync_lyrics_document(&mut self.state, &snapshot, ctx.config, ctx.floating);
             refresh_lyrics_display(
                 &snapshot,
@@ -356,16 +369,21 @@ fn handle_player_event(
             if previous_fingerprint != next_fingerprint {
                 controller_state.lyrics_hint = None;
             }
-            let jump_detected =
-                playback_jump_detected(controller_state.latest.as_ref(), state.position_ms, state);
+            controller_state.current_fingerprint = next_fingerprint;
+            let jump_detected = playback_jump_detected(
+                controller_state.latest.as_deref(),
+                state.position_ms,
+                state,
+            );
             if jump_detected {
                 controller_state.seek_pending = true;
             }
-            controller_state.latest = Some(PlaybackSnapshot {
+            controller_state.latest = Some(Arc::new(PlaybackSnapshot {
                 state: state.clone(),
                 received_at: Instant::now(),
-            });
+            }));
             playback.set_current_track(state.track.clone());
+            publish_player_control(Some(state.control), ctx, controller_state);
             update_player_state(state, ctx, controller_state);
         }
         PlayerWatcherEvent::PositionUpdated {
@@ -374,6 +392,7 @@ fn handle_player_event(
             sampled_at,
         } => {
             if let Some(snapshot) = controller_state.latest.as_mut() {
+                let snapshot = Arc::make_mut(snapshot);
                 let predicted = effective_position_ms(snapshot);
                 if apply_position_sample(
                     snapshot,
@@ -387,31 +406,38 @@ fn handle_player_event(
             }
         }
         PlayerWatcherEvent::Disconnected => {
-            controller_state.latest = None;
-            controller_state.lyrics = LyricsDisplayState::default();
-            controller_state.document_dirty = true;
-            playback.set_current_track(None);
-            controller_state.track_offset_ms = 0;
-            controller_state.track_offset_fingerprint = None;
-            controller_state.lyrics_hint = None;
-            ctx.floating.set_track_offset(0);
-            ctx.floating.set_song_info("FloatLyrics");
+            reset_player_state(controller_state, ctx, playback);
             ctx.floating.show_status(Text::OpenPlayer);
         }
         PlayerWatcherEvent::Error(message) => {
-            controller_state.latest = None;
-            controller_state.lyrics = LyricsDisplayState::default();
-            controller_state.document_dirty = true;
-            playback.set_current_track(None);
-            controller_state.track_offset_ms = 0;
-            controller_state.track_offset_fingerprint = None;
-            controller_state.lyrics_hint = None;
-            ctx.floating.set_track_offset(0);
             tracing::warn!(%message, "MPRIS listener error");
-            ctx.floating.set_song_info("FloatLyrics");
+            reset_player_state(controller_state, ctx, playback);
             ctx.floating.show_status(Text::PlayerAttention);
         }
     }
+}
+
+/// Forgets the player and tells the view that playback stopped.
+///
+/// The status shown afterwards is the caller's, because a disconnect and a
+/// failed listener are reported differently.
+fn reset_player_state(
+    state: &mut ControllerState,
+    ctx: &ControllerContext<'_>,
+    playback: &PlaybackProjection,
+) {
+    state.latest = None;
+    state.current_fingerprint = None;
+    state.lyrics = LyricsDisplayState::default();
+    state.document_dirty = true;
+    playback.set_current_track(None);
+    state.track_offset_ms = 0;
+    state.track_offset_fingerprint = None;
+    state.lyrics_hint = None;
+    ctx.floating.set_track_offset(0);
+    ctx.floating.set_track_metadata(None);
+    publish_player_control(None, ctx, state);
+    ctx.floating.set_song_info("FloatLyrics");
 }
 
 fn apply_player_lyrics_hint(event: PlayerLyricsHintEvent, state: &mut ControllerState) {
@@ -434,57 +460,135 @@ fn apply_player_lyrics_hint(event: PlayerLyricsHintEvent, state: &mut Controller
     state.reload_lyrics();
 }
 
+/// Publishes the control state to the view, which only the AMLL sender renders.
+///
+/// The state is compared with the last published one so a repeated notification
+/// does not resend it.
+fn publish_player_control(
+    control: Option<PlayerControl>,
+    ctx: &ControllerContext<'_>,
+    controller_state: &mut ControllerState,
+) {
+    if controller_state.player_control == control {
+        return;
+    }
+    controller_state.player_control = control;
+    ctx.floating.set_player_control(control.as_ref());
+}
+
 fn update_player_state(
     state: &PlayerState,
     ctx: &ControllerContext<'_>,
     controller_state: &mut ControllerState,
 ) {
+    // The player's own billing reaches the view here, so a credited
+    // restatement has to follow it again.
+    controller_state.credited_billing = None;
     let Some(track) = &state.track else {
+        ctx.floating.set_track_metadata(None);
         ctx.floating.set_song_info("FloatLyrics");
         ctx.floating.show_status(Text::WaitingForMetadata);
         return;
     };
     ctx.cache.record_track(track.clone());
+    ctx.floating.set_track_metadata(Some(track));
+    // The song info only changes with the track, so it is published here and not
+    // from the per-frame presentation refresh.
+    publish_song_info(state, ctx.floating);
     update_track_display(
-        state,
         ctx.floating,
         ctx.config,
         &controller_state.lyrics,
         state.position_ms,
+        state.playback_status == PlaybackStatus::Playing,
         controller_state.seek_pending,
         controller_state.track_offset_ms,
     );
 }
 
-fn ensure_lyrics_loaded(
-    track: &TrackMetadata,
-    hint: Option<&floatlyrics_lyrics::lyrics::LyricsLookupHint>,
-    ctx: &ControllerContext<'_>,
-    state: &mut ControllerState,
-) {
-    let fingerprint = track.fingerprint();
-    if state.lyrics.track_fingerprint.as_deref() == Some(fingerprint.as_str()) {
+/// Restates the current track with the artists the lyrics provider credits.
+///
+/// The provider that supplied the lyrics can name performers the playback source
+/// omits — see [`TrackMetadata::artists_including`] — and those names only arrive
+/// with the lyrics, so the track is restated once they are known. Nothing is sent
+/// when they add nobody, which is the usual case.
+///
+/// Only the AMLL listener renders track metadata, so the restatement goes
+/// through [`LyricsView::set_track_metadata`]; the overlay's song info is left
+/// as it is.
+fn credit_artists(state: &mut ControllerState, view: &dyn LyricsView) {
+    let Some(fingerprint) = state.current_fingerprint.as_deref() else {
+        return;
+    };
+    // Only the lyrics of the current track may credit it.
+    if state.lyrics.track_fingerprint.as_deref() != Some(fingerprint) {
         return;
     }
+    let reconciled = state
+        .credited_billing
+        .as_ref()
+        .is_some_and(|(known, names)| {
+            known == fingerprint && names == &state.lyrics.credited_artists
+        });
+    if reconciled {
+        return;
+    }
+    // Reconciled from here on: without a credited name the view is already
+    // right, so the pair is recorded even when nothing is restated.
+    state.credited_billing = Some((
+        fingerprint.to_string(),
+        state.lyrics.credited_artists.clone(),
+    ));
+    let Some(track) = state
+        .latest
+        .as_ref()
+        .and_then(|snapshot| snapshot.state.track.as_ref())
+    else {
+        return;
+    };
+    let Some(artists) = track.artists_including(&state.lyrics.credited_artists) else {
+        return;
+    };
+    let mut credited = track.clone();
+    credited.artists = artists;
+    view.set_track_metadata(Some(&credited));
+}
+
+/// Starts loading the lyrics of the current track when they are not loaded yet.
+///
+/// Runs on every tick, so it compares the fingerprint stored by the player
+/// events instead of hashing the track metadata again.
+fn ensure_lyrics_loaded(ctx: &ControllerContext<'_>, state: &mut ControllerState) {
+    let Some(fingerprint) = state.current_fingerprint.as_deref() else {
+        return;
+    };
+    if state.lyrics.track_fingerprint.as_deref() == Some(fingerprint) {
+        return;
+    }
+    let Some(track) = state
+        .latest
+        .as_ref()
+        .and_then(|snapshot| snapshot.state.track.as_ref())
+    else {
+        return;
+    };
 
     state.lyrics_generation = state.lyrics_generation.wrapping_add(1);
-    if state.track_offset_fingerprint.as_deref() != Some(fingerprint.as_str()) {
-        state.track_offset_fingerprint = Some(fingerprint.clone());
+    if state.track_offset_fingerprint.as_deref() != Some(fingerprint) {
+        state.track_offset_fingerprint = Some(fingerprint.to_string());
         state.track_offset_generation = state.track_offset_generation.wrapping_add(1);
         state.track_offset_ms = 0;
         ctx.floating.set_track_offset(0);
     }
-    let generation = state.lyrics_generation;
     let load_context = LyricsLoadContext {
         cache: ctx.cache,
         config: ctx.config,
         cache_sender: ctx.cache_sender,
-        generation,
+        generation: state.lyrics_generation,
         offset_generation: state.track_offset_generation,
-        hint: hint.cloned(),
+        hint: state.lyrics_hint.clone(),
     };
-    let lyrics = load_lyrics_for_track(track, fingerprint, &load_context);
-    state.lyrics = lyrics;
+    state.lyrics = load_lyrics_for_track(track, fingerprint.to_string(), &load_context);
     state.document_dirty = true;
 }
 

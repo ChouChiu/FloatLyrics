@@ -16,11 +16,12 @@ use std::time::Duration;
 #[test]
 fn reload_state_invalidates_only_the_lyrics_identity() {
     let mut state = ControllerState {
-        latest: Some(snapshot("Song")),
+        latest: Some(Arc::new(snapshot("Song"))),
         lyrics: LyricsDisplayState {
             track_fingerprint: Some("fingerprint".to_string()),
             lines: vec![line("existing lyrics")],
             status_message: None,
+            credited_artists: Vec::new(),
         },
         track_offset_ms: 300,
         track_offset_fingerprint: Some("fingerprint".to_string()),
@@ -73,7 +74,7 @@ fn presentation_refresh_does_not_invalidate_lyrics() {
 #[test]
 fn a_new_exact_hint_reloads_only_the_same_track() {
     let mut state = ControllerState {
-        latest: Some(snapshot("Song")),
+        latest: Some(Arc::new(snapshot("Song"))),
         lyrics: LyricsDisplayState {
             track_fingerprint: Some("loaded".to_string()),
             ..LyricsDisplayState::default()
@@ -166,7 +167,7 @@ fn reset_at_zero_invalidates_a_pending_offset_load_and_persists_zero() {
         Ok(())
     );
     let mut state = ControllerState {
-        latest: Some(snapshot("Song")),
+        latest: Some(Arc::new(snapshot("Song"))),
         track_offset_fingerprint: Some(track.fingerprint()),
         track_offset_generation: 7,
         ..ControllerState::default()
@@ -194,7 +195,7 @@ fn adjusting_track_offset_marks_the_next_frame_as_seeking() {
     let directory = tempfile::tempdir().unwrap();
     let cache = CacheWorker::new(&directory.path().join("lyrics.db")).unwrap();
     let mut state = ControllerState {
-        latest: Some(snapshot("Song")),
+        latest: Some(Arc::new(snapshot("Song"))),
         ..ControllerState::default()
     };
 
@@ -257,11 +258,17 @@ struct NoopLyricsView;
 impl LyricsView for NoopLyricsView {
     fn set_song_info(&self, _value: &str) {}
 
+    fn set_track_metadata(&self, _track: Option<&TrackMetadata>) {}
+
     fn set_track_offset(&self, _offset_ms: i64) {}
+
+    fn set_player_control(&self, _control: Option<&PlayerControl>) {}
 
     fn set_lyrics_document(&self, _document: LyricsDocument) {}
 
-    fn show_lyrics(&self, _frame: LyricsFrame) {}
+    fn set_playback(&self, _position_ms: Option<u64>, _playing: bool) {}
+
+    fn show_lyrics(&self, _frame: Arc<LyricsFrame>) {}
 
     fn show_status(&self, _key: Text) {}
 }
@@ -317,4 +324,74 @@ impl LyricsView for RecordingLyricsView {
             self.metadata.borrow_mut().push(track.artists.clone());
         }
     }
+
+    fn set_track_offset(&self, _offset_ms: i64) {}
+
+    fn set_player_control(&self, _control: Option<&PlayerControl>) {}
+
+    fn set_lyrics_document(&self, _document: LyricsDocument) {}
+
+    fn set_playback(&self, _position_ms: Option<u64>, _playing: bool) {}
+
+    fn show_lyrics(&self, _frame: Arc<LyricsFrame>) {}
+
+    fn show_status(&self, _key: Text) {}
+}
+
+fn state_with_credits(lyrics_fingerprint: &str) -> ControllerState {
+    // The real shape of this: the player credits the lead performer alone while
+    // the provider that supplied the lyrics bills both of them.
+    let mut snapshot = snapshot("Problem");
+    snapshot.state.track.as_mut().unwrap().artists = vec!["Ariana Grande".to_string()];
+
+    ControllerState {
+        latest: Some(Arc::new(snapshot)),
+        current_fingerprint: Some("fingerprint".to_string()),
+        lyrics: LyricsDisplayState {
+            track_fingerprint: Some(lyrics_fingerprint.to_string()),
+            lines: vec![line("One less problem")],
+            status_message: None,
+            credited_artists: vec!["Ariana Grande".to_string(), "Iggy Azalea".to_string()],
+        },
+        ..ControllerState::default()
+    }
+}
+
+#[test]
+fn restates_the_track_with_the_artists_the_provider_credits() {
+    let mut state = state_with_credits("fingerprint");
+    let view = RecordingLyricsView::default();
+
+    credit_artists(&mut state, &view);
+
+    assert_eq!(
+        view.metadata.borrow().as_slice(),
+        [vec!["Ariana Grande".to_string(), "Iggy Azalea".to_string()]],
+        "the listener is told the performer the player left out"
+    );
+    assert!(
+        view.song_info.borrow().is_empty(),
+        "the overlay's own song info is not the listener's"
+    );
+}
+
+#[test]
+fn restates_the_track_once() {
+    let mut state = state_with_credits("fingerprint");
+    let view = RecordingLyricsView::default();
+
+    credit_artists(&mut state, &view);
+    credit_artists(&mut state, &view);
+
+    assert_eq!(view.metadata.borrow().len(), 1);
+}
+
+#[test]
+fn the_lyrics_of_another_track_credit_nobody() {
+    let mut state = state_with_credits("another fingerprint");
+    let view = RecordingLyricsView::default();
+
+    credit_artists(&mut state, &view);
+
+    assert!(view.metadata.borrow().is_empty());
 }

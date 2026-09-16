@@ -407,6 +407,7 @@ fn loaded_state() -> LyricsDisplayState {
         track_fingerprint: Some("track".to_string()),
         lines: vec![line("manual lyrics")],
         status_message: None,
+        credited_artists: Vec::new(),
     }
 }
 
@@ -414,6 +415,7 @@ fn searching_state(fingerprint: &str) -> LyricsDisplayState {
     LyricsDisplayState {
         track_fingerprint: Some(fingerprint.to_string()),
         status_message: Some(Message::Text(Text::SearchingLyrics)),
+        credited_artists: Vec::new(),
         ..LyricsDisplayState::default()
     }
 }
@@ -432,11 +434,12 @@ fn line(text: &str) -> TimedLine {
     }
 }
 
-fn player_state(title: &str, position_ms: u64) -> SpotifyPlayerState {
-    SpotifyPlayerState {
+fn player_state(title: &str, position_ms: u64) -> PlayerState {
+    PlayerState {
         bus_name: "org.mpris.MediaPlayer2.spotify".to_string(),
         playback_status: PlaybackStatus::Paused,
         position_ms: Some(position_ms),
+        control: PlayerControl::default(),
         track: Some(TrackMetadata {
             title: title.to_string(),
             artists: vec!["Artist".to_string()],

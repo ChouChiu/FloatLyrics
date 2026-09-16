@@ -62,6 +62,7 @@ pub(super) fn lyrics_state_from_cached(
         track_fingerprint: Some(fingerprint),
         lines,
         status_message,
+        credited_artists: cached.artists.clone(),
     }
 }
 
