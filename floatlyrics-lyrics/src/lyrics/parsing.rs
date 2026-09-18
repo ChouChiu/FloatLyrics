@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result, anyhow};
 use lyrics_helper::{
-    LineInfo, LyricsData, LyricsTypes, generate_string, parse_auto as parse_helper,
+    LineInfo, LyricsData, LyricsTypes, SyllableItem, generate_string, parse_auto as parse_helper,
 };
 
 use super::model::{BackgroundVocal, TimedLine, TimedSyllable, Voice};
@@ -31,10 +31,11 @@ const TRANSLATION_SECTION_MARKER: &str = "[floatlyrics:translation]";
 /// # Errors
 /// Returns an error when the input is XML or the format cannot be detected or parsed.
 pub fn parse_local_lyrics(content: &str) -> Result<LyricsData> {
-    // `lyrics-parsers` 0.1.3 uses quick-xml's checked attribute iterator for
-    // TTML. Reject XML before reaching the quadratic paths described by
-    // RUSTSEC-2026-0194 and RUSTSEC-2026-0195. QQ Music and NetEase payloads
-    // use the LRC/QRC paths above this fallback.
+    // `lyrics-parsers` reads TTML through quick-xml 0.36's checked attribute
+    // iterator and namespace resolver, which hold the quadratic run time and the
+    // unbounded namespace allocation of RUSTSEC-2026-0194 and RUSTSEC-2026-0195.
+    // Reject XML before reaching that parser; QQ Music and NetEase payloads use
+    // the LRC/QRC paths above this fallback.
     if content
         .trim_start_matches(|character: char| character.is_whitespace() || character == '\u{feff}')
         .starts_with('<')
@@ -191,6 +192,10 @@ fn timed_syllables_from_info(line: &LineInfo) -> Vec<TimedSyllable> {
         LineInfo::Syllable { syllables, .. } | LineInfo::FullSyllable { syllables, .. } => {
             syllables
                 .iter()
+                // A merged word keeps the items it was merged from, whose times are
+                // the ones a renderer animates; the aggregate would only approximate
+                // them.
+                .flat_map(SyllableItem::parts)
                 .filter_map(|syllable| {
                     Some(TimedSyllable {
                         start_ms: ms_i32_to_u64(syllable.start_time)?,

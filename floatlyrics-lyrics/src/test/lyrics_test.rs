@@ -125,6 +125,41 @@ fn converts_lyrics_helper_lines_to_timed_lines() {
     assert_eq!(active_line_index(&lines, 3_200, 0), Some(1));
 }
 
+/// Upstream merges the syllables of a word into one item and keeps the timing of
+/// the items it was merged from; those are the times a renderer animates.
+#[test]
+fn merged_syllable_items_keep_the_timing_of_their_parts() {
+    use lyrics_helper::{FullSyllableInfo, SyllableInfo, SyllableItem};
+
+    let merged = SyllableItem::from(FullSyllableInfo::new(vec![
+        SyllableInfo::new("合".to_string(), 1_000, 1_250),
+        SyllableInfo::new("声".to_string(), 1_250, 1_500),
+    ]));
+    let data = LyricsData {
+        lines: Some(vec![LineInfo::new_syllable(vec![
+            merged,
+            SyllableItem::from(SyllableInfo::new("是你".to_string(), 1_500, 2_000)),
+        ])]),
+        ..LyricsData::default()
+    };
+
+    let lines = timed_lines_from_data(&data, &[]);
+
+    assert_eq!(lines[0].text, "合声是你");
+    assert_eq!(
+        lines[0]
+            .syllables
+            .iter()
+            .map(|syllable| (syllable.start_ms, syllable.end_ms, syllable.text.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (1_000, 1_250, "合"),
+            (1_250, 1_500, "声"),
+            (1_500, 2_000, "是你")
+        ]
+    );
+}
+
 #[test]
 fn generates_japanese_romanization_locally() {
     let lines = romanized_lines("[00:01.00]こんにちは世界\n[00:03.00]音楽");

@@ -3,28 +3,31 @@
 
 //! Concrete `lyrics-helper` provider adapters.
 
-use anyhow::Result;
-
 use crate::lyrics::{
     model::{FetchedLyrics, LyricsCandidate, LyricsLookupHint, LyricsProvider},
     parsing::combine_lyrics_with_translation,
 };
 use floatlyrics_core::track::TrackMetadata;
+use lyrics_helper::SearchError;
 
 pub(super) async fn search_provider_candidates(
     provider: LyricsProvider,
     metadata: &lyrics_helper::models::TrackMetadata,
-) -> Vec<LyricsCandidate> {
+) -> Result<Vec<LyricsCandidate>, SearchError> {
     use lyrics_helper::searchers::{
         netease::NeteaseSearcher, qq_music::QQMusicSearcher, search_with_refinement,
     };
 
     let results = match provider {
-        LyricsProvider::QqMusic => search_with_refinement(&QQMusicSearcher, metadata, false).await,
-        LyricsProvider::NetEase => search_with_refinement(&NeteaseSearcher, metadata, false).await,
+        LyricsProvider::QqMusic => {
+            search_with_refinement(&QQMusicSearcher, metadata, false).await?
+        }
+        LyricsProvider::NetEase => {
+            search_with_refinement(&NeteaseSearcher, metadata, false).await?
+        }
     };
 
-    results
+    Ok(results
         .into_iter()
         .map(|result| LyricsCandidate {
             provider,
@@ -36,10 +39,12 @@ pub(super) async fn search_provider_candidates(
             duration_ms: result.duration_ms,
             match_score: result.match_type.map_or(0, |value| value as i32),
         })
-        .collect()
+        .collect())
 }
 
-pub(super) async fn fetch_candidate_raw_lyrics(candidate: &LyricsCandidate) -> Option<String> {
+pub(super) async fn fetch_candidate_raw_lyrics(
+    candidate: &LyricsCandidate,
+) -> Result<Option<String>, SearchError> {
     let artist = candidate.artists.join(", ");
     fetch_raw_lyrics(ProviderTrackRef {
         provider: candidate.provider,
@@ -65,6 +70,9 @@ pub(super) async fn fetch_hint_lyrics(
         ),
         LyricsProvider::NetEase => (hint.provider_track_id.as_str(), None),
     };
+    // The hint only shortcuts the search below: an identifier the provider can no
+    // longer serve — and a failed request — falls back to it, so the outcome here
+    // stays an `Option`.
     let raw_lyrics = fetch_raw_lyrics(ProviderTrackRef {
         provider: hint.provider,
         id,
@@ -74,7 +82,9 @@ pub(super) async fn fetch_hint_lyrics(
         album: track.album.as_deref().unwrap_or_default(),
         duration_ms: track.duration_ms.and_then(|value| value.try_into().ok()),
     })
-    .await?
+    .await
+    .ok()
+    .flatten()?
     .trim()
     .to_string();
     if raw_lyrics.is_empty() {
@@ -94,7 +104,7 @@ pub(super) async fn fetch_hint_lyrics(
 pub(super) async fn search_provider_best(
     provider: LyricsProvider,
     metadata: &lyrics_helper::models::TrackMetadata,
-) -> Result<Option<FetchedLyrics>> {
+) -> Result<Option<FetchedLyrics>, SearchError> {
     use lyrics_helper::searchers::{
         compare_helper::MatchType, netease::NeteaseSearcher, qq_music::QQMusicSearcher,
         search_for_best_result_with_match,
@@ -102,20 +112,20 @@ pub(super) async fn search_provider_best(
 
     let result = match provider {
         LyricsProvider::QqMusic => {
-            search_for_best_result_with_match(&QQMusicSearcher, metadata, MatchType::Medium).await
+            search_for_best_result_with_match(&QQMusicSearcher, metadata, MatchType::Medium).await?
         }
         LyricsProvider::NetEase => {
-            search_for_best_result_with_match(&NeteaseSearcher, metadata, MatchType::Medium).await
+            search_for_best_result_with_match(&NeteaseSearcher, metadata, MatchType::Medium).await?
         }
     };
 
     let Some(result) = result else {
         return Ok(None);
     };
-    let raw_lyrics = fetch_result_lyrics(provider, &result).await;
-    let Some(raw_lyrics) = raw_lyrics.map(|value| value.trim().to_string()) else {
+    let Some(raw_lyrics) = fetch_result_lyrics(provider, &result).await? else {
         return Ok(None);
     };
+    let raw_lyrics = raw_lyrics.trim().to_string();
     if raw_lyrics.is_empty() {
         return Ok(None);
     }
@@ -135,7 +145,7 @@ pub(super) async fn search_provider_best(
 async fn fetch_result_lyrics(
     provider: LyricsProvider,
     result: &lyrics_helper::searchers::search_result::SearchResult,
-) -> Option<String> {
+) -> Result<Option<String>, SearchError> {
     let artist = result.artist();
     fetch_raw_lyrics(ProviderTrackRef {
         provider,
@@ -159,10 +169,10 @@ struct ProviderTrackRef<'a> {
     duration_ms: Option<i32>,
 }
 
-async fn fetch_raw_lyrics(track: ProviderTrackRef<'_>) -> Option<String> {
+async fn fetch_raw_lyrics(track: ProviderTrackRef<'_>) -> Result<Option<String>, SearchError> {
     use lyrics_helper::search::providers::web::{netease, qq_music};
 
-    let response = match track.provider {
+    let (lyrics, translation) = match track.provider {
         LyricsProvider::QqMusic => {
             qq_music::api::get_lyrics(
                 track.id,
@@ -172,15 +182,17 @@ async fn fetch_raw_lyrics(track: ProviderTrackRef<'_>) -> Option<String> {
                 track.album,
                 track.duration_ms,
             )
-            .await
+            .await?
         }
         LyricsProvider::NetEase => {
-            let song_id = track.id.parse().ok()?;
-            netease::api::get_lyrics(song_id).await
+            let Ok(song_id) = track.id.parse() else {
+                // An identifier NetEase cannot address names no song, which is the
+                // same outcome as a song without lyrics.
+                return Ok(None);
+            };
+            netease::api::get_lyrics(song_id).await?
         }
     };
 
-    response.and_then(|(lyrics, translation)| {
-        lyrics.map(|lyrics| combine_lyrics_with_translation(&lyrics, translation.as_deref()))
-    })
+    Ok(lyrics.map(|lyrics| combine_lyrics_with_translation(&lyrics, translation.as_deref())))
 }
