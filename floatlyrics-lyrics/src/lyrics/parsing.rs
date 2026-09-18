@@ -3,7 +3,10 @@
 
 //! Conversion between provider payloads and display-ready timed lyrics.
 
+use std::borrow::Cow;
+
 use anyhow::{Context, Result, anyhow};
+use lyrics_helper::helpers::optimization::explicit::fix_explicit;
 use lyrics_helper::{
     LineInfo, LyricsData, LyricsTypes, SyllableItem, generate_string, parse_auto as parse_helper,
 };
@@ -48,16 +51,28 @@ pub fn parse_local_lyrics(content: &str) -> Result<LyricsData> {
 /// Parses raw provider lyrics into sorted, display-ready lines.
 ///
 /// `artists` are the ones the provider that supplied these lyrics credits, and
-/// are what a speaker label in the payload is matched against. Translation
-/// sections are merged, the conventions of the transcription itself are read into
-/// the lines, and known metadata or credit lines are removed. Provider
-/// pronunciation is intentionally discarded; call
-/// [`super::generate_local_romanization`] when local romanization is wanted.
+/// are what a speaker label in the payload is matched against. Words the provider
+/// censored are restored before anything reads the text, translation sections are
+/// merged, the conventions of the transcription itself are read into the lines,
+/// and known metadata or credit lines are removed. Provider pronunciation is
+/// intentionally discarded; call [`super::generate_local_romanization`] when local
+/// romanization is wanted.
 ///
 /// # Errors
 /// Returns an error when no supported timed format can be parsed.
 pub fn timed_lines_from_raw(content: &str, artists: &[String]) -> Result<Vec<TimedLine>> {
-    let (lyrics, translation) = split_translation_section(content);
+    // A provider censors the explicit words it serves by leaving the shape of the
+    // word behind (`s**t`, `b***h`, `mother****in'`), and upstream's word list
+    // restores the ones that shape still spells; a mask that kept no letter at all
+    // (`*******`) stays a mask, because nothing left in the payload says the word.
+    // Restoring before the payload is read keeps the line text and the words it is
+    // timed by spelling the same.
+    let content = if content.contains('*') {
+        Cow::Owned(fix_explicit(content))
+    } else {
+        Cow::Borrowed(content)
+    };
+    let (lyrics, translation) = split_translation_section(&content);
     let mut lines = parse_timed_lines_block(lyrics, artists)?;
     if let Some(translation) = translation {
         // A translation document is written for the track rather than by one of

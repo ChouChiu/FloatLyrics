@@ -160,6 +160,34 @@ fn merged_syllable_items_keep_the_timing_of_their_parts() {
     );
 }
 
+/// A provider censors the explicit words it serves by masking them; the shape the
+/// mask leaves restores what upstream's word list can spell, and a mask that kept
+/// no letter stays one.
+#[test]
+fn restores_the_words_a_provider_censored() {
+    let lines = timed_lines_from_raw("[00:01.00]This s**t again\n[00:03.00]*******", &[]).unwrap();
+
+    assert_eq!(lines[0].text, "This shit again");
+    assert_eq!(lines[1].text, "*******");
+}
+
+/// The restoration runs before the payload is read, so a timed word and the line
+/// it spells keep saying the same thing.
+#[test]
+fn restores_censored_words_inside_timed_units() {
+    let lines = timed_lines_from_raw("[1000,2000]s**t(0,500) h*es(500,500)", &[]).unwrap();
+
+    assert_eq!(lines[0].text, "shit hoes");
+    assert_eq!(
+        lines[0]
+            .syllables
+            .iter()
+            .map(|syllable| syllable.text.as_str())
+            .collect::<String>(),
+        lines[0].text
+    );
+}
+
 #[test]
 fn generates_japanese_romanization_locally() {
     let lines = romanized_lines("[00:01.00]こんにちは世界\n[00:03.00]音楽");
