@@ -19,8 +19,8 @@ pub use model::{
     LyricsProviderParseError, RomanizationSegment, TimedLine, TimedSyllable, Voice,
 };
 pub use parsing::{
-    combine_lyrics_with_translation, export_lyrics, parse_local_lyrics, timed_lines_from_data,
-    timed_lines_from_raw,
+    combine_lyrics_with_translation, combine_word_timing, export_lyrics, parse_local_lyrics,
+    timed_lines_from_data, timed_lines_from_raw,
 };
 pub use romanization::{
     ChineseRomanizationMode, generate_local_romanization, generate_local_romanization_with_mode,

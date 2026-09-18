@@ -5,7 +5,7 @@
 
 use crate::lyrics::{
     model::{FetchedLyrics, LyricsCandidate, LyricsLookupHint, LyricsProvider},
-    parsing::combine_lyrics_with_translation,
+    parsing::{combine_lyrics_with_translation, combine_word_timing},
 };
 use floatlyrics_core::track::TrackMetadata;
 use lyrics_helper::SearchError;
@@ -200,7 +200,7 @@ struct ProviderTrackRef<'a> {
 }
 
 async fn fetch_raw_lyrics(track: ProviderTrackRef<'_>) -> Result<Option<String>, SearchError> {
-    use lyrics_helper::search::providers::web::{netease, qq_music};
+    use lyrics_helper::search::providers::web::qq_music;
 
     let (lyrics, translation) = match track.provider {
         LyricsProvider::QqMusic => {
@@ -220,9 +220,45 @@ async fn fetch_raw_lyrics(track: ProviderTrackRef<'_>) -> Result<Option<String>,
                 // same outcome as a song without lyrics.
                 return Ok(None);
             };
-            netease::api::get_lyrics(song_id).await?
+            return netease_lyrics(song_id).await;
         }
     };
 
     Ok(lyrics.map(|lyrics| combine_lyrics_with_translation(&lyrics, translation.as_deref())))
+}
+
+/// Fetches NetEase lyrics, with the word times of the tracks that have them.
+///
+/// NetEase times every word of a track it holds a word-timed transcription of and
+/// answers the request for one it does not without lyrics at all, so the row-timed
+/// request is the one that decides whether there are lyrics: it is asked first, and
+/// the word-timed document only follows it. That document is a timing table rather
+/// than a transcription — the provider drops the separators between its words and
+/// reads the brackets of an aside as the brackets of a tag — so it is carried
+/// beside the row-timed lyrics, whose text is displayed, rather than on its own.
+/// The translation is the one of the transcription, not the word-timed one: this
+/// application displays a translation as a row of text, and romanizes locally from
+/// the readings it generates for that purpose, so the provider's romanization is
+/// discarded and its word-timed translation is not needed.
+async fn netease_lyrics(song_id: i64) -> Result<Option<String>, SearchError> {
+    use lyrics_helper::search::providers::web::netease;
+
+    let (lyrics, translation) = netease::api::get_lyrics(song_id).await?;
+    let Some(lyrics) = lyrics else {
+        return Ok(None);
+    };
+    if let Some(syllable) = netease::api::get_syllable_lyrics(song_id).await?
+        && let Some(word_timed) = syllable.yrc
+    {
+        return Ok(Some(combine_word_timing(
+            &word_timed,
+            &lyrics,
+            translation.as_deref(),
+        )));
+    }
+
+    Ok(Some(combine_lyrics_with_translation(
+        &lyrics,
+        translation.as_deref(),
+    )))
 }

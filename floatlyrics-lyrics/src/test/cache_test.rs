@@ -256,3 +256,48 @@ fn existing_database_gains_track_offsets_without_losing_tracks() {
     cache.set_track_offset_ms(&fingerprint, 300).unwrap();
     assert_eq!(cache.track_offset_ms(&fingerprint).unwrap(), 300);
 }
+
+/// A payload that carries the word timings of a track beside its transcription is
+/// stored as it was written and read back the same way, which is how the
+/// application reads every document it caches.
+#[test]
+fn stores_a_payload_that_carries_word_timings() {
+    let cache = Cache::open_memory().unwrap();
+    let track = track();
+    let fingerprint = cache.upsert_track(&track).unwrap();
+    let payload = crate::lyrics::combine_word_timing(
+        "[90,2070](90,330,0)Ugh(690,540,0)you're (1230,900,0)a monster",
+        "[00:00.396]Ugh, you're a monster\n",
+        Some("[00:00.396]呕，你真是只怪兽\n"),
+    );
+
+    cache
+        .insert_provider_result(ProviderResultInsert {
+            track_fingerprint: &fingerprint,
+            provider: LyricsProvider::NetEase,
+            provider_track_id: Some("123"),
+            title: "A Song",
+            artists: &track.artists,
+            score: 0.99,
+            raw_lyrics: Some(&payload),
+        })
+        .unwrap();
+
+    let stored = cache
+        .lyrics_for_track(&fingerprint, &LyricsProvider::default_order())
+        .unwrap()
+        .unwrap();
+    let lines = crate::lyrics::timed_lines_from_raw(&stored.raw_lyrics, &stored.artists).unwrap();
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, "Ugh, you're a monster");
+    assert_eq!(lines[0].translation.as_deref(), Some("呕，你真是只怪兽"));
+    assert_eq!(
+        lines[0]
+            .syllables
+            .iter()
+            .map(|syllable| (syllable.start_ms, syllable.text.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(90, "Ugh, "), (690, "you're "), (1230, "a monster")]
+    );
+}

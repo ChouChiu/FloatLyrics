@@ -16,6 +16,7 @@ use super::model::{BackgroundVocal, TimedLine, TimedSyllable, Voice};
 mod conventions;
 mod filter;
 mod qrc;
+mod word_timing;
 
 use conventions::{
     apply_speaker_labels, fold_bracketed_echoes, merge_continued_lines, split_background_vocals,
@@ -24,6 +25,7 @@ use qrc::timed_lines_from_qrc;
 
 const TRANSLATION_PREFIX: &str = "__FLOATLYRICS_TRANSLATION__:";
 const TRANSLATION_SECTION_MARKER: &str = "[floatlyrics:translation]";
+const WORD_TIMING_SECTION_MARKER: &str = "[floatlyrics:word-timing]";
 
 /// Parses a local lyrics document using the formats supported by `lyrics-helper`.
 /// XML-based formats are rejected until the transitive XML parser can be
@@ -43,7 +45,27 @@ pub fn parse_local_lyrics(content: &str) -> Result<LyricsData> {
     {
         return Err(anyhow!("XML lyrics are temporarily unsupported"));
     }
-    parse_helper(content).context("lyrics-helper could not detect or parse lyrics")
+    let mut parsed =
+        parse_helper(content).context("lyrics-helper could not detect or parse lyrics")?;
+    standardize_parsed_payload(content, &mut parsed);
+    Ok(parsed)
+}
+
+/// Applies `lyrics-helper`'s normalization for a payload format that needs one.
+///
+/// NetEase times the space between two words as a unit of its own, which upstream
+/// folds into the word before it; a renderer would otherwise animate the gap
+/// between two words as if it were one.
+fn standardize_parsed_payload(content: &str, data: &mut LyricsData) {
+    use lyrics_helper::LyricsRawTypes;
+    use lyrics_helper::helpers::{optimization::yrc, type_helper::get_lyrics_types};
+
+    if get_lyrics_types(content) != LyricsRawTypes::Yrc {
+        return;
+    }
+    if let Some(lines) = data.lines.as_mut() {
+        yrc::standardize_yrc_lyrics(lines);
+    }
 }
 
 /// Parses raw provider lyrics into sorted, display-ready lines.
@@ -52,9 +74,11 @@ pub fn parse_local_lyrics(content: &str) -> Result<LyricsData> {
 /// are what a speaker label in the payload is matched against. Words the provider
 /// censored are restored before anything reads the text, translation sections are
 /// merged, the conventions of the transcription itself are read into the lines,
-/// and known metadata or credit lines are removed. Provider pronunciation is
-/// intentionally discarded; call [`super::generate_local_romanization`] when local
-/// romanization is wanted.
+/// and known metadata or credit lines are removed. A payload that carries a
+/// word-timed document beside its transcription takes the times of the words from
+/// that document and the text of them from the transcription. Provider
+/// pronunciation is intentionally discarded; call [`super::generate_local_romanization`]
+/// when local romanization is wanted.
 ///
 /// # Errors
 /// Returns an error when no supported timed format can be parsed.
@@ -71,7 +95,17 @@ pub fn timed_lines_from_raw(content: &str, artists: &[String]) -> Result<Vec<Tim
         Cow::Borrowed(content)
     };
     let (lyrics, translation) = split_translation_section(&content);
+    let (word_timing, lyrics) = split_word_timing_section(lyrics);
     let mut lines = parse_timed_lines_block(lyrics, artists)?;
+    if let Some(word_timing) = word_timing {
+        // The words are read onto the row-timed text, so they are read before
+        // anything reads that text. A word-timed document that cannot be read is
+        // no reason to lose the transcription beside it: the rows stand on their
+        // own, without words.
+        if let Ok(word_lines) = parse_timed_lines_block(word_timing, &[]) {
+            word_timing::apply_word_timings(&mut lines, &word_lines);
+        }
+    }
     if let Some(translation) = translation {
         // A translation document is written for the track rather than by one of
         // its performers, so no label in it names a voice.
@@ -302,6 +336,29 @@ fn nearest_line_mut(
         .map(|(index, _)| index)?;
 
     lines.get_mut(index)
+}
+
+/// Combines a word-timed document, the row-timed transcription of the same track,
+/// and the translation of that transcription into one parseable payload.
+///
+/// The word-timed document is a timing table: this application reads it onto the
+/// text of the row-timed transcription rather than displaying what it spells the
+/// words with, so both travel together.
+pub fn combine_word_timing(word_timed: &str, row_timed: &str, translation: Option<&str>) -> String {
+    format!(
+        "{}\n{}\n{}",
+        word_timed.trim_end(),
+        WORD_TIMING_SECTION_MARKER,
+        combine_lyrics_with_translation(row_timed, translation)
+    )
+}
+
+fn split_word_timing_section(content: &str) -> (Option<&str>, &str) {
+    content
+        .split_once(WORD_TIMING_SECTION_MARKER)
+        .map_or((None, content), |(word_timing, rows)| {
+            (Some(word_timing), rows)
+        })
 }
 
 fn split_translation_section(content: &str) -> (&str, Option<&str>) {
