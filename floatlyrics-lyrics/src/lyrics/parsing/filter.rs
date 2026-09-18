@@ -5,15 +5,83 @@
 
 use crate::lyrics::model::TimedLine;
 
-/// Returns `true` when the line should be hidden from lyric display
-/// (credit, speaker label, or intro title lines).
-pub(super) fn is_non_lyric_display_line(line: &TimedLine) -> bool {
-    let text = line.text.trim();
-    if text.is_empty() {
-        return true;
+/// The longest a credit role is written with.
+///
+/// QQ Music writes `Mixed in Dolby Atmos by` and `Computer programming by`, which
+/// are the longest roles in the material read here.
+const CREDIT_ROLE_MAX_CHARS: usize = 24;
+
+/// What a credit role is written with besides letters, digits, and ideographs.
+const ROLE_PUNCTUATION: [char; 3] = ['-', '&', '/'];
+
+/// The fewest names a bracketed row has to list to be part of a credit.
+const CREDIT_CONTINUATION_NAMES: usize = 3;
+
+/// The rows a provider writes around its lyrics, read as the block they stand in.
+///
+/// The block opens at the first row of the payload and closes at the first row the
+/// lyrics view draws. Reading a credit role by its shape is what recognizes the
+/// roles the vocabulary does not know — QQ Music writes `Vocals Arrangement`,
+/// `Recording Engineer`, and `Mixed in Dolby Atmos by`, and NetEase writes `词` and
+/// `曲` — but a sung row that contains a colon is shaped like one too, so the shape
+/// is read only inside the block: the rows a provider wrote around its lyrics are
+/// the ones before the first row it sang, whichever second they fall on. QQ Music
+/// times its credit block up to fifteen seconds into the song, which a fixed window
+/// over the intro cut off in the middle.
+pub(super) struct Metadata {
+    /// Whether every row read so far was written around the lyrics.
+    open: bool,
+    /// Whether the row before this one was a credit.
+    after_credit: bool,
+}
+
+impl Metadata {
+    pub(super) fn new() -> Self {
+        Self {
+            open: true,
+            after_credit: false,
+        }
     }
 
-    is_intro_title_line(line, text) || is_credit_line(line, text) || is_speaker_label_line(text)
+    /// Reads `line` as part of the block and returns whether the view draws it.
+    ///
+    /// The credits it reads are the ones a row of their own may continue, so the
+    /// rows are read in the order the transcription wrote them.
+    pub(super) fn drops(&mut self, line: &TimedLine) -> bool {
+        let text = line.text.trim();
+        let credit = is_credit_line(text, self.open);
+        let row = credit
+            || (self.after_credit && is_bracketed_name_list(text))
+            || text.is_empty()
+            || is_intro_title_line(line, text)
+            || is_speaker_label_line(text);
+
+        self.after_credit = credit;
+        if !row {
+            self.open = false;
+        }
+        row
+    }
+}
+
+/// Returns whether `text` is the names of a credit written on a row of their own.
+///
+/// QQ Music repeats the names a credit lists on a bracketed row that follows it —
+/// `Produced by：13/"hitman" bang` and then `(SCORE(13)/Megatone(13)/Sofia Quinn/…)`
+/// — which is the rest of that credit rather than a line the view draws with its
+/// brackets. The names are read by their shape, because the row repeats names a
+/// credit spelled in another script in between: the names of one are the names of
+/// the other, written differently.
+fn is_bracketed_name_list(text: &str) -> bool {
+    let trimmed = text.trim();
+    let Some(inner) = trimmed
+        .strip_prefix(['(', '（'])
+        .and_then(|rest| rest.strip_suffix([')', '）']))
+    else {
+        return false;
+    };
+
+    inner.trim().split('/').count() >= CREDIT_CONTINUATION_NAMES
 }
 
 fn is_intro_title_line(line: &TimedLine, text: &str) -> bool {
@@ -45,24 +113,17 @@ fn looks_like_title_and_artist_list(text: &str) -> bool {
         && text.matches(|c: char| c.is_whitespace()).count() >= 2
 }
 
-fn is_credit_line(line: &TimedLine, text: &str) -> bool {
+fn is_credit_line(text: &str, in_block: bool) -> bool {
     let normalized = normalize_line_text(text);
 
     // Key-value credits can extend well beyond the first ten seconds in live
-    // releases. Known roles are safe to remove wherever they occur; unknown
-    // metadata remains limited to the intro to avoid hiding ordinary lyrics.
-    if let Some((key, _value)) = normalized.split_once(':') {
-        let key = key.trim();
-        if is_known_credit_key(key)
-            || (line.start_ms < 10_000
-                && (2..=18).contains(&key.chars().count())
-                && key
-                    .chars()
-                    .all(|ch| ch.is_alphanumeric() || ch == ' ' || ch == '&' || ch == '/')
-                && !key.starts_with("http"))
-        {
-            return true;
-        }
+    // releases, so a role the vocabulary knows is read wherever its credit falls. An
+    // unknown one is read by its shape, which is only trusted inside the block the
+    // provider wrote around its lyrics.
+    if let Some((key, _value)) = split_credit_key(text)
+        && (is_known_credit_key(&key.to_lowercase()) || (in_block && is_credit_role(key)))
+    {
+        return true;
     }
 
     // Common credit line prefixes in both English and Chinese.
@@ -204,6 +265,40 @@ fn is_credit_line(line: &TimedLine, text: &str) -> bool {
     prefixes.iter().any(|prefix| normalized.starts_with(prefix))
 }
 
+/// Splits a row into the role it names and the names it credits.
+///
+/// The role is read before the text is folded to lower case, because a role is
+/// written as a heading and it is the case that tells it from the head of a sung
+/// line. The spaces a provider puts around the colon are not part of the role.
+fn split_credit_key(text: &str) -> Option<(&str, &str)> {
+    let (key, value) = text.split_once([':', '：'])?;
+    let key = key.trim();
+    (!key.is_empty()).then_some((key, value))
+}
+
+/// Returns whether `key` reads as a credit role rather than as the head of a line
+/// that was sung.
+///
+/// A role is written as a heading — `Lyrics by`, `Vocals Arrangement`, `Recording
+/// Engineer`, `Sub-publisher`, `词` — and a sung line that contains a colon is not:
+/// it opens with a lowercase word (`love: it's real`) as readily as with a capital,
+/// and it carries the punctuation a sentence is written with, which a role is not.
+fn is_credit_role(key: &str) -> bool {
+    let Some(first) = key.chars().next() else {
+        return false;
+    };
+    // An ideograph is written in one case, so a role spelled with one is read by the
+    // ideograph itself; the Latin roles are written as headings.
+    if !(first.is_uppercase() || first >= '\u{2e80}') || key.starts_with("http") {
+        return false;
+    }
+
+    key.chars().count() <= CREDIT_ROLE_MAX_CHARS
+        && key.chars().all(|character| {
+            character.is_alphanumeric() || character == ' ' || ROLE_PUNCTUATION.contains(&character)
+        })
+}
+
 fn is_known_credit_key(key: &str) -> bool {
     let mut components = key.split('/').map(str::trim);
     let Some(first) = components.next() else {
@@ -216,7 +311,11 @@ fn is_known_credit_key(key: &str) -> bool {
 fn is_known_credit_key_component(key: &str) -> bool {
     matches!(
         key,
-        "pgm"
+        // NetEase writes `词 : 卡西恩Cacien` and `曲 : 卡西恩Cacien`: the role is one
+        // ideograph, and the role is the same wherever the credit falls.
+        "词" | "詞"
+            | "曲"
+            | "pgm"
             | "音乐总监"
             | "音樂總監"
             | "音响总监"
@@ -273,6 +372,10 @@ fn normalize_line_text(text: &str) -> String {
         .trim_start_matches(['(', '[', '【'])
         .trim_end_matches([')', ']', '】'])
         .replace('：', ":")
+        // NetEase writes its credits as `词 : 卡西恩Cacien`, which names the role the
+        // vocabulary is written without the space for.
+        .replace(" :", ":")
+        .replace(": ", ":")
         .to_lowercase()
 }
 

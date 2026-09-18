@@ -166,6 +166,67 @@ fn joins_the_translation_of_a_sentence_broken_across_rows() {
     );
 }
 
+/// The rows a provider writes around its lyrics are dropped before the view draws
+/// them, and a credit whose names the provider repeats on a bracketed row of its own
+/// is part of the credit rather than a line drawn with its brackets.
+#[test]
+fn drops_the_credit_block_a_payload_opens_with() {
+    let content = "[0,570]Perfect Night - LE SSERAFIM\n\
+         [571,456]Lyrics by：(571,150)SCORE(13)/Megatone(13)(721,150)\n\
+         [6061,300]Produced by：(6061,150)13/\"hitman\" bang(6211,150)\n\
+         [6527,300](SCORE(13)/Megatone(13)/Sofia Quinn)\n\
+         [11002,300]Vocals Arrangement：(11002,150)Young Chance(11152,150)\n\
+         [14173,300]Mastering Engineer：(14173,150)Chris Gehringer(14323,150)\n\
+         [14733,900]Me (14733,300)and (15033,300)my (15333,300)girlies(15633,900)";
+    let artists = vec!["LE SSERAFIM".to_string()];
+
+    let lines = timed_lines_from_raw(content, &artists).unwrap();
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, "Me and my girlies");
+}
+
+/// The label a transcription writes for the part the two performers sing together
+/// gives that part back to the main voice rather than leaving it on the side the
+/// verse before it was.
+#[test]
+fn a_joint_label_gives_the_last_chorus_back_to_the_main_voice() {
+    let content = "[0,300]The (0,150)Weeknd：(150,150)\n\
+         [1000,600]I (1000,300)saw (1300,300)you(1600,600)\n\
+         [2000,300]Ariana (2000,150)Grande：(2150,150)\n\
+         [3000,600]Met (3000,300)you(3300,600)\n\
+         [4000,300]Both：(4000,300)\n\
+         [5000,900]Save (5000,300)your (5300,300)tears(5600,900)";
+    let artists = vec!["The Weeknd".to_string(), "Ariana Grande".to_string()];
+
+    let lines = timed_lines_from_raw(content, &artists).unwrap();
+
+    assert_eq!(lines.len(), 3);
+    assert_eq!(lines[0].voice, Voice::Primary);
+    assert_eq!(lines[1].voice, Voice::Secondary);
+    assert_eq!(lines[2].text, "Save your tears");
+    assert_eq!(lines[2].voice, Voice::Primary);
+}
+
+/// A phrase a provider brackets inside the line it answers is read as the part a
+/// second voice sings, and the line is drawn without it.
+#[test]
+fn reads_a_background_vocal_written_inside_the_line() {
+    let content = "[1000,4628]I'm (1000,180)in (1180,190)love (1370,709)((2079,380)we're \
+                   (2459,180)in (2639,430)love) (3069,519)with (3588,170)a (3758,180)monster(3938,840)";
+
+    let lines = timed_lines_from_raw(content, &[]).unwrap();
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, "I'm in love with a monster");
+    let background = lines[0]
+        .background
+        .as_ref()
+        .expect("the phrase is split off");
+    assert_eq!(background.text, "we're in love");
+    assert_eq!(background.start_ms, 2_459);
+}
+
 /// Upstream merges the syllables of a word into one item and keeps the timing of
 /// the items it was merged from; those are the times a renderer animates.
 #[test]

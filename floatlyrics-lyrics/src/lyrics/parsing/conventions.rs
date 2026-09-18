@@ -25,8 +25,18 @@ const ECHO_GAP_MS: u64 = 2_000;
 /// Performance separators a joint credit is written with.
 const LABEL_SEPARATORS: [char; 5] = ['/', '&', ',', '，', '、'];
 
+/// The words a transcription writes for a part the two sides sing together.
+const JOINT_LABELS: [&str; 5] = ["both", "all", "合唱", "齐唱", "合"];
+
 /// Punctuation a transcription leaves a sentence open with.
 const OPEN_MARKS: [char; 7] = [',', '，', '、', ';', '；', ':', '：'];
+
+/// How long after the row it continues a continued row may begin.
+///
+/// Every row the material here writes as the rest of a sentence begins within a
+/// tenth of a second of the row it continues, while the rows of a hook repeated
+/// under a line are timed half a second apart.
+const CONTINUATION_GAP_MS: u64 = 250;
 
 /// Punctuation that says the sentence before it ended.
 const CLOSING_MARKS: [char; 13] = [
@@ -57,7 +67,9 @@ pub(super) fn apply_speaker_labels(lines: &mut Vec<TimedLine>, artists: &[String
 /// A joint credit is written lead-first, so the first performer the label names
 /// that the provider also lists decides the side: a shared section belongs to the
 /// performer credited first. One match is enough, which lets a featured performer
-/// the provider omits from its artist list ride along on the name beside them.
+/// the provider omits from its artist list ride along on the name beside them. A
+/// label that names no performer but says the two sing together is read as the
+/// main voice by [`is_joint_label`].
 fn speaker_label(text: &str, artists: &[String]) -> Option<(Voice, usize)> {
     let (colon_start, colon) = text
         .char_indices()
@@ -67,6 +79,16 @@ fn speaker_label(text: &str, artists: &[String]) -> Option<(Voice, usize)> {
         return None;
     }
 
+    let after_colon = colon_start + colon.len_utf8();
+    let content = text[after_colon..].trim_start();
+    let content_start = text.len() - content.len();
+
+    // A label that names no performer says the two sides sing together, and the row
+    // it opens is read the way one naming a performer is.
+    if is_joint_label(label) {
+        return Some((Voice::Primary, content_start));
+    }
+
     let leading = label.split(LABEL_SEPARATORS).find_map(|name| {
         let name = normalize_artist(name);
         artists
@@ -74,15 +96,24 @@ fn speaker_label(text: &str, artists: &[String]) -> Option<(Voice, usize)> {
             .position(|artist| !name.is_empty() && name == normalize_artist(artist))
     })?;
 
-    let after_colon = colon_start + colon.len_utf8();
-    let content = text[after_colon..].trim_start();
-    let content_start = text.len() - content.len();
     let voice = if leading == 0 {
         Voice::Primary
     } else {
         Voice::Secondary
     };
     Some((voice, content_start))
+}
+
+/// Returns whether `label` says both sides sing the rows it opens.
+///
+/// A transcription that divides a song between its performers writes the division as
+/// a label naming one of them, and a part they sing together as a label naming both;
+/// where the provider has no name for the joint part it writes `Both：` — the last
+/// chorus of "Save Your Tears (Remix)" is given back to the two of them that way. Such
+/// a part belongs to the main voice, which is the side the lyric files of the AMLL
+/// database give a chorus both of them sing.
+fn is_joint_label(label: &str) -> bool {
+    JOINT_LABELS.contains(&normalize_artist(label).as_str())
 }
 
 /// Removes a speaker label from a line and from the timing of its words.
@@ -113,18 +144,23 @@ fn strip_speaker_label(line: &mut TimedLine, content_start: usize) {
     });
 }
 
-/// Splits a trailing bracketed tail off every line that answers with one.
+/// Splits the bracketed phrase off every line that answers with one.
 ///
 /// QRC and plain LRC have no structured background-vocal field. What they do
 /// carry is the convention the lyric was transcribed with: the backing part is
-/// written as a bracketed tail on the line it answers, with word timings of its
+/// written as a bracketed phrase on the line it answers, with word timings of its
 /// own — NetEase's "Umbrella" opens `Ahuh Ahuh （Yea Rihanna）`, with the brackets
-/// as zero-length syllables between the two parts.
+/// as zero-length syllables between the two parts, and "I'm In Love With a
+/// Monster" puts the phrase in the middle of one, `I'm in love (we're in love)
+/// with a monster`, where the words the two sing together stand between the words
+/// that lead into the phrase and the words that carry on after it. Either way it is
+/// the line's own words that stay, joined where the phrase stood.
 ///
 /// The rule stays narrow, because a bracket is not evidence by itself. Sung text
-/// has to remain in front of the tail, the tail has to contain a letter or digit,
-/// and the line has to be word-timed, so an aside such as `(instrumental)` or a
-/// line-timed source keeps its brackets and stays one ordinary line.
+/// has to remain beside the phrase, the phrase has to contain a letter or digit,
+/// and the line has to be word-timed, so an aside such as `(instrumental)`, a row
+/// that is nothing but a bracketed phrase, or a line-timed source keeps its
+/// brackets and stays one ordinary line.
 pub(super) fn split_background_vocals(lines: &mut [TimedLine]) {
     for line in lines {
         split_background_vocal(line);
@@ -135,18 +171,29 @@ fn split_background_vocal(line: &mut TimedLine) {
     if line.background.is_some() || !line.is_word_timed() {
         return;
     }
-    let Some(tail) = bracketed_tail(&line.text) else {
+    let Some(phrase) = bracketed_phrase_in_line(&line.text) else {
         return;
     };
-    let head_slice = &line.text[..tail.open];
-    let head_text = head_slice.trim_end().to_string();
+
+    let before = &line.text[..phrase.open];
+    let after = &line.text[phrase.close..];
+    let head_text = join_around(before, after);
     if head_text.is_empty() {
         return;
     }
 
     let mut head = line.syllables.clone();
-    let background =
-        unwrap_syllable_brackets(split_syllables_at(&mut head, head_slice.chars().count()));
+    let mut enclosed = split_syllables_at(&mut head, before.chars().count());
+    let trailing = split_syllables_at(
+        &mut enclosed,
+        line.text[phrase.open..phrase.close].chars().count(),
+    );
+    let background = unwrap_syllable_brackets(enclosed);
+    // The words of the line are the words the phrase was written between, and a
+    // phrase at the end of the line leaves none after it to join.
+    if !trailing.is_empty() {
+        join_words(&mut head, trailing);
+    }
     if head.iter().all(|syllable| syllable.text.trim().is_empty())
         || background
             .iter()
@@ -156,8 +203,8 @@ fn split_background_vocal(line: &mut TimedLine) {
     }
 
     line.background = Some(BackgroundVocal {
-        text: tail.text,
-        // The tail is sung inside the line it belongs to, so the line's own
+        text: phrase.text,
+        // The phrase is sung inside the line it belongs to, so the line's own
         // translation covers it.
         translation: None,
         // Its words carry the timing the provider gave them, which is where it
@@ -170,6 +217,42 @@ fn split_background_vocal(line: &mut TimedLine) {
     });
     line.text = head_text;
     line.syllables = head;
+}
+
+/// Joins the text a bracketed phrase was written between.
+///
+/// The phrase is not part of what the line displays, so the words before and after
+/// it are joined the way the words of two rows a sentence is broken across are: with
+/// the one space between them that the views draw the word stream with.
+fn join_around(before: &str, after: &str) -> String {
+    match (before.trim_end(), after.trim_start()) {
+        ("", after) => after.to_string(),
+        (before, "") => before.to_string(),
+        (before, after) => format!("{before} {after}"),
+    }
+}
+
+/// Joins the words that followed a bracketed phrase onto the words before it.
+///
+/// The space the phrase was written after is a unit of the transcription where it
+/// stands between them, and the split divides the word holding it when the bracket
+/// shares one with the text beside it: `love) ` becomes `love)` and ` `, and the
+/// piece belongs to neither part. The join writes that space again, so the pieces
+/// that hold nothing but it go, and the words at the joint are trimmed of the
+/// whitespace the join takes the place of.
+fn join_words(head: &mut Vec<TimedSyllable>, mut trailing: Vec<TimedSyllable>) {
+    let separators = trailing
+        .iter()
+        .take_while(|syllable| syllable.text.trim().is_empty())
+        .count();
+    trailing.drain(..separators);
+    if let Some(first) = trailing.first_mut() {
+        first.text = first.text.trim_start().to_string();
+    }
+    if let Some(last) = head.last_mut() {
+        last.text = last.text.trim_end().to_string();
+    }
+    continue_words(head, trailing);
 }
 
 /// Removes the brackets that wrap a background vocal's own words.
@@ -392,7 +475,13 @@ fn join_pieces(pieces: impl IntoIterator<Item = String>) -> Option<String> {
 /// way `A tragedy, Ms. RIP,` does. The row before has to be able to say so at all: a
 /// row the punctuation closed ends its sentence, and a row ending in a script without
 /// letter case keeps its rows, because the transcriber of a language without case
-/// breaks where the line ran out rather than where a sentence did.
+/// breaks where the line ran out rather than where a sentence did. Where the row before
+/// said nothing but the case of its last letter, the timing has to say the same: a
+/// transcription that times every word writes the rest of a sentence beginning at the
+/// last word of the row it continues, so a row timed apart from the one before it is a
+/// row of its own — the hook of "WDA (Whole Different Animal)" writes `She a Whole
+/// Different Animal` and then `different animal`, half a second later and with a
+/// translation of its own, and keeps both of its rows.
 ///
 /// This runs after the translations are paired, because a row carries the translation
 /// of its own line until then, and after a bracketed echo is folded away, so the
@@ -434,7 +523,30 @@ fn continues(first: &TimedLine, tail: &TimedLine) -> bool {
         // joined only when they are written the same way: a row timed by the word
         // and a row timed by the line each spell their text differently.
         && first.syllables.is_empty() == tail.syllables.is_empty()
+        // Punctuation that leaves the sentence open is evidence of its own, and says
+        // so wherever the row after it was timed; a row that says nothing but the
+        // case of its last letter is carried on only by a row that begins where it
+        // runs out.
+        && (left_open || follows_flush(first, tail))
         && opens_a_continuation(tail.text.trim_start(), sentence_goes_on, left_open)
+}
+
+/// Returns whether `tail` begins where the row it continues runs out.
+///
+/// A transcription that times every word writes the rest of a sentence starting at
+/// the last word of the row it continues — Saddle Up's `where your mouth is` begins
+/// where `Put your money` ends — so a row timed apart from the one before it is a
+/// line of its own: the hook of "WDA (Whole Different Animal)" writes `She a Whole
+/// Different Animal` and then `different animal`, half a second later and with a
+/// translation of its own, which is a row of the chant rather than its rest. A
+/// line-timed payload states no such thing about the row it wrote, and it is left to
+/// the case alone.
+fn follows_flush(first: &TimedLine, tail: &TimedLine) -> bool {
+    let ends_at = first.latest_time_ms();
+    if ends_at == first.start_ms {
+        return true;
+    }
+    tail.start_ms <= ends_at.saturating_add(CONTINUATION_GAP_MS)
 }
 
 /// Returns whether `text` opens with a word that carries a sentence on.
@@ -505,48 +617,63 @@ fn matching_bracket(open: char) -> Option<char> {
     }
 }
 
-/// Where a line's trailing bracketed segment starts, and what it says.
-struct BracketedTail {
+/// Where a bracketed phrase stands in a line, and what it says.
+struct BracketedPhrase {
     /// Byte index of the opening bracket within the line text.
     open: usize,
+    /// Byte index just past the closing bracket.
+    close: usize,
     /// The text between the brackets.
     text: String,
 }
 
-fn bracketed_tail(text: &str) -> Option<BracketedTail> {
-    let trimmed = text.trim_end();
-    let close = trimmed
-        .chars()
-        .next_back()
-        .filter(|character| matches!(character, ')' | '）'))?;
-
-    let mut depth = 0_usize;
+/// Reads the last phrase `text` brackets, wherever the line puts it.
+///
+/// The phrase is bracketed on the line it answers, and a line answers with the last
+/// thing it brackets: NetEase ends its line with the phrase, while the middle of
+/// `I'm in love (we're in love) with a monster` is where the phrase answers from.
+/// Nothing is read from an aside such as `(instrumental)`, because a phrase a voice
+/// sings names something: a letter or a digit stands inside the brackets.
+fn bracketed_phrase_in_line(text: &str) -> Option<BracketedPhrase> {
+    let mut phrase = None;
     let mut open = None;
-    for (index, character) in trimmed.char_indices().rev() {
+    let mut inner = None;
+    let mut depth = 0_usize;
+
+    for (index, character) in text.char_indices() {
         match character {
-            ')' | '）' => depth += 1,
             '(' | '（' => {
-                // The scan starts on the closing bracket, so the depth of an
-                // opening one is never zero.
-                depth -= 1;
                 if depth == 0 {
-                    open = Some((index, character));
-                    break;
+                    open = Some(index);
+                    inner = Some(index + character.len_utf8());
+                }
+                depth += 1;
+            }
+            ')' | '）' => {
+                if depth == 0 {
+                    continue;
+                }
+                depth -= 1;
+                if depth > 0 {
+                    continue;
+                }
+                let (Some(bracket), Some(start)) = (open.take(), inner.take()) else {
+                    continue;
+                };
+                let inner = text[start..index].trim();
+                if inner.chars().any(char::is_alphanumeric) {
+                    phrase = Some(BracketedPhrase {
+                        open: bracket,
+                        close: index + character.len_utf8(),
+                        text: inner.to_string(),
+                    });
                 }
             }
             _ => {}
         }
     }
 
-    let (open, bracket) = open?;
-    let inner = trimmed[open + bracket.len_utf8()..trimmed.len() - close.len_utf8()].trim();
-    if !inner.chars().any(char::is_alphanumeric) {
-        return None;
-    }
-    Some(BracketedTail {
-        open,
-        text: inner.to_string(),
-    })
+    phrase
 }
 
 /// Splits `syllables` at a character offset, returning the tail.

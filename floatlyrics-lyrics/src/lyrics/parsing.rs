@@ -414,8 +414,9 @@ fn preferred_translation(line: &LineInfo) -> Option<String> {
 }
 
 fn filter_display_lines(lines: Vec<TimedLine>) -> Vec<TimedLine> {
+    let mut metadata = filter::Metadata::new();
     lines
         .into_iter()
-        .filter(|line| !filter::is_non_lyric_display_line(line))
+        .filter(|line| !metadata.drops(line))
         .collect()
 }

@@ -389,26 +389,32 @@ conventions the transcriber wrote the lyrics with, in
   colon is left alone. A label may credit several performers at once, and the
   first name in it that the provider also lists decides the side, because joint
   credits are written lead-first — one match is enough, so a featured performer
-  the provider omits from its artist list rides along on the name beside them.
-  The list matched against is the one the lyrics were resolved with, which is why
-  `timed_lines_from_raw` takes it as an argument.
-- **A background vocal is bracketed.** NetEase writes it as a bracketed tail on
-  the line it answers, with sung text in front of it, and that tail becomes
-  `TimedLine::background`. QQ Music writes it as rows of its own, wholly
-  bracketed, which are folded into the line before them: the phrase may open on
-  one row and close several rows later, and it answers after whatever rest the
-  line leaves rather than always at its parent's last word. Both forms need a
-  letter or digit inside the brackets, so `(...)` is left alone, and a line-timed
-  source is left alone entirely: there is no timing to split off with. Folding
-  runs after translations are paired, because the echo
-  is translated where it is sung rather than where the line it answers is: it
-  keeps its own timing, its own words, and its own translation in
-  `BackgroundVocal`: the AMLL sender writes them as the spans inside the `x-bg`
-  span, so the listener fills the words it hears as it hears them instead of one
-  span crawling over the whole echo, and draws the translation the phrase was
-  sung with. The brackets that marked the phrase are stripped from the words and
-  from the translation, and are written back on the words at the edges of the
-  span, which is the shape a listener strips them from again.
+  the provider omits from its artist list rides along on the name beside them. A
+  label that names nobody but says the two sides sing together, the way `Both：`
+  gives the last chorus of "Save Your Tears (Remix)" back to the two of them,
+  gives its part to the main voice. The list matched against is the one the
+  lyrics were resolved with, which is why `timed_lines_from_raw` takes it as an
+  argument.
+- **A background vocal is bracketed.** NetEase writes it as a bracketed phrase on
+  the line it answers, with sung text beside it, and that phrase becomes
+  `TimedLine::background`: it may stand at the end of the line, the way "Umbrella"
+  opens with `Ahuh Ahuh （Yea Rihanna）`, or inside it, the way "I'm In Love With a
+  Monster" writes `I'm in love (we're in love) with a monster`, and the line is
+  drawn as the words the phrase stood between. QQ Music writes it as rows of its
+  own, wholly bracketed, which are folded into the line before them: the phrase
+  may open on one row and close several rows later, and it answers after whatever
+  rest the line leaves rather than always at its parent's last word. Both forms
+  need a letter or digit inside the brackets, so `(...)` is left alone, and a
+  line-timed source is left alone entirely: there is no timing to split off with.
+  Folding runs after translations are paired, because the echo is translated where
+  it is sung rather than where the line it answers is: it keeps its own timing, its
+  own words, and its own translation in `BackgroundVocal`: the AMLL sender writes
+  them as the spans inside the `x-bg` span, so the listener fills the words it
+  hears as it hears them instead of one span crawling over the whole echo, and
+  draws the translation the phrase was sung with. The brackets that marked the
+  phrase are stripped from the words and from the translation, and are written back
+  on the words at the edges of the span, which is the shape a listener strips them
+  from again.
 - **A sentence broken across rows is one line.** A transcriber who runs out of
   room writes the rest of a sentence on the row after the one that begins it —
   Saddle Up writes `Put your money` then `where your mouth is`, and `But I had
@@ -422,7 +428,23 @@ conventions the transcriber wrote the lyrics with, in
   punctuation open. The row before has to be able to say so: a row the punctuation
   closed keeps its own line, and a row ending in a script without letter case — or
   in a digit — says nothing either way, because there the transcriber broke where
-  the line ran out rather than where a sentence did.
+  the line ran out rather than where a sentence did. Where the row before said
+  nothing but the case of its last letter, the timing has to agree: a payload that
+  times every word writes the rest of a sentence beginning at the last word of the
+  row it continues, so a row timed apart from the one before it is a row of its
+  own, the way the hook of "WDA (Whole Different Animal)" writes `She a Whole
+  Different Animal` and then `different animal` half a second later.
+
+The rows a provider writes around its lyrics — its title, its credits, its
+labels — are dropped by `parsing/filter.rs` before anything is drawn. It reads
+them as the block they stand in: the block opens at the first row of the payload
+and closes at the first row the view draws, which is what lets a credit role the
+vocabulary does not know be read by its shape (`Vocals Arrangement：`, `Recording
+Engineer：`, `Mixed in Dolby Atmos by：`) without hiding a sung row that contains a
+colon, since QQ Music times its credit block up to fifteen seconds into the song.
+A role the vocabulary does know is read wherever its credit falls, and a credit
+whose names the provider repeats on a bracketed row of its own belongs to the
+credit above it.
 
 Do not widen this past what the transcription states: overlapping timings and an
 unmatched label are not evidence of a second voice. The resulting voice is

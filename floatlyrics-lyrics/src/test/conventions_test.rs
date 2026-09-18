@@ -107,6 +107,78 @@ fn a_bracketed_tail_inside_a_syllable_is_divided_by_its_characters() {
 }
 
 #[test]
+fn a_bracketed_phrase_inside_the_line_becomes_a_background_vocal() {
+    // "I'm In Love With a Monster" writes the words the two sing together in the
+    // middle of the line they answer from, and the line carries on after them.
+    let mut lines = vec![line(
+        1_849,
+        Some(5_627),
+        "I'm in love (we're in love) with a monster",
+        vec![
+            syllable(1_849, 2_029, "I'm "),
+            syllable(2_029, 2_219, "in "),
+            syllable(2_219, 2_928, "love "),
+            syllable(2_928, 3_308, "("),
+            syllable(3_308, 3_488, "we're "),
+            syllable(3_488, 3_918, "in "),
+            syllable(3_918, 4_437, "love) "),
+            syllable(4_437, 4_607, "with "),
+            syllable(4_607, 4_787, "a "),
+            syllable(4_787, 5_627, "monster"),
+        ],
+    )];
+
+    split_background_vocals(&mut lines);
+
+    assert_eq!(lines[0].text, "I'm in love with a monster");
+    assert_eq!(
+        texts(&lines[0]),
+        vec!["I'm ", "in ", "love ", "with ", "a ", "monster"],
+        "the words the line is drawn with are the words around the phrase"
+    );
+    let background = lines[0]
+        .background
+        .as_ref()
+        .expect("the phrase is split off");
+    assert_eq!(background.text, "we're in love");
+    assert_eq!(
+        background
+            .syllables
+            .iter()
+            .map(|syllable| syllable.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["we're ", "in ", "love"],
+        "the brackets are not sung, so they are not words of the phrase"
+    );
+    assert_eq!(
+        (background.start_ms, background.end_ms),
+        (3_308, Some(4_350)),
+        "the phrase is sung where its own words are, inside the line"
+    );
+}
+
+#[test]
+fn a_bracketed_phrase_the_line_opens_with_becomes_a_background_vocal() {
+    let mut lines = vec![line(
+        0,
+        Some(2_000),
+        "(Oh) I love it",
+        vec![
+            syllable(0, 300, "(Oh) "),
+            syllable(300, 700, "I "),
+            syllable(700, 1_200, "love "),
+            syllable(1_200, 2_000, "it"),
+        ],
+    )];
+
+    split_background_vocals(&mut lines);
+
+    assert_eq!(lines[0].text, "I love it");
+    assert_eq!(texts(&lines[0]), vec!["I ", "love ", "it"]);
+    assert_eq!(background_text(&lines[0]), Some("Oh"));
+}
+
+#[test]
 fn a_bracketed_tail_without_words_is_left_alone() {
     let mut lines = vec![line(
         1_000,
@@ -512,6 +584,62 @@ fn a_sung_colon_without_a_label_keeps_the_line() {
     assert_eq!(lines[0].voice, Voice::Primary);
 }
 
+#[test]
+fn a_joint_label_gives_its_part_back_to_the_main_voice() {
+    // "Save Your Tears (Remix)" divides its verses between the two performers and
+    // gives the last chorus to both, which QQ Music writes as a label of its own.
+    let mut lines = vec![
+        line(0, Some(500), "The Weeknd：", Vec::new()),
+        line(
+            1_000,
+            Some(2_000),
+            "I saw you dancing in a crowded room",
+            Vec::new(),
+        ),
+        line(2_000, Some(2_500), "Ariana Grande：", Vec::new()),
+        line(
+            3_000,
+            Some(4_000),
+            "Met you once under a Pisces moon",
+            Vec::new(),
+        ),
+        line(4_000, Some(4_500), "Both：", Vec::new()),
+        line(
+            5_000,
+            Some(6_000),
+            "I don't know why I run away",
+            Vec::new(),
+        ),
+    ];
+
+    apply_speaker_labels(&mut lines, &artists(&["The Weeknd", "Ariana Grande"]));
+
+    assert_eq!(lines.len(), 3);
+    assert_eq!(lines[0].voice, Voice::Primary);
+    assert_eq!(lines[1].voice, Voice::Secondary);
+    assert_eq!(
+        (lines[2].text.as_str(), lines[2].voice),
+        ("I don't know why I run away", Voice::Primary),
+        "the part the two of them sing goes back to the main voice"
+    );
+}
+
+#[test]
+fn a_joint_label_written_in_chinese_gives_its_part_back_to_the_main_voice() {
+    // A Chinese transcription writes the same thing as `合：` or `合唱：`, either on a
+    // row of its own or in front of the words the two of them sing.
+    let mut lines = vec![
+        line(0, Some(500), "合：", Vec::new()),
+        line(1_000, Some(2_000), "合唱：我们一起走吧", Vec::new()),
+    ];
+
+    apply_speaker_labels(&mut lines, &artists(&["某人"]));
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, "我们一起走吧");
+    assert_eq!(lines[0].voice, Voice::Primary);
+}
+
 /// A word-timed row whose words are the words of `text`, timed evenly from
 /// `start_ms`.
 ///
@@ -610,6 +738,50 @@ fn the_rest_of_a_sentence_is_joined_without_punctuation_at_the_break() {
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].text, "Put your money where your mouth is");
     assert_eq!(lines[0].end_ms, Some(199_100));
+}
+
+#[test]
+fn a_hook_timed_apart_from_the_row_before_it_keeps_its_rows() {
+    // "WDA (Whole Different Animal)" writes its hook as rows of half a second each,
+    // a rest apart from one another, and translates each of them; only the rest of a
+    // sentence begins where the row it continues runs out.
+    let mut lines = vec![
+        word_timed_line(28_415, 29_417, "She a Whole Different Animal"),
+        word_timed_line(29_953, 30_779, "different animal"),
+    ];
+
+    merge_continued_lines(&mut lines);
+
+    assert_eq!(lines.len(), 2, "the rows are the hook and not one sentence");
+}
+
+#[test]
+fn a_row_the_punctuation_left_open_is_joined_however_late_it_is_timed() {
+    // The rows of "LEMONADE" are a second apart and the comma the first one ends in
+    // is what says the sentence goes on, so the timing has nothing to say about them.
+    let mut lines = vec![
+        word_timed_line(39_491, 39_991, "Like zip,"),
+        word_timed_line(40_572, 40_984, "I don't care"),
+    ];
+
+    merge_continued_lines(&mut lines);
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, "Like zip, I don't care");
+}
+
+#[test]
+fn a_line_timed_payload_joins_its_rows_by_case_alone() {
+    // A line-timed row states no end time, so it says nothing about when the row
+    // after it begins and the case of the letters is all there is to read.
+    let mut lines = vec![
+        line(1_000, None, "Put your money", Vec::new()),
+        line(5_000, None, "where your mouth is", Vec::new()),
+    ];
+
+    merge_continued_lines(&mut lines);
+
+    assert_eq!(lines.len(), 1);
 }
 
 #[test]
