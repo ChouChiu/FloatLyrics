@@ -14,6 +14,13 @@ pub enum LyricsProvider {
     /// NetEase Cloud Music.
     #[serde(rename = "netease")]
     NetEase,
+    /// Kugou Music.
+    Kugou,
+    /// LRCLIB.
+    #[serde(rename = "lrclib")]
+    Lrclib,
+    /// Soda Music.
+    SodaMusic,
 }
 
 /// Provider-specific track identifier suggested by a playback source.
@@ -31,8 +38,19 @@ pub struct LyricsLookupHint {
 
 impl LyricsProvider {
     /// Returns the default automatic search priority.
+    ///
+    /// The two Chinese sources that time every word come first, then the Chinese
+    /// source that times only the rows, then the international one, and last the
+    /// source whose ranking prefers the covers of a song over the song itself.
+    /// Only a track the earlier sources cannot answer reaches the later ones.
     pub fn default_order() -> Vec<Self> {
-        vec![Self::QqMusic, Self::NetEase]
+        vec![
+            Self::QqMusic,
+            Self::NetEase,
+            Self::Kugou,
+            Self::Lrclib,
+            Self::SodaMusic,
+        ]
     }
 
     /// Returns the stable identifier used in configuration and storage.
@@ -40,6 +58,9 @@ impl LyricsProvider {
         match self {
             Self::QqMusic => "qq-music",
             Self::NetEase => "netease",
+            Self::Kugou => "kugou",
+            Self::Lrclib => "lrclib",
+            Self::SodaMusic => "soda-music",
         }
     }
 }
@@ -57,6 +78,9 @@ impl std::str::FromStr for LyricsProvider {
         match value {
             "qq-music" => Ok(Self::QqMusic),
             "netease" => Ok(Self::NetEase),
+            "kugou" => Ok(Self::Kugou),
+            "lrclib" => Ok(Self::Lrclib),
+            "soda-music" => Ok(Self::SodaMusic),
             _ => Err(LyricsProviderParseError(value.to_string())),
         }
     }

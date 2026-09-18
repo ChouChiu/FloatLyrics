@@ -5,7 +5,7 @@ use std::fs;
 fn default_provider_order_matches_plan() {
     assert_eq!(
         AppConfig::default().lyrics.provider_order,
-        vec![LyricsProvider::QqMusic, LyricsProvider::NetEase]
+        LyricsProvider::default_order()
     );
 }
 

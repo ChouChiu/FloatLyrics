@@ -37,7 +37,7 @@ impl SearchPlan {
         Self { providers }
     }
 
-    /// Builds the default QQ Music then NetEase plan.
+    /// Builds the plan from the default search priority.
     pub fn default_mvp() -> Self {
         Self::new(LyricsProvider::default_order())
     }

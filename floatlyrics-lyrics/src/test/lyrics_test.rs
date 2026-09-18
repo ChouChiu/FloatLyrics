@@ -70,8 +70,30 @@ fn line_index_at_or_before_holds_previous_line_during_gap() {
 fn search_plan_keeps_mvp_provider_order() {
     assert_eq!(
         SearchPlan::default_mvp().providers(),
-        &[LyricsProvider::QqMusic, LyricsProvider::NetEase]
+        &[
+            LyricsProvider::QqMusic,
+            LyricsProvider::NetEase,
+            LyricsProvider::Kugou,
+            LyricsProvider::Lrclib,
+            LyricsProvider::SodaMusic,
+        ]
     );
+}
+
+/// A source is named the same way in the configuration, in the stored lyrics, and
+/// in the order the settings page writes back.
+#[test]
+fn names_every_source_the_same_way_everywhere() {
+    for provider in LyricsProvider::default_order() {
+        assert_eq!(
+            provider.as_str().parse::<LyricsProvider>().unwrap(),
+            provider
+        );
+        assert_eq!(
+            serde_json::to_string(&provider).unwrap(),
+            format!("\"{}\"", provider.as_str())
+        );
+    }
 }
 
 #[test]
