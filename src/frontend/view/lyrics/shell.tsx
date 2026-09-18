@@ -14,7 +14,7 @@ import {
   Slider,
   Switch,
 } from "./components/ui";
-import type { AppConfig, ControlPage, SearchState } from "./types";
+import type { AppConfig, ControlPage, LyricsProvider, SearchState } from "./types";
 import { sendUiAction, type UiState, uiStore } from "./ui-store";
 
 function text(state: UiState, key: string): string {
@@ -162,6 +162,9 @@ function SettingsPage({ state, page }: { state: UiState; page: SettingsPageName 
   const [subpage, setSubpage] = useState<SettingsSubpage>(metadata.defaultSubpage);
   if (!draft) return null;
   const t = (key: string) => text(state, key);
+  const availableProviders = ALL_PROVIDERS.filter(
+    (provider) => !draft.lyrics.provider_order.includes(provider),
+  );
 
   return (
     <div className="page-stack">
@@ -462,19 +465,95 @@ function SettingsPage({ state, page }: { state: UiState; page: SettingsPageName 
       {subpage === "sources" && (
         <Card>
           <SettingRow title={t("SearchPriority")} description={t("SearchPriorityDescription")}>
-            <Select
-              value={draft.lyrics.provider_order.join(",")}
-              onChange={(event) =>
-                update((next) => {
-                  next.lyrics.provider_order = event.currentTarget.value.split(
-                    ",",
-                  ) as AppConfig["lyrics"]["provider_order"];
-                })
-              }
-            >
-              <option value="qq-music,netease">{t("QqThenNetEase")}</option>
-              <option value="netease,qq-music">{t("NetEaseThenQq")}</option>
-            </Select>
+            <div className="source-control">
+              <div className="source-list">
+                {draft.lyrics.provider_order.map((provider, index) => (
+                  <div className="source-row" key={provider}>
+                    <span>{t(PROVIDER_NAMES[provider])}</span>
+                    <div className="source-row-actions">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title={t("MoveSourceUp")}
+                        aria-label={t("MoveSourceUp")}
+                        disabled={index === 0}
+                        onClick={() =>
+                          update((next) => {
+                            next.lyrics.provider_order = moveLyricsProvider(
+                              next.lyrics.provider_order,
+                              index,
+                              -1,
+                            );
+                          })
+                        }
+                      >
+                        <Icon name="up" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title={t("MoveSourceDown")}
+                        aria-label={t("MoveSourceDown")}
+                        disabled={index + 1 === draft.lyrics.provider_order.length}
+                        onClick={() =>
+                          update((next) => {
+                            next.lyrics.provider_order = moveLyricsProvider(
+                              next.lyrics.provider_order,
+                              index,
+                              1,
+                            );
+                          })
+                        }
+                      >
+                        <Icon name="down" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title={t("RemoveSource")}
+                        aria-label={t("RemoveSource")}
+                        disabled={draft.lyrics.provider_order.length <= 1}
+                        onClick={() =>
+                          update((next) => {
+                            next.lyrics.provider_order = removeLyricsProvider(
+                              next.lyrics.provider_order,
+                              index,
+                            );
+                          })
+                        }
+                      >
+                        <Icon name="remove" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {availableProviders.length > 0 && (
+                <div className="source-available">
+                  <div className="source-list-title">{t("AvailableSources")}</div>
+                  <div className="source-available-rows">
+                    {availableProviders.map((provider) => (
+                      <Button
+                        key={provider}
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          update((next) => {
+                            next.lyrics.provider_order = addLyricsProvider(
+                              next.lyrics.provider_order,
+                              provider,
+                            );
+                          })
+                        }
+                      >
+                        <Icon name="plus" />
+                        <span>{t(PROVIDER_NAMES[provider])}</span>
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </SettingRow>
         </Card>
       )}
@@ -625,8 +704,9 @@ function SearchPage({ state }: { state: UiState }) {
                 <strong>{candidate.title}</strong>
                 <span>{candidate.artists.join(" · ")}</span>
                 <small>
-                  {candidate.album || "—"} · {formatDuration(candidate.duration_ms)} ·{" "}
-                  {t("MatchScore")} {candidate.match_score}
+                  {t(PROVIDER_NAMES[candidate.provider])} · {candidate.album || "—"} ·{" "}
+                  {formatDuration(candidate.duration_ms)} · {t("MatchScore")}{" "}
+                  {candidate.match_score}
                 </small>
               </button>
             ))}
@@ -764,6 +844,54 @@ export function ControlCenter({ state }: { state: UiState }) {
 export function addFontFamily(fonts: string[], family: string): string[] {
   if (family.trim() === "" || fonts.includes(family)) return fonts;
   return [...fonts, family];
+}
+
+/** The lyrics sources the settings page can enable, in the order it offers them. */
+export const ALL_PROVIDERS: LyricsProvider[] = [
+  "qq-music",
+  "netease",
+  "kugou",
+  "lrclib",
+  "soda-music",
+];
+
+const PROVIDER_NAMES: Record<LyricsProvider, string> = {
+  "qq-music": "ProviderNameQqMusic",
+  netease: "ProviderNameNetEase",
+  kugou: "ProviderNameKugou",
+  lrclib: "ProviderNameLrclib",
+  "soda-music": "ProviderNameSodaMusic",
+};
+
+export function addLyricsProvider(
+  providers: LyricsProvider[],
+  provider: LyricsProvider,
+): LyricsProvider[] {
+  if (providers.includes(provider)) return providers;
+  return [...providers, provider];
+}
+
+export function moveLyricsProvider(
+  providers: LyricsProvider[],
+  index: number,
+  delta: -1 | 1,
+): LyricsProvider[] {
+  const target = index + delta;
+  if (index < 0 || index >= providers.length || target < 0 || target >= providers.length) {
+    return providers;
+  }
+  const next = [...providers];
+  const provider = next[index];
+  const targetProvider = next[target];
+  if (provider === undefined || targetProvider === undefined) return providers;
+  next[index] = targetProvider;
+  next[target] = provider;
+  return next;
+}
+
+export function removeLyricsProvider(providers: LyricsProvider[], index: number): LyricsProvider[] {
+  if (providers.length <= 1 || index < 0 || index >= providers.length) return providers;
+  return providers.filter((_, current) => current !== index);
 }
 
 export function moveFontFamily(fonts: string[], index: number, delta: -1 | 1): string[] {

@@ -25,12 +25,15 @@ if (!("MouseEvent" in globalThis)) {
 const { AppleMusicLyrics, LyricSlot, LyricsViewport } = await import("./app");
 const {
   addFontFamily,
+  addLyricsProvider,
   ControlCenter,
   FontPickerWindow,
   ManualSearchWindow,
   moveFontFamily,
+  moveLyricsProvider,
   OverlayShell,
   removeFontFamily,
+  removeLyricsProvider,
 } = await import("./shell");
 
 const style = {
@@ -304,6 +307,66 @@ describe("React application shell", () => {
     expect(html).toContain('class="manual-search-window"');
     expect(html).toContain('id="manual-search-title"');
     expect(html).not.toContain('class="sidebar"');
+  });
+
+  test("reorders and enables lyrics sources", () => {
+    expect(addLyricsProvider(["qq-music"], "kugou")).toEqual(["qq-music", "kugou"]);
+    expect(addLyricsProvider(["qq-music"], "qq-music")).toEqual(["qq-music"]);
+    expect(moveLyricsProvider(["qq-music", "kugou", "lrclib"], 2, -1)).toEqual([
+      "qq-music",
+      "lrclib",
+      "kugou",
+    ]);
+    expect(moveLyricsProvider(["qq-music", "kugou"], 0, -1)).toEqual(["qq-music", "kugou"]);
+    expect(removeLyricsProvider(["qq-music", "kugou", "lrclib"], 1)).toEqual([
+      "qq-music",
+      "lrclib",
+    ]);
+    expect(removeLyricsProvider(["qq-music"], 0)).toEqual(["qq-music"]);
+  });
+
+  test("renders the source order with the sources that are not enabled yet", () => {
+    let state = advanceUiState(initial, {
+      type: "bootstrap",
+      surface: "control-center",
+      config,
+      strings: {
+        General: "General",
+        Display: "Display",
+        LyricsSources: "Lyrics Sources",
+        About: "About",
+        SourcesTitle: "Lyrics Sources",
+        SourcesDescription: "Search online sources in order",
+        SearchPriority: "Search priority",
+        SearchPriorityDescription: "Search the sources in this order",
+        AvailableSources: "Add a source",
+        MoveSourceUp: "Move source up",
+        MoveSourceDown: "Move source down",
+        RemoveSource: "Remove source",
+        ProviderNameQqMusic: "QQ Music",
+        ProviderNameNetEase: "NetEase Cloud Music",
+        ProviderNameKugou: "Kugou Music",
+        ProviderNameLrclib: "LRCLIB",
+        ProviderNameSodaMusic: "Soda Music",
+      },
+      version: "1.1.2",
+      about: { dependencies: [], licenses: [] },
+      available_fonts: [],
+    });
+    state = advanceUiState(state, { type: "navigate", page: "sources" });
+
+    const html = renderToStaticMarkup(<ControlCenter state={state} />);
+    expect(html).toContain("Search priority");
+    // Both enabled sources are rows of the ordered list, in their stored order.
+    expect(html.indexOf("QQ Music")).toBeLessThan(html.indexOf("NetEase Cloud Music"));
+    expect(html).toContain('title="Move source down"');
+    expect(html).toContain('title="Remove source"');
+    // A source that is not enabled is offered instead of being listed.
+    expect(html).toContain("Add a source");
+    expect(html).toContain(">Kugou Music<");
+    // Only the enabled sources are rows of the list; the rest are offered.
+    expect(html.match(/QQ Music/g)?.length).toBe(1);
+    expect(html.match(/Kugou Music/g)?.length).toBe(1);
   });
 
   test("renders the original two-column font selection workflow", () => {

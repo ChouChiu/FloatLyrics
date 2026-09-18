@@ -522,6 +522,59 @@ button {
   display: flex;
   justify-content: flex-end;
 }
+.source-control {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+.source-list {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+}
+.source-row {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px 3px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.source-row:last-child {
+  border-bottom: 0;
+}
+.source-row > span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.source-row-actions {
+  display: flex;
+  gap: 2px;
+}
+.source-row-actions .button-icon {
+  width: 26px;
+  min-height: 26px;
+}
+.source-available {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.source-list-title {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.source-available-rows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
 .color-control {
   display: flex;
   align-items: center;

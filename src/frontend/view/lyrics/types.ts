@@ -69,7 +69,7 @@ export interface LyricsFrame {
 }
 
 export type Language = "en" | "zh-CN" | "zh-TW";
-export type LyricsProvider = "qq-music" | "netease";
+export type LyricsProvider = "qq-music" | "netease" | "kugou" | "lrclib" | "soda-music";
 export type AppMode = "floating" | "amll";
 export type ChineseRomanizationMode =
   | "auto"
