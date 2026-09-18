@@ -125,6 +125,25 @@ fn converts_lyrics_helper_lines_to_timed_lines() {
     assert_eq!(active_line_index(&lines, 3_200, 0), Some(1));
 }
 
+/// A row of a sentence broken across rows carries the translation of its own line
+/// until the rows are joined, so the line the renderer draws carries both.
+#[test]
+fn joins_the_translation_of_a_sentence_broken_across_rows() {
+    let content = combine_lyrics_with_translation(
+        "[00:33.00]Put your money\n[00:35.00]where your mouth is",
+        Some("[00:33.00]把你的钱\n[00:35.00]放到嘴上说的地方"),
+    );
+
+    let lines = timed_lines_from_raw(&content, &[]).unwrap();
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, "Put your money where your mouth is");
+    assert_eq!(
+        lines[0].translation.as_deref(),
+        Some("把你的钱 放到嘴上说的地方")
+    );
+}
+
 /// Upstream merges the syllables of a word into one item and keeps the timing of
 /// the items it was merged from; those are the times a renderer animates.
 #[test]

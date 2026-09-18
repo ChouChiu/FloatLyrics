@@ -15,13 +15,11 @@ use super::model::{BackgroundVocal, TimedLine, TimedSyllable, Voice};
 
 mod conventions;
 mod filter;
-mod lrc;
 mod qrc;
 
 use conventions::{
     apply_speaker_labels, fold_bracketed_echoes, merge_continued_lines, split_background_vocals,
 };
-use lrc::timed_lines_from_lrc;
 use qrc::timed_lines_from_qrc;
 
 const TRANSLATION_PREFIX: &str = "__FLOATLYRICS_TRANSLATION__:";
@@ -37,8 +35,8 @@ pub fn parse_local_lyrics(content: &str) -> Result<LyricsData> {
     // `lyrics-parsers` reads TTML through quick-xml 0.36's checked attribute
     // iterator and namespace resolver, which hold the quadratic run time and the
     // unbounded namespace allocation of RUSTSEC-2026-0194 and RUSTSEC-2026-0195.
-    // Reject XML before reaching that parser; QQ Music and NetEase payloads use
-    // the LRC/QRC paths above this fallback.
+    // Reject XML before reaching that parser; the payloads read here are timed
+    // text, and the word-timed ones never reach it.
     if content
         .trim_start_matches(|character: char| character.is_whitespace() || character == '\u{feff}')
         .starts_with('<')
@@ -97,16 +95,17 @@ fn require_lines(lines: Vec<TimedLine>) -> Result<Vec<TimedLine>> {
 }
 
 fn parse_timed_lines_block(content: &str, artists: &[String]) -> Result<Vec<TimedLine>> {
-    let mut lines = timed_lines_from_lrc(content);
-    if lines.is_empty() {
-        lines = timed_lines_from_qrc(content);
-    }
-    if !lines.is_empty() {
-        return Ok(finish(lines, artists));
+    // QQ Music writes the span a word-timed row is drawn for in the tag that opens
+    // it, and `lyrics-helper` reads a row's end from its last word instead, so a
+    // word-timed payload is read here. Everything else — line-timed LRC and the
+    // other formats alike — is `lyrics-helper`'s to detect and parse.
+    let word_timed = timed_lines_from_qrc(content);
+    if !word_timed.is_empty() {
+        return Ok(finish(word_timed, artists));
     }
 
     let parsed = parse_local_lyrics(content)?;
-    require_lines(timed_lines_from_data(&parsed, artists))
+    require_lines(timed_lines_from_parsed(&parsed, artists))
 }
 
 /// Reads a provider's own transcription conventions and drops non-lyric rows.
@@ -135,6 +134,19 @@ pub fn export_lyrics(data: &LyricsData, ty: LyricsTypes) -> Result<String> {
 /// [`timed_lines_from_raw`]. Provider pronunciation is intentionally discarded;
 /// call [`super::generate_local_romanization`] when local romanization is wanted.
 pub fn timed_lines_from_data(data: &LyricsData, artists: &[String]) -> Vec<TimedLine> {
+    let mut timed_lines = timed_lines_from_parsed(data, artists);
+    // A row carries the translation of its own line, so the rows of one sentence are
+    // joined once they have both been paired with it.
+    merge_continued_lines(&mut timed_lines);
+    timed_lines
+}
+
+/// Converts already parsed lyrics to sorted, display-ready lines, leaving the rows
+/// a sentence is broken across as they were written.
+///
+/// The join waits for the translations to be paired, so a payload that arrived with
+/// a translation document of its own is read in this stage first.
+fn timed_lines_from_parsed(data: &LyricsData, artists: &[String]) -> Vec<TimedLine> {
     let Some(lines) = data.lines.as_deref() else {
         return Vec::new();
     };
@@ -144,11 +156,7 @@ pub fn timed_lines_from_data(data: &LyricsData, artists: &[String]) -> Vec<Timed
         .filter_map(timed_line_from_info)
         .collect::<Vec<_>>();
     timed_lines.sort_by_key(|line| line.start_ms);
-    let mut timed_lines = finish(timed_lines, artists);
-    // A row carries the translation of its own line, so the rows of one sentence are
-    // joined once they have both been paired with it.
-    merge_continued_lines(&mut timed_lines);
-    timed_lines
+    finish(timed_lines, artists)
 }
 
 /// Combines a primary document and optional translation into one parseable payload.
