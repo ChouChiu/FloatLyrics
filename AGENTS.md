@@ -429,6 +429,19 @@ unmatched label are not evidence of a second voice. The resulting voice is
 written to the AMLL listener as the `ttm:agent` of the line, which is what tells
 it to alternate the two sides; the floating overlay renders `background` only.
 
+A provider that times every word may also write the transcription of the rows
+separately, and the two documents of NetEase state the same track in ways that do
+not agree: the word-timed one drops the separators between its words, reads the
+brackets of an aside as the brackets of a tag, and censors words its row-timed
+document spells out. The row-timed transcription is the text a listener reads, so
+a payload carries both — the fetch writes `combine_word_timing`, the parse splits
+the section again — and `parsing/word_timing.rs` reads the times of the words onto
+the row-timed text, one row at a time. A row whose words cannot be spelled from
+that text (a masked word, an aside the word-timed document never carried) keeps
+its row timing and carries no words, and the words of a row always spell exactly
+what the row displays, because the views map a word onto its row by character
+offset.
+
 A resolved lookup also carries the artists the provider credits as
 `LyricsDisplayState::credited_artists`. When they name a performer the player's
 own metadata omits — Spotify reports "Problem" as Ariana Grande alone — the
