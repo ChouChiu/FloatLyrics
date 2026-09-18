@@ -122,6 +122,11 @@ pub(super) async fn search_provider_best(
     let Some(result) = result else {
         return Ok(None);
     };
+    if is_another_song(metadata, &result) {
+        // The provider does not hold this track; the next source in the order is
+        // asked instead.
+        return Ok(None);
+    }
     let Some(raw_lyrics) = fetch_result_lyrics(provider, &result).await? else {
         return Ok(None);
     };
@@ -140,6 +145,31 @@ pub(super) async fn search_provider_best(
             .map_or(0.0, |match_type| match_type as i32 as f64),
         raw_lyrics,
     }))
+}
+
+/// Returns whether a provider's best result is another song of the same artist.
+///
+/// `compare_track` rescales its score by the fields the comparison lacked, so a
+/// result with a different title still scores `MatchType::Medium` when the album
+/// and the duration are unknown. That is how Kugou answers a title it does not
+/// hold — with another song of the same artist, which would be displayed as this
+/// track's lyrics — so the name and the artist are read on their own, before the
+/// score is trusted.
+pub(super) fn is_another_song(
+    track: &lyrics_helper::models::TrackMetadata,
+    result: &lyrics_helper::searchers::search_result::SearchResult,
+) -> bool {
+    use lyrics_helper::searchers::compare_helper::{
+        ArtistMatchType, NameMatchType, compare_artist, compare_name,
+    };
+
+    let name = compare_name(track.title.as_deref(), Some(result.title.as_str()));
+    let artist = compare_artist(
+        track.artists.as_deref().unwrap_or_default(),
+        &result.artists,
+    );
+
+    matches!(name, Some(NameMatchType::NoMatch)) || matches!(artist, Some(ArtistMatchType::NoMatch))
 }
 
 async fn fetch_result_lyrics(
