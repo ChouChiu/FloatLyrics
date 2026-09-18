@@ -179,6 +179,25 @@ fn merged_syllable_items_keep_the_timing_of_their_parts() {
     );
 }
 
+/// Soda Music times its words inside angle brackets, on the row that opens them:
+/// a format of its own rather than the parenthesis tags of a QRC payload, which
+/// only shares the `[start,duration]` tag that opens a row.
+#[test]
+fn parses_a_krc_payload_with_its_own_parser() {
+    let lines = timed_lines_from_raw("[14690,6530]<0,210,0>故<210,200,0>事", &[]).unwrap();
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, "故事");
+    assert_eq!(
+        lines[0]
+            .syllables
+            .iter()
+            .map(|syllable| (syllable.start_ms, syllable.text.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(14_690, "故"), (14_900, "事")]
+    );
+}
+
 /// A provider censors the explicit words it serves by masking them; the shape the
 /// mask leaves restores what upstream's word list can spell, and a mask that kept
 /// no letter stays one.

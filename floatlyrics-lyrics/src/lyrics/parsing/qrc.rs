@@ -36,6 +36,14 @@ pub(super) fn timed_lines_from_qrc(content: &str) -> Vec<TimedLine> {
         });
     }
 
+    // A QRC payload times its words, so a payload whose rows carry no word tag is
+    // another format that opens a row with the same `[start,duration]` tag: KRC
+    // times `<offset,duration,0>` units and YRC `(start,duration,0)` ones, and
+    // reading either here would take the tags for the words they time.
+    if lines.iter().all(|line| line.syllables.is_empty()) {
+        return Vec::new();
+    }
+
     lines.sort_by_key(|line| line.start_ms);
     lines
 }
