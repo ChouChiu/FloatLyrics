@@ -439,12 +439,23 @@ The rows a provider writes around its lyrics — its title, its credits, its
 labels — are dropped by `parsing/filter.rs` before anything is drawn. It reads
 them as the block they stand in: the block opens at the first row of the payload
 and closes at the first row the view draws, which is what lets a credit role the
-vocabulary does not know be read by its shape (`Vocals Arrangement：`, `Recording
-Engineer：`, `Mixed in Dolby Atmos by：`) without hiding a sung row that contains a
+local vocabulary does not know be read by its shape (`Vocals Arrangement：`,
+`Recording Engineer：`, `Mixed in Dolby Atmos by：`) and by upstream's
+`optimization::info_lines::is_info_line` without hiding a sung row that contains a
 colon, since QQ Music times its credit block up to fifteen seconds into the song.
-A role the vocabulary does know is read wherever its credit falls, and a credit
-whose names the provider repeats on a bracketed row of its own belongs to the
-credit above it.
+Upstream's vocabulary is written to be read against a whole document rather than a
+row at a time — a row is a credit once it carries a colon and any one entry, and
+its Chinese entries are single characters — so inside the block is the only place
+a row carrying a colon is put to it. A row written without one can only be answered
+there by its copyright and distribution claims, which no sung row spells out, so
+those are read wherever they fall: a provider signs its lyrics off after the last
+line as readily as before the first. A role the local vocabulary does know is read
+wherever its credit falls, and a credit whose names the provider repeats on a
+bracketed row of its own belongs to the credit above it.
+
+Rows are folded to simplified Chinese with `chinese_helper::to_simplified` before
+any of this reads them, so each role is written once: do not add the traditional
+spelling of a role the vocabulary already lists.
 
 Do not widen this past what the transcription states: overlapping timings and an
 unmatched label are not evidence of a second voice. The resulting voice is

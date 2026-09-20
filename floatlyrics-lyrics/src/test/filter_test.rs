@@ -156,3 +156,67 @@ fn filters_urls_and_typographic_marks() {
 
     assert_eq!(rows, vec!["Baby"]);
 }
+
+#[test]
+fn filters_a_role_upstreams_vocabulary_knows_and_the_shape_does_not() {
+    // A role is not always written as a heading: QQ Music writes the place a part
+    // was recorded into the role itself, and a provider that writes its roles in
+    // lower case leaves nothing for the shape to read. Upstream's vocabulary knows
+    // the words either one is built from.
+    let rows = drawn(&[
+        ("Recorded @ HYBE Studio：황민희", 500),
+        ("mixing engineer：Josh Gudwin", 1200),
+        ("Me and my girlies", 14733),
+    ]);
+
+    assert_eq!(rows, vec!["Me and my girlies"]);
+}
+
+#[test]
+fn filters_a_traditional_credit_beyond_the_block() {
+    // A role is read wherever its credit falls, and the two scripts a provider may
+    // write it in name the one role: the row is folded to simplified Chinese, so
+    // the vocabulary spells each role once rather than twice.
+    let rows = drawn(&[
+        ("We gon party 'til its early", 15803),
+        ("編曲：John Ho", 40000),
+        ("混音：Josh Gudwin", 41000),
+    ]);
+
+    assert_eq!(rows, vec!["We gon party 'til its early"]);
+}
+
+#[test]
+fn filters_the_notice_a_provider_signs_its_lyrics_off_with() {
+    // A copyright notice is written after the last line rather than before the
+    // first, so it falls outside the block. It names no role and carries no colon:
+    // what reads it is the notice's own wording, which no sung row spells out.
+    let rows = drawn(&[
+        ("We gon party 'til its early", 15803),
+        ("未经著作权人许可不得翻唱翻录或使用", 200_000),
+        ("腾讯音乐娱乐集团享有本翻译作品的著作权", 201_000),
+    ]);
+
+    assert_eq!(rows, vec!["We gon party 'til its early"]);
+}
+
+#[test]
+fn keeps_a_sung_row_naming_something_the_vocabulary_lists() {
+    // Upstream's Chinese entries are single characters — `声`, `曲`, `鼓` — and a
+    // row carrying a colon and any one of them reads as a credit. A row the view
+    // has begun drawing is past the block, where that reading is not trusted.
+    let rows = drawn(&[
+        ("We gon party 'til its early", 15803),
+        ("他说：你的声音很好听", 30000),
+        ("鼓起勇气说：我喜欢你", 31000),
+    ]);
+
+    assert_eq!(
+        rows,
+        vec![
+            "We gon party 'til its early",
+            "他说：你的声音很好听",
+            "鼓起勇气说：我喜欢你"
+        ]
+    );
+}

@@ -11,6 +11,8 @@
 //! timed to, and a sentence left open at a comma is continued by the row that
 //! follows. The provider's own artist list is what a label is matched against.
 
+use lyrics_helper::helpers::string_helper::collapse_whitespace;
+
 use crate::lyrics::model::{BackgroundVocal, TimedLine, TimedSyllable, Voice};
 
 /// How long after the line it answers a bracketed echo may begin.
@@ -744,7 +746,7 @@ fn normalize_artist(value: &str) -> String {
             }
         })
         .collect();
-    cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
+    collapse_whitespace(&cleaned)
 }
 
 #[cfg(test)]

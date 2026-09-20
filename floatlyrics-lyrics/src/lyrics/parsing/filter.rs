@@ -3,6 +3,9 @@
 
 //! Filters non-lyric display lines (credits, speaker labels, intro titles).
 
+use lyrics_helper::helpers::chinese_helper::to_simplified;
+use lyrics_helper::helpers::optimization::info_lines::is_info_line;
+
 use crate::lyrics::model::TimedLine;
 
 /// The longest a credit role is written with.
@@ -20,14 +23,17 @@ const CREDIT_CONTINUATION_NAMES: usize = 3;
 /// The rows a provider writes around its lyrics, read as the block they stand in.
 ///
 /// The block opens at the first row of the payload and closes at the first row the
-/// lyrics view draws. Reading a credit role by its shape is what recognizes the
-/// roles the vocabulary does not know — QQ Music writes `Vocals Arrangement`,
-/// `Recording Engineer`, and `Mixed in Dolby Atmos by`, and NetEase writes `词` and
-/// `曲` — but a sung row that contains a colon is shaped like one too, so the shape
-/// is read only inside the block: the rows a provider wrote around its lyrics are
-/// the ones before the first row it sang, whichever second they fall on. QQ Music
-/// times its credit block up to fifteen seconds into the song, which a fixed window
-/// over the intro cut off in the middle.
+/// lyrics view draws. Inside it a role is read by upstream's credit vocabulary and
+/// by its shape, which is what recognizes the roles neither list knows — QQ Music
+/// writes `Vocals Arrangement`, `Recording Engineer`, and `Mixed in Dolby Atmos
+/// by`, and NetEase writes `词` and `曲`. A sung row that contains a colon is
+/// shaped like a credit too, and upstream's vocabulary is written to be read
+/// against a whole document rather than a row at a time — its Chinese entries are
+/// single characters, so `他说：你的声音很好听` reads as a credit on `声` — so
+/// neither is trusted outside the block: the rows a provider wrote around its
+/// lyrics are the ones before the first row it sang, whichever second they fall
+/// on. QQ Music times its credit block up to fifteen seconds into the song, which
+/// a fixed window over the intro cut off in the middle.
 pub(super) struct Metadata {
     /// Whether every row read so far was written around the lyrics.
     open: bool,
@@ -121,8 +127,27 @@ fn is_credit_line(text: &str, in_block: bool) -> bool {
     // unknown one is read by its shape, which is only trusted inside the block the
     // provider wrote around its lyrics.
     if let Some((key, _value)) = split_credit_key(text)
-        && (is_known_credit_key(&key.to_lowercase()) || (in_block && is_credit_role(key)))
+        && (is_known_credit_key(&to_simplified(&key.to_lowercase()))
+            || (in_block && is_credit_role(key)))
     {
+        return true;
+    }
+
+    // Upstream keeps the roles a provider writes its credits with, along with the
+    // copyright and distribution claims they are signed off with, and reads them
+    // against the row folded to simplified Chinese — which is the vocabulary below
+    // plus every role it never listed, and the notices no role names at all.
+    //
+    // Its vocabulary is written to be read against a whole document rather than a
+    // row at a time: a row is a credit once it carries a colon and any one entry,
+    // and the Chinese entries are single characters, so `他说：你的声音很好听` reads
+    // as a credit on `声`. A row written without a colon cannot be read that way —
+    // upstream then answers for the copyright and distribution claims alone, which
+    // are spelled out far too fully to be mistaken for a row that was sung. So the
+    // vocabulary is read inside the block, and the claims wherever they fall: a
+    // provider signs its lyrics off after the last line as readily as before the
+    // first.
+    if (in_block || !carries_colon(text)) && is_info_line(text, None) {
         return true;
     }
 
@@ -192,68 +217,46 @@ fn is_credit_line(text: &str, in_block: bool) -> bool {
         "sp:",
         // NetEase / Chinese credits
         "作词",
-        "作詞",
         "作曲",
         "编曲",
-        "編曲",
         "制作人",
-        "製作人",
         "监制",
-        "監製",
         "词:",
-        "詞:",
         "曲:",
         "演唱",
         "歌手",
         "专辑",
-        "專輯",
         "歌名",
         "歌曲",
         "标题",
-        "標題",
         "歌:",
         "唱:",
         "原唱",
         "翻唱",
         "和声",
-        "和聲",
         "和音",
         "合音",
         "和声编写",
-        "和聲編寫",
         "混音",
         "母带",
-        "母帶",
         "录音",
-        "錄音",
         "吉他",
         "钢琴",
-        "鋼琴",
         "贝斯",
-        "貝斯",
         "鼓:",
         "弦乐",
-        "弦樂",
         "发行",
-        "發行",
         "厂牌",
-        "廠牌",
         "上传",
-        "上傳",
         "歌词制作",
-        "歌詞製作",
         "歌词编辑",
-        "歌詞編輯",
         "配唱",
         "出品",
         "版权",
-        "版權",
         "词曲",
-        "詞曲",
         "qq音乐享有",
         "以下歌词翻译由",
         "翻译:",
-        "翻譯:",
         // URLs / metadata
         "http://",
         "https://",
@@ -263,6 +266,14 @@ fn is_credit_line(text: &str, in_block: bool) -> bool {
     ];
 
     prefixes.iter().any(|prefix| normalized.starts_with(prefix))
+}
+
+/// Returns whether `text` is written with a colon in either width.
+///
+/// Upstream folds a full-width colon to a half-width one before it reads a row, so
+/// both are the colon its vocabulary is keyed on.
+fn carries_colon(text: &str) -> bool {
+    text.contains(':') || text.contains('：')
 }
 
 /// Splits a row into the role it names and the names it credits.
@@ -312,29 +323,22 @@ fn is_known_credit_key_component(key: &str) -> bool {
     matches!(
         key,
         // NetEase writes `词 : 卡西恩Cacien` and `曲 : 卡西恩Cacien`: the role is one
-        // ideograph, and the role is the same wherever the credit falls.
-        "词" | "詞"
-            | "曲"
+        // ideograph, and the role is the same wherever the credit falls. The role
+        // arrives folded to simplified Chinese, so each is written once.
+        "词" | "曲"
             | "pgm"
             | "音乐总监"
-            | "音樂總監"
             | "音响总监"
-            | "音響總監"
             | "音乐设计"
-            | "音樂設計"
             | "乐队队长"
-            | "樂隊隊長"
             | "键盘"
-            | "鍵盤"
             | "管弦配器"
             | "和音"
             | "合音"
             | "竹笛"
             | "长笛"
-            | "長笛"
             | "柳琴"
             | "打击乐"
-            | "打擊樂"
     )
 }
 
@@ -367,8 +371,14 @@ fn looks_like_artist_label(label: &str) -> bool {
             && !label.chars().any(|ch| ch.is_lowercase()))
 }
 
+/// Folds a row to the one spelling the credit vocabulary is written in.
+///
+/// A provider writes the same role in either script — `编曲` and `編曲` name the
+/// one role — so the row is folded to simplified Chinese and the vocabulary lists
+/// each role once.
 fn normalize_line_text(text: &str) -> String {
-    text.trim()
+    let normalized = text
+        .trim()
         .trim_start_matches(['(', '[', '【'])
         .trim_end_matches([')', ']', '】'])
         .replace('：', ":")
@@ -376,7 +386,9 @@ fn normalize_line_text(text: &str) -> String {
         // vocabulary is written without the space for.
         .replace(" :", ":")
         .replace(": ", ":")
-        .to_lowercase()
+        .to_lowercase();
+
+    to_simplified(&normalized)
 }
 
 #[cfg(test)]
