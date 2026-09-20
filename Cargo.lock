@@ -1919,9 +1919,9 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "lyrics-core"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f1ad5b38dd9c7aa2a2c0d485f003cfc4d5ea54fcc38b1805909b08699f35067"
+checksum = "1f2a2e977b4114ccb31daabee28e7e652a3611c28bb9eb782373d747a2ea3cc5"
 dependencies = [
  "ferrous-opencc",
  "quick-xml",
@@ -1932,9 +1932,9 @@ dependencies = [
 
 [[package]]
 name = "lyrics-crypto"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d90da31fca8314c029e0c5d16eae23da1ec3bf1270f1a65ea7607dda86f6f89"
+checksum = "79fe5e47e05ad2f78e5c1abdd3c710bb9d985d059ca03074fe6154c8c921241d"
 dependencies = [
  "aes",
  "base64 0.22.1",
@@ -1947,18 +1947,18 @@ dependencies = [
 
 [[package]]
 name = "lyrics-generators"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ef833ddf46a3b5a8ebb3f24e97d8dad2f0bab0eff4eadd19b9b3bd5683d1c31"
+checksum = "4d1ebf870c30e8c1dbc800639a489089894aff4676c843a9cd0b99b8dba0a32d"
 dependencies = [
  "lyrics-core",
 ]
 
 [[package]]
 name = "lyrics-helper"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9461ac3fa4cf068890fadf2e88d1630de019db407534b6f60c7ac91d7d2194dd"
+checksum = "e1a5c92127e21f02e0d22b63b7c448f14f6a05ce17262ea0a2a6937383e7d6fa"
 dependencies = [
  "lyrics-core",
  "lyrics-crypto",
@@ -1969,9 +1969,9 @@ dependencies = [
 
 [[package]]
 name = "lyrics-parsers"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbb5174b1287bfbea8b4065d9a86cd855894c13e3474ef9b601393c46fab2789"
+checksum = "d5492052aac2564caa5c3b9b536940f61d49854363899c465123639a8508eb96"
 dependencies = [
  "base64 0.22.1",
  "lyrics-core",
@@ -1983,9 +1983,9 @@ dependencies = [
 
 [[package]]
 name = "lyrics-search"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9815ec589aeefae9d909bf782096f8b998eda2b1dbc5f46973c6b490b45bf5c0"
+checksum = "0baba823bd2fb24c93ea15925d7901467836e318ca3e3b7e746ed6da33f19cb6"
 dependencies = [
  "async-trait",
  "base64 0.22.1",

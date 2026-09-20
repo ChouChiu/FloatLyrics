@@ -867,32 +867,32 @@
     },
     {
       "name": "lyrics-core",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "license": "Apache-2.0"
     },
     {
       "name": "lyrics-crypto",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "license": "Apache-2.0"
     },
     {
       "name": "lyrics-generators",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "license": "Apache-2.0"
     },
     {
       "name": "lyrics-helper",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "license": "Apache-2.0"
     },
     {
       "name": "lyrics-parsers",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "license": "Apache-2.0"
     },
     {
       "name": "lyrics-search",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "license": "Apache-2.0"
     },
     {
