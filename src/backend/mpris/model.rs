@@ -6,12 +6,14 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, time::Instant};
-use zvariant::{OwnedObjectPath, OwnedValue};
+use zvariant::{OwnedObjectPath, OwnedValue, Value};
 
 use floatlyrics_core::track::TrackMetadata;
 
+use crate::shared::presentation::PlayerControl;
+
 /// State change emitted by the background MPRIS watcher.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PlayerWatcherEvent {
     /// A matching player appeared with its initial state.
     Connected(PlayerState),
@@ -33,7 +35,7 @@ pub enum PlayerWatcherEvent {
 }
 
 /// Latest known state for one MPRIS player.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PlayerState {
     /// D-Bus well-known name of the player instance.
     pub bus_name: String,
@@ -43,6 +45,8 @@ pub struct PlayerState {
     pub position_ms: Option<u64>,
     /// Current track metadata, when known.
     pub track: Option<TrackMetadata>,
+    /// Volume, playback modes, and capabilities of the player.
+    pub(crate) control: PlayerControl,
 }
 
 /// Typed subset of MPRIS metadata used by FloatLyrics.
@@ -58,6 +62,9 @@ pub struct MprisMetadata {
     pub length_us: Option<u64>,
     /// MPRIS track object path, when supplied.
     pub track_id: Option<String>,
+    /// Album cover URL supplied by the player, when available.
+    #[serde(default)]
+    pub art_url: Option<String>,
 }
 
 /// Extracts the metadata fields used by FloatLyrics from MPRIS properties.
@@ -74,6 +81,7 @@ pub fn metadata_from_mpris(metadata: &HashMap<String, OwnedValue>) -> Option<Mpr
         album: metadata.get("xesam:album").and_then(string_value),
         length_us: metadata.get("mpris:length").and_then(u64_value),
         track_id: metadata.get("mpris:trackid").and_then(track_id_value),
+        art_url: metadata.get("mpris:artUrl").and_then(string_value),
     })
 }
 
@@ -89,8 +97,20 @@ fn string_vec_value(value: &OwnedValue) -> Option<Vec<String>> {
     Vec::<String>::try_from(value.try_clone().ok()?).ok()
 }
 
+/// Reads an unsigned integer whichever integer type the player sent.
+///
+/// The specification types `mpris:length` as an `int64`, but Spotify and other
+/// players send a `uint64`, and zbus converts to the exact variant only — a
+/// strict `i64` read silently drops the length, which is what sizes a listener's
+/// progress bar against the playback clock.
 fn u64_value(value: &OwnedValue) -> Option<u64> {
-    i64::try_from(value.try_clone().ok()?).ok()?.try_into().ok()
+    match &**value {
+        Value::I64(number) => u64::try_from(*number).ok(),
+        Value::U64(number) => Some(*number),
+        Value::I32(number) => u64::try_from(*number).ok(),
+        Value::U32(number) => Some(u64::from(*number)),
+        _ => None,
+    }
 }
 
 fn object_path_value(value: &OwnedValue) -> Option<String> {
@@ -127,24 +147,14 @@ impl MprisMetadata {
                 .filter(|album| !album.is_empty()),
             duration_ms: self.length_us.map(|value| value / 1_000),
             mpris_track_id: self.track_id,
+            art_url: self
+                .art_url
+                .map(|url| url.trim().to_string())
+                .filter(|url| !url.is_empty()),
         };
 
         Ok(track)
     }
-}
-
-/// Compatibility alias for the former Spotify-specific event name.
-pub type SpotifyWatcherEvent = PlayerWatcherEvent;
-/// Compatibility alias for the former Spotify-specific player-state name.
-pub type SpotifyPlayerState = PlayerState;
-/// Compatibility alias for the former Spotify-specific metadata name.
-pub type SpotifyMetadata = MprisMetadata;
-
-/// Compatibility wrapper for the former Spotify-specific conversion function.
-pub fn spotify_metadata_from_mpris(
-    metadata: &HashMap<String, OwnedValue>,
-) -> Option<MprisMetadata> {
-    metadata_from_mpris(metadata)
 }
 
 /// Normalized MPRIS playback status.

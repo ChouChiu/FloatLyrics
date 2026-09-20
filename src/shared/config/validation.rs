@@ -111,7 +111,28 @@ pub(super) fn validate(config: &AppConfig) -> Result<()> {
             bail!("{name} must contain 6 or 8 hexadecimal digits");
         }
     }
+    validate_listener_address("amll.address", &config.amll.address)?;
     Ok(())
+}
+
+/// Rejects addresses that cannot be turned into a `ws://host:port` URL.
+pub(super) fn validate_listener_address(name: &str, value: &str) -> Result<()> {
+    let address = value.trim();
+    let Some((host, port)) = address.rsplit_once(':') else {
+        bail!("{name} must be written as host:port, got {value:?}");
+    };
+    let host = host.trim_matches(['[', ']']);
+    if host.is_empty()
+        || host
+            .chars()
+            .any(|character| character.is_whitespace() || character == '/')
+    {
+        bail!("{name} must start with a host name or address, got {value:?}");
+    }
+    match port.parse::<u16>() {
+        Ok(port) if port > 0 => Ok(()),
+        _ => bail!("{name} must end with a TCP port between 1 and 65535, got {value:?}"),
+    }
 }
 
 fn validate_i32(name: &str, value: i32, minimum: i32, maximum: i32) -> Result<()> {

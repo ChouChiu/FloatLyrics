@@ -31,6 +31,9 @@ pub(super) fn recover_fields(content: &str) -> AppConfig {
         &mut config.general.language,
         |_| true,
     );
+    apply(&value, "general", "mode", &mut config.general.mode, |_| {
+        true
+    });
 
     apply(
         &value,
@@ -202,6 +205,17 @@ pub(super) fn recover_fields(content: &str) -> AppConfig {
     {
         config.player.preferred_players = vec![prefix.to_string()];
     }
+
+    apply(
+        &value,
+        "amll",
+        "address",
+        &mut config.amll.address,
+        |address| super::validation::validate_listener_address("amll.address", address).is_ok(),
+    );
+    apply(&value, "tray", "enabled", &mut config.tray.enabled, |_| {
+        true
+    });
 
     config
 }

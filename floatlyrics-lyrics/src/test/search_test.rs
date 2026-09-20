@@ -67,6 +67,7 @@ fn provider_metadata_converts_traditional_chinese_for_search() {
         album: Some("喜歡你".to_string()),
         duration_ms: Some(235_000),
         mpris_track_id: Some("spotify:track:example".to_string()),
+        art_url: None,
     };
 
     let metadata = lyrics_helper_metadata(&track);
@@ -77,4 +78,66 @@ fn provider_metadata_converts_traditional_chinese_for_search() {
     assert_eq!(metadata.album.as_deref(), Some("喜欢你"));
     assert_eq!(track.title, "喜歡你");
     assert_eq!(track.artists, ["G.E.M.鄧紫棋"]);
+}
+
+fn helper_result(
+    title: &str,
+    artists: &[&str],
+) -> lyrics_helper::searchers::search_result::SearchResult {
+    use lyrics_helper::searchers::{Searchers, compare_helper::MatchType};
+
+    lyrics_helper::searchers::search_result::SearchResult {
+        searcher_type: Searchers::Kugou,
+        title: title.to_string(),
+        artists: artists.iter().map(|value| (*value).to_string()).collect(),
+        album: String::new(),
+        album_artists: None,
+        duration_ms: None,
+        match_type: Some(MatchType::Medium),
+        id: "hash".to_string(),
+        numeric_id: None,
+    }
+}
+
+fn helper_metadata(title: &str, artists: &[&str]) -> lyrics_helper::models::TrackMetadata {
+    let mut metadata = lyrics_helper::models::TrackMetadata::new();
+    metadata.title = Some(title.to_string());
+    metadata.artist = Some(artists.join(", "));
+    metadata.ensure_artists();
+    metadata
+}
+
+/// A source that scores another song of the same artist as this track must not
+/// answer with its lyrics, which is what Kugou does for a title it does not hold.
+#[test]
+fn another_song_of_the_same_artist_is_not_this_tracks_lyrics() {
+    let metadata = helper_metadata("Zzz Totally Made Up Song", &["Eminem"]);
+
+    assert!(super::provider::is_another_song(
+        &metadata,
+        &helper_result("Godzilla", &["Eminem"])
+    ));
+    assert!(super::provider::is_another_song(
+        &metadata,
+        &helper_result("Zzz Totally Made Up Song", &["Somebody Else"])
+    ));
+}
+
+/// A source that holds the track still answers it, whatever else it credits it
+/// with, and however it decorates the title.
+#[test]
+fn a_source_that_holds_the_track_still_answers_it() {
+    let metadata = helper_metadata("Zzz Totally Made Up Song", &["Eminem"]);
+
+    assert!(!super::provider::is_another_song(
+        &metadata,
+        &helper_result("Zzz Totally Made Up Song", &["Eminem"])
+    ));
+    assert!(!super::provider::is_another_song(
+        &metadata,
+        &helper_result(
+            "Zzz Totally Made Up Song (Explicit)",
+            &["Eminem", "Juice WRLD"]
+        )
+    ));
 }

@@ -7,14 +7,14 @@ use crate::{
         controller::loading::{
             LyricsCacheApplyContext, LyricsCacheEvent, apply_lyrics_cache_event,
         },
-        mpris::{PlaybackStatus, SpotifyPlayerState},
+        mpris::{PlaybackStatus, PlayerState},
     },
-    shared::config::AppConfig,
+    shared::{config::AppConfig, presentation::PlayerControl},
 };
 use floatlyrics_core::{i18n::Message, track::TrackMetadata};
 use floatlyrics_lyrics::{
     cache::CachedLyrics,
-    lyrics::{FetchedLyrics, LyricsLookupHint, LyricsProvider, TimedLine},
+    lyrics::{FetchedLyrics, LyricsLookupHint, LyricsProvider, TimedLine, Voice},
 };
 
 #[test]
@@ -407,6 +407,7 @@ fn loaded_state() -> LyricsDisplayState {
         track_fingerprint: Some("track".to_string()),
         lines: vec![line("manual lyrics")],
         status_message: None,
+        credited_artists: Vec::new(),
     }
 }
 
@@ -414,6 +415,7 @@ fn searching_state(fingerprint: &str) -> LyricsDisplayState {
     LyricsDisplayState {
         track_fingerprint: Some(fingerprint.to_string()),
         status_message: Some(Message::Text(Text::SearchingLyrics)),
+        credited_artists: Vec::new(),
         ..LyricsDisplayState::default()
     }
 }
@@ -428,20 +430,23 @@ fn line(text: &str) -> TimedLine {
         romanization: None,
         romanization_segments: Vec::new(),
         background: None,
+        voice: Voice::Primary,
     }
 }
 
-fn player_state(title: &str, position_ms: u64) -> SpotifyPlayerState {
-    SpotifyPlayerState {
+fn player_state(title: &str, position_ms: u64) -> PlayerState {
+    PlayerState {
         bus_name: "org.mpris.MediaPlayer2.spotify".to_string(),
         playback_status: PlaybackStatus::Paused,
         position_ms: Some(position_ms),
+        control: PlayerControl::default(),
         track: Some(TrackMetadata {
             title: title.to_string(),
             artists: vec!["Artist".to_string()],
             album: None,
             duration_ms: Some(60_000),
             mpris_track_id: None,
+            art_url: None,
         }),
     }
 }

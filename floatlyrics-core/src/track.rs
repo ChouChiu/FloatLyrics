@@ -20,6 +20,12 @@ pub struct TrackMetadata {
     pub duration_ms: Option<u64>,
     /// MPRIS object path or identifier, when supplied by the player.
     pub mpris_track_id: Option<String>,
+    /// Album cover URL supplied by the player, when available.
+    ///
+    /// Cover art is display-only: it is deliberately excluded from
+    /// [`Self::fingerprint`].
+    #[serde(default)]
+    pub art_url: Option<String>,
 }
 
 impl TrackMetadata {
@@ -43,6 +49,49 @@ impl TrackMetadata {
         self.mpris_track_id
             .clone()
             .unwrap_or_else(|| self.fingerprint())
+    }
+
+    /// Returns the artists to display once `credited` names are folded in.
+    ///
+    /// A playback source may credit only the lead performer — Spotify reports
+    /// "Problem" as `Ariana Grande` alone, with no mention of the featured
+    /// artist — while the provider holding the lyrics usually lists the full
+    /// billing. Those extra names fill the gap here.
+    ///
+    /// The track's own artists keep their order and the credited names follow,
+    /// so the lead stays the lead. Names are compared with the module's
+    /// normalization, so case and whitespace differences cannot list one
+    /// performer twice.
+    ///
+    /// `credited` has to name at least one artist the track also names: a lyrics
+    /// match agreeing on nobody is evidence about the lyrics, not grounds for
+    /// rewriting the billing. `None` is returned in that case and whenever
+    /// nothing would be added, which tells the caller the display is already
+    /// right.
+    #[must_use]
+    pub fn artists_including(&self, credited: &[String]) -> Option<Vec<String>> {
+        let mut known = self
+            .artists
+            .iter()
+            .map(|artist| canonicalize(artist))
+            .collect::<Vec<_>>();
+        let names = credited
+            .iter()
+            .map(|artist| canonicalize(artist))
+            .collect::<Vec<_>>();
+        if !names.iter().any(|name| known.contains(name)) {
+            return None;
+        }
+
+        let mut artists = self.artists.clone();
+        for (artist, name) in credited.iter().zip(&names) {
+            if name.is_empty() || known.contains(name) {
+                continue;
+            }
+            known.push(name.clone());
+            artists.push(artist.clone());
+        }
+        (artists.len() > self.artists.len()).then_some(artists)
     }
 }
 

@@ -9,23 +9,14 @@ fn owned(value: impl Into<Value<'static>>) -> OwnedValue {
 }
 
 #[test]
-fn filters_spotify_mpris_names_only() {
-    assert!(is_spotify_mpris_name("org.mpris.MediaPlayer2.spotify"));
-    assert!(is_spotify_mpris_name(
-        "org.mpris.MediaPlayer2.spotify.instance123"
-    ));
-    assert!(!is_spotify_mpris_name("org.mpris.MediaPlayer2.vlc"));
-    assert!(!is_spotify_mpris_name("org.example.spotify"));
-}
-
-#[test]
-fn converts_spotify_metadata_to_internal_track() {
-    let track = SpotifyMetadata {
+fn converts_mpris_metadata_to_internal_track() {
+    let track = MprisMetadata {
         title: " Track ".to_string(),
         artists: vec![" Alice ".to_string(), "Bob".to_string()],
         album: Some(" Album ".to_string()),
         length_us: Some(215_500_000),
         track_id: Some("/org/mpris/MediaPlayer2/Track/42".to_string()),
+        art_url: Some(" https://i.example.test/cover.jpg ".to_string()),
     }
     .into_track_metadata()
     .unwrap();
@@ -133,7 +124,7 @@ fn parses_mpris_metadata_map() {
     );
     metadata.insert("xesam:url".to_string(), owned("fuo://netease/songs/123"));
 
-    let parsed = spotify_metadata_from_mpris(&metadata).unwrap();
+    let parsed = metadata_from_mpris(&metadata).unwrap();
 
     assert_eq!(parsed.title, "Song");
     assert_eq!(parsed.artists, vec!["Alice", "Bob"]);
@@ -147,6 +138,29 @@ fn parses_mpris_metadata_map() {
         super::model::source_url_from_mpris(&metadata).as_deref(),
         Some("fuo://netease/songs/123")
     );
+}
+
+/// Spotify types `mpris:length` as a `uint64` where the specification calls for
+/// an `int64`. The length has to survive either way: a listener sizes its
+/// progress bar against it, and a missing length leaves the bar with a zero
+/// duration to divide by.
+#[test]
+fn reads_a_track_length_typed_as_uint64() {
+    let mut metadata = HashMap::new();
+    metadata.insert("xesam:title".to_string(), owned("Song"));
+    metadata.insert("mpris:length".to_string(), owned(199_173_000_u64));
+
+    let parsed = metadata_from_mpris(&metadata).unwrap();
+
+    assert_eq!(parsed.length_us, Some(199_173_000));
+    assert_eq!(
+        parsed.into_track_metadata().unwrap().duration_ms,
+        Some(199_173)
+    );
+
+    // A malformed negative length is skipped rather than reinterpreted.
+    metadata.insert("mpris:length".to_string(), owned(-1_i64));
+    assert_eq!(metadata_from_mpris(&metadata).unwrap().length_us, None);
 }
 
 #[test]
@@ -177,5 +191,6 @@ fn hint_metadata(track_id: Option<&str>) -> MprisMetadata {
         album: None,
         length_us: None,
         track_id: track_id.map(str::to_string),
+        art_url: None,
     }
 }

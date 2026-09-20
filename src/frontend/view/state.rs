@@ -28,6 +28,18 @@ impl From<&LyricsFrame> for LyricsLayoutKey {
     }
 }
 
+impl LyricsLayoutKey {
+    /// Whether `frame` renders with the layout this key was built from.
+    ///
+    /// Compared by reference so an unchanged frame, which is nearly every frame,
+    /// does not copy the line text.
+    fn matches(&self, frame: &LyricsFrame) -> bool {
+        self.frame_key == frame.key
+            && self.romanization == frame.content.romanization
+            && self.translation == frame.content.translation
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct OverlayMetrics {
     pub(super) compact_width: i32,
@@ -131,11 +143,13 @@ impl OverlayState {
     }
 
     pub(super) fn register_frame(&mut self, frame: &LyricsFrame) -> Option<bool> {
-        let layout_key = LyricsLayoutKey::from(frame);
-        let layout_changed = self.last_lyrics_layout.as_ref() != Some(&layout_key);
+        let layout_changed = !self
+            .last_lyrics_layout
+            .as_ref()
+            .is_some_and(|key| key.matches(frame));
         let resize = lyrics_resize_animation(self.metrics.apple_music_style, layout_changed);
         if resize.is_some() {
-            self.last_lyrics_layout = Some(layout_key);
+            self.last_lyrics_layout = Some(LyricsLayoutKey::from(frame));
         }
         resize
     }

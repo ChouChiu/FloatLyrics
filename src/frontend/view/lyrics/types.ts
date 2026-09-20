@@ -5,6 +5,8 @@ export interface TimedSyllable {
   start_ms: number;
   end_ms: number;
   text: string;
+  /** Locally generated reading for this syllable; absent when it has none. */
+  romanization?: string;
 }
 
 export interface KaraokeContent {
@@ -40,6 +42,16 @@ export interface PresentedLyricLine {
   romanization: string;
   translation: string;
   background: string;
+  /** Translation of the background vocal, empty when it has none. */
+  background_translation: string;
+  /** Where the background vocal is sung within the track. */
+  background_start_ms: number;
+  /** Exclusive end of the background vocal, when the provider timed one. */
+  background_end_ms: number | null;
+  /** Words of the background vocal, when the provider timed them. */
+  background_syllables: TimedSyllable[];
+  /** Vocal part the line belongs to; the AMLL sender writes it as the TTML agent. */
+  voice: "primary" | "secondary";
 }
 
 export interface LyricsDocument {
@@ -57,7 +69,8 @@ export interface LyricsFrame {
 }
 
 export type Language = "en" | "zh-CN" | "zh-TW";
-export type LyricsProvider = "qq-music" | "netease";
+export type LyricsProvider = "qq-music" | "netease" | "kugou" | "lrclib" | "soda-music";
+export type AppMode = "floating" | "amll";
 export type ChineseRomanizationMode =
   | "auto"
   | "mandarin-pinyin"
@@ -65,7 +78,7 @@ export type ChineseRomanizationMode =
   | "cantonese-jyutping-no-tones";
 
 export interface AppConfig {
-  general: { language: Language };
+  general: { language: Language; mode: AppMode };
   window: {
     anchor: "bottom-center";
     remember_position: boolean;
@@ -92,6 +105,8 @@ export interface AppConfig {
     romanization_color: string;
   };
   player: { preferred_players: string[]; ignored_players: string[] };
+  amll: { address: string };
+  tray: { enabled: boolean };
 }
 
 export interface LicenseData {
@@ -120,7 +135,7 @@ export interface SearchState {
   candidates: SearchCandidate[];
 }
 
-export type ControlPage = "general" | "display" | "sources" | "about";
+export type ControlPage = "general" | "display" | "integration" | "sources" | "about";
 export type SnapClass = "snapped-left" | "snapped-right" | "snapped-top" | "snapped-bottom";
 
 export type LyricsCommand =
@@ -152,6 +167,7 @@ export type UiAction =
   | { type: "quit" }
   | { type: "adjust-track-offset"; delta_ms: number }
   | { type: "reset-track-offset" }
+  | { type: "reload-lyrics" }
   | { type: "save-config"; config: AppConfig }
   | { type: "search-lyrics"; title: string; artist: string }
   | { type: "preview-lyrics"; index: number }

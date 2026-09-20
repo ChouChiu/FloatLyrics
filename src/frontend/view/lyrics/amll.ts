@@ -36,9 +36,17 @@ function lineWords(line: PresentedLyricLine, endTime: number): LyricWord[] {
       startTime: Math.round(syllable.start_ms),
       endTime: Math.max(Math.round(syllable.start_ms), Math.round(syllable.end_ms)),
       word: syllable.text,
+      romanWord: syllable.romanization?.trim() ?? "",
     }));
   if (timed.length > 0) return timed;
-  return [{ startTime: Math.round(line.start_ms), endTime, word: line.text }];
+  return [
+    {
+      startTime: Math.round(line.start_ms),
+      endTime,
+      word: line.text,
+      romanWord: line.romanization.trim(),
+    },
+  ];
 }
 
 function backgroundLine(line: PresentedLyricLine, endTime: number): LyricLine | null {
@@ -62,10 +70,15 @@ export function documentToAmllLines(document: LyricsDocument | null): LyricLine[
   for (const [index, line] of document.lines.entries()) {
     const startTime = Math.round(line.start_ms);
     const endTime = resolvedLineEnd(line, document.lines[index + 1], document.duration_ms);
+    const words = lineWords(line, endTime);
     result.push({
-      words: lineWords(line, endTime),
+      words,
       translatedLyric: line.translation,
-      romanLyric: line.romanization,
+      // AMLL renders a reading below each word as soon as one word has one,
+      // so the line-level romanization is only used without word readings.
+      romanLyric: words.some((word) => (word.romanWord?.trim().length ?? 0) > 0)
+        ? ""
+        : line.romanization,
       startTime,
       endTime,
       isBG: false,

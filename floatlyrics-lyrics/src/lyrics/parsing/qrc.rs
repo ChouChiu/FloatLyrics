@@ -3,9 +3,14 @@
 
 //! Focused parser for QQ Music QRC timing and syllable tags.
 
-use super::super::model::{TimedLine, TimedSyllable};
-use super::{filter_display_lines, merge_translation_marker_lines};
+use super::super::model::{TimedLine, TimedSyllable, Voice};
 
+/// Parses QQ Music word timing and syllable tags without interpreting what the
+/// lines say.
+///
+/// The rows are returned in start order as the payload wrote them; the
+/// conventions a transcription uses are read once for every provider format, in
+/// [`super::finish`].
 pub(super) fn timed_lines_from_qrc(content: &str) -> Vec<TimedLine> {
     let mut lines = Vec::new();
 
@@ -27,11 +32,20 @@ pub(super) fn timed_lines_from_qrc(content: &str) -> Vec<TimedLine> {
             romanization: None,
             romanization_segments: Vec::new(),
             background: None,
+            voice: Voice::Primary,
         });
     }
 
+    // A QRC payload times its words, so a payload whose rows carry no word tag is
+    // another format that opens a row with the same `[start,duration]` tag: KRC
+    // times `<offset,duration,0>` units and YRC `(start,duration,0)` ones, and
+    // reading either here would take the tags for the words they time.
+    if lines.iter().all(|line| line.syllables.is_empty()) {
+        return Vec::new();
+    }
+
     lines.sort_by_key(|line| line.start_ms);
-    filter_display_lines(merge_translation_marker_lines(lines))
+    lines
 }
 
 fn parse_qrc_line(line: &str) -> Option<(u64, u64, String, Vec<TimedSyllable>)> {
@@ -60,36 +74,65 @@ fn parse_qrc_timestamp(tag: &str) -> Option<(u64, u64)> {
     Some((start, duration))
 }
 
+/// Splits the tagged body of one QRC line into its text and timed syllables.
+///
+/// A parenthesis pair whose content is not a timestamp is provider text: QQ Music
+/// repeats a phrase as `((109473,249)Come on, just…)(110123,7118)`, where only the
+/// inner pairs are word tags. Such a bracket belongs to the word that the next
+/// timestamp times, so the syllables always spell the line a renderer shows.
 fn qrc_line_parts(value: &str) -> (String, Vec<TimedSyllable>) {
-    let mut output = String::new();
+    let mut text = String::new();
     let mut syllables = Vec::new();
+    let mut word = String::new();
     let mut rest = value;
 
     while let Some(open) = rest.find('(') {
-        let segment_text = &rest[..open];
-        output.push_str(segment_text);
         let after_open = &rest[open + 1..];
         let Some(close) = after_open.find(')') else {
-            output.push_str(&rest[open..]);
-            return (output.trim().to_string(), syllables);
+            break;
         };
-        let tag = &after_open[..close];
-        if let Some((start_ms, duration_ms)) = parse_qrc_timestamp(tag) {
-            if !segment_text.is_empty() {
-                syllables.push(TimedSyllable {
-                    start_ms,
-                    end_ms: start_ms.saturating_add(duration_ms),
-                    text: segment_text.to_string(),
-                });
-            }
-        } else {
-            output.push('(');
+        let Some((start_ms, duration_ms)) = parse_qrc_timestamp(&after_open[..close]) else {
+            word.push_str(&rest[..=open]);
             rest = after_open;
             continue;
+        };
+
+        word.push_str(&rest[..open]);
+        text.push_str(&word);
+        if !word.is_empty() {
+            syllables.push(TimedSyllable {
+                start_ms,
+                end_ms: start_ms.saturating_add(duration_ms),
+                text: std::mem::take(&mut word),
+                romanization: String::new(),
+                furigana: String::new(),
+            });
         }
         rest = &after_open[close + 1..];
     }
 
-    output.push_str(rest);
-    (output.trim().to_string(), syllables)
+    word.push_str(rest);
+    text.push_str(&word);
+    if let Some(last) = syllables.last_mut() {
+        // Text after the last timestamp carries no timing of its own, so the final
+        // word covers it instead of dropping it from the syllables.
+        last.text.push_str(&word);
+    }
+
+    debug_assert!(
+        syllables.is_empty()
+            || syllables
+                .iter()
+                .map(|syllable| syllable.text.as_str())
+                .collect::<String>()
+                .trim()
+                == text.trim(),
+        "qrc syllables must spell the line text"
+    );
+
+    (text.trim().to_string(), syllables)
 }
+
+#[cfg(test)]
+#[path = "../../test/qrc_test.rs"]
+mod tests;

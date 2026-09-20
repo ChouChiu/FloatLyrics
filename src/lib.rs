@@ -15,13 +15,6 @@ pub mod frontend;
 /// Configuration and contracts shared across application layers.
 pub mod shared;
 
-/// Compatibility re-export for the former MPRIS module path.
-pub use backend::mpris;
-/// Compatibility alias for the former application module path.
-pub use frontend as app;
-/// Compatibility re-export for the former configuration module path.
-pub use shared::config;
-
 use anyhow::Result;
 use clap::Parser;
 use floatlyrics_core::paths::AppPaths;

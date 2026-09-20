@@ -11,13 +11,32 @@ fn line(start_ms: u64, end_ms: Option<u64>, text: &str) -> TimedLine {
         romanization: None,
         romanization_segments: Vec::new(),
         background: None,
+        voice: Voice::Primary,
     }
 }
 
 fn romanized_lines(raw: &str) -> Vec<TimedLine> {
-    let mut lines = timed_lines_from_raw(raw).unwrap();
+    let mut lines = timed_lines_from_raw(raw, &[]).unwrap();
     generate_local_romanization(&mut lines);
     lines
+}
+
+/// The text and the generated reading of every syllable of a line.
+fn syllable_readings(line: &TimedLine) -> Vec<(&str, &str)> {
+    line.syllables
+        .iter()
+        .map(|syllable| (syllable.text.as_str(), syllable.romanization.as_str()))
+        .collect()
+}
+
+fn syllable(start_ms: u64, end_ms: u64, text: &str) -> TimedSyllable {
+    TimedSyllable {
+        start_ms,
+        end_ms,
+        text: text.to_string(),
+        romanization: String::new(),
+        furigana: String::new(),
+    }
 }
 
 #[test]
@@ -51,8 +70,30 @@ fn line_index_at_or_before_holds_previous_line_during_gap() {
 fn search_plan_keeps_mvp_provider_order() {
     assert_eq!(
         SearchPlan::default_mvp().providers(),
-        &[LyricsProvider::QqMusic, LyricsProvider::NetEase]
+        &[
+            LyricsProvider::QqMusic,
+            LyricsProvider::NetEase,
+            LyricsProvider::Kugou,
+            LyricsProvider::Lrclib,
+            LyricsProvider::SodaMusic,
+        ]
     );
+}
+
+/// A source is named the same way in the configuration, in the stored lyrics, and
+/// in the order the settings page writes back.
+#[test]
+fn names_every_source_the_same_way_everywhere() {
+    for provider in LyricsProvider::default_order() {
+        assert_eq!(
+            provider.as_str().parse::<LyricsProvider>().unwrap(),
+            provider
+        );
+        assert_eq!(
+            serde_json::to_string(&provider).unwrap(),
+            format!("\"{}\"", provider.as_str())
+        );
+    }
 }
 
 #[test]
@@ -79,6 +120,7 @@ fn maps_track_metadata_for_lyrics_helper_search() {
         album: Some("Album".to_string()),
         duration_ms: Some(123_000),
         mpris_track_id: None,
+        art_url: None,
     };
 
     let metadata = lyrics_helper_metadata(&track);
@@ -96,7 +138,7 @@ fn maps_track_metadata_for_lyrics_helper_search() {
 #[test]
 fn converts_lyrics_helper_lines_to_timed_lines() {
     let parsed = parse_local_lyrics("[00:01.00]First\n[00:03.00]Second").unwrap();
-    let lines = timed_lines_from_data(&parsed);
+    let lines = timed_lines_from_data(&parsed, &[]);
 
     assert_eq!(lines.len(), 2);
     assert_eq!(lines[0].start_ms, 1_000);
@@ -105,11 +147,173 @@ fn converts_lyrics_helper_lines_to_timed_lines() {
     assert_eq!(active_line_index(&lines, 3_200, 0), Some(1));
 }
 
+/// A row of a sentence broken across rows carries the translation of its own line
+/// until the rows are joined, so the line the renderer draws carries both.
+#[test]
+fn joins_the_translation_of_a_sentence_broken_across_rows() {
+    let content = combine_lyrics_with_translation(
+        "[00:33.00]Put your money\n[00:35.00]where your mouth is",
+        Some("[00:33.00]把你的钱\n[00:35.00]放到嘴上说的地方"),
+    );
+
+    let lines = timed_lines_from_raw(&content, &[]).unwrap();
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, "Put your money where your mouth is");
+    assert_eq!(
+        lines[0].translation.as_deref(),
+        Some("把你的钱 放到嘴上说的地方")
+    );
+}
+
+/// The rows a provider writes around its lyrics are dropped before the view draws
+/// them, and a credit whose names the provider repeats on a bracketed row of its own
+/// is part of the credit rather than a line drawn with its brackets.
+#[test]
+fn drops_the_credit_block_a_payload_opens_with() {
+    let content = "[0,570]Perfect Night - LE SSERAFIM\n\
+         [571,456]Lyrics by：(571,150)SCORE(13)/Megatone(13)(721,150)\n\
+         [6061,300]Produced by：(6061,150)13/\"hitman\" bang(6211,150)\n\
+         [6527,300](SCORE(13)/Megatone(13)/Sofia Quinn)\n\
+         [11002,300]Vocals Arrangement：(11002,150)Young Chance(11152,150)\n\
+         [14173,300]Mastering Engineer：(14173,150)Chris Gehringer(14323,150)\n\
+         [14733,900]Me (14733,300)and (15033,300)my (15333,300)girlies(15633,900)";
+    let artists = vec!["LE SSERAFIM".to_string()];
+
+    let lines = timed_lines_from_raw(content, &artists).unwrap();
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, "Me and my girlies");
+}
+
+/// The label a transcription writes for the part the two performers sing together
+/// gives that part back to the main voice rather than leaving it on the side the
+/// verse before it was.
+#[test]
+fn a_joint_label_gives_the_last_chorus_back_to_the_main_voice() {
+    let content = "[0,300]The (0,150)Weeknd：(150,150)\n\
+         [1000,600]I (1000,300)saw (1300,300)you(1600,600)\n\
+         [2000,300]Ariana (2000,150)Grande：(2150,150)\n\
+         [3000,600]Met (3000,300)you(3300,600)\n\
+         [4000,300]Both：(4000,300)\n\
+         [5000,900]Save (5000,300)your (5300,300)tears(5600,900)";
+    let artists = vec!["The Weeknd".to_string(), "Ariana Grande".to_string()];
+
+    let lines = timed_lines_from_raw(content, &artists).unwrap();
+
+    assert_eq!(lines.len(), 3);
+    assert_eq!(lines[0].voice, Voice::Primary);
+    assert_eq!(lines[1].voice, Voice::Secondary);
+    assert_eq!(lines[2].text, "Save your tears");
+    assert_eq!(lines[2].voice, Voice::Primary);
+}
+
+/// A phrase a provider brackets inside the line it answers is read as the part a
+/// second voice sings, and the line is drawn without it.
+#[test]
+fn reads_a_background_vocal_written_inside_the_line() {
+    let content = "[1000,4628]I'm (1000,180)in (1180,190)love (1370,709)((2079,380)we're \
+                   (2459,180)in (2639,430)love) (3069,519)with (3588,170)a (3758,180)monster(3938,840)";
+
+    let lines = timed_lines_from_raw(content, &[]).unwrap();
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, "I'm in love with a monster");
+    let background = lines[0]
+        .background
+        .as_ref()
+        .expect("the phrase is split off");
+    assert_eq!(background.text, "we're in love");
+    assert_eq!(background.start_ms, 2_459);
+}
+
+/// Upstream merges the syllables of a word into one item and keeps the timing of
+/// the items it was merged from; those are the times a renderer animates.
+#[test]
+fn merged_syllable_items_keep_the_timing_of_their_parts() {
+    use lyrics_helper::{FullSyllableInfo, SyllableInfo, SyllableItem};
+
+    let merged = SyllableItem::from(FullSyllableInfo::new(vec![
+        SyllableInfo::new("合".to_string(), 1_000, 1_250),
+        SyllableInfo::new("声".to_string(), 1_250, 1_500),
+    ]));
+    let data = LyricsData {
+        lines: Some(vec![LineInfo::new_syllable(vec![
+            merged,
+            SyllableItem::from(SyllableInfo::new("是你".to_string(), 1_500, 2_000)),
+        ])]),
+        ..LyricsData::default()
+    };
+
+    let lines = timed_lines_from_data(&data, &[]);
+
+    assert_eq!(lines[0].text, "合声是你");
+    assert_eq!(
+        lines[0]
+            .syllables
+            .iter()
+            .map(|syllable| (syllable.start_ms, syllable.end_ms, syllable.text.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (1_000, 1_250, "合"),
+            (1_250, 1_500, "声"),
+            (1_500, 2_000, "是你")
+        ]
+    );
+}
+
+/// Soda Music times its words inside angle brackets, on the row that opens them:
+/// a format of its own rather than the parenthesis tags of a QRC payload, which
+/// only shares the `[start,duration]` tag that opens a row.
+#[test]
+fn parses_a_krc_payload_with_its_own_parser() {
+    let lines = timed_lines_from_raw("[14690,6530]<0,210,0>故<210,200,0>事", &[]).unwrap();
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, "故事");
+    assert_eq!(
+        lines[0]
+            .syllables
+            .iter()
+            .map(|syllable| (syllable.start_ms, syllable.text.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(14_690, "故"), (14_900, "事")]
+    );
+}
+
+/// A provider censors the explicit words it serves by masking them; the shape the
+/// mask leaves restores what upstream's word list can spell, and a mask that kept
+/// no letter stays one.
+#[test]
+fn restores_the_words_a_provider_censored() {
+    let lines = timed_lines_from_raw("[00:01.00]This s**t again\n[00:03.00]*******", &[]).unwrap();
+
+    assert_eq!(lines[0].text, "This shit again");
+    assert_eq!(lines[1].text, "*******");
+}
+
+/// The restoration runs before the payload is read, so a timed word and the line
+/// it spells keep saying the same thing.
+#[test]
+fn restores_censored_words_inside_timed_units() {
+    let lines = timed_lines_from_raw("[1000,2000]s**t(0,500) h*es(500,500)", &[]).unwrap();
+
+    assert_eq!(lines[0].text, "shit hoes");
+    assert_eq!(
+        lines[0]
+            .syllables
+            .iter()
+            .map(|syllable| syllable.text.as_str())
+            .collect::<String>(),
+        lines[0].text
+    );
+}
+
 #[test]
 fn generates_japanese_romanization_locally() {
     let lines = romanized_lines("[00:01.00]こんにちは世界\n[00:03.00]音楽");
 
-    assert_eq!(lines[0].romanization.as_deref(), Some("konnichiha sekai"));
+    assert_eq!(lines[0].romanization.as_deref(), Some("konnichiwa sekai"));
     assert_eq!(lines[1].romanization.as_deref(), Some("ongaku"));
 }
 
@@ -118,7 +322,7 @@ fn generates_chinese_pinyin_without_treating_it_as_japanese() {
     let lines = romanized_lines("[00:01.00]你好世界\n[00:03.00]我喜欢你");
 
     assert_eq!(lines[0].romanization.as_deref(), Some("nǐ hǎo shì jiè"));
-    assert_eq!(lines[1].romanization.as_deref(), Some("wǒ xǐ huān nǐ"));
+    assert_eq!(lines[1].romanization.as_deref(), Some("wǒ xǐ huan nǐ"));
 }
 
 #[test]
@@ -179,21 +383,453 @@ fn applies_korean_pronunciation_rules() {
 }
 
 #[test]
+fn keeps_only_korean_readings_in_mixed_lines() {
+    let lines = romanized_lines("[00:01.00]안녕 Hello 세계\n[00:03.00]Hello world");
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("annyeong segye"));
+    assert_eq!(lines[1].romanization, None);
+    assert_eq!(
+        lines[0]
+            .romanization_segments
+            .iter()
+            .find(|segment| segment.text.contains("Hello"))
+            .map(|segment| segment.romanization.as_str()),
+        Some("")
+    );
+}
+
+#[test]
+fn keeps_only_han_readings_in_mixed_chinese_lines() {
+    let lines = romanized_lines("[00:01.00]Hello 世界\n[00:03.00]我喜欢你 Baby");
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("shì jiè"));
+    assert_eq!(lines[1].romanization.as_deref(), Some("wǒ xǐ huan nǐ"));
+}
+
+#[test]
+fn keeps_only_han_readings_in_mixed_cantonese_lines() {
+    let mut lines = vec![line(0, Some(1_000), "Hello 喜歡你")];
+
+    generate_local_romanization_with_mode(&mut lines, ChineseRomanizationMode::CantoneseJyutping);
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("hei2 fun1 nei5"));
+}
+
+#[test]
+fn keeps_japanese_whole_line_readings_in_mixed_lines() {
+    let lines = romanized_lines("[00:01.00]こんにちは World");
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("konnichiwa World"));
+}
+
+#[test]
+fn attaches_korean_readings_to_timed_syllables() {
+    let mut lines = timed_lines_from_raw("[1000,2000]안녕(0,500)하세요(500,500)", &[]).unwrap();
+
+    generate_local_romanization(&mut lines);
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("annyeonghaseyo"));
+    assert_eq!(
+        syllable_readings(&lines[0]),
+        vec![("안녕", "annyeong"), ("하세요", "haseyo")]
+    );
+}
+
+#[test]
+fn attaches_chinese_readings_to_timed_syllables() {
+    let mut lines = timed_lines_from_raw("[1000,2000]你好(0,500)世界(500,500)", &[]).unwrap();
+
+    generate_local_romanization(&mut lines);
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("nǐ hǎo shì jiè"));
+    assert_eq!(
+        syllable_readings(&lines[0]),
+        vec![("你好", "nǐhǎo"), ("世界", "shìjiè")]
+    );
+}
+
+/// Every kana character carries its own reading, and a word the dictionary reads
+/// as a unit keeps its reading on the character it starts at instead of repeating
+/// it under all of them.
+#[test]
+fn attaches_japanese_readings_to_timed_syllables() {
+    let mut lines = timed_lines_from_raw("[1000,4000]こんにちは世界", &[]).unwrap();
+    segment_lines_into_words(&mut lines);
+
+    generate_local_romanization(&mut lines);
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("konnichiwa sekai"));
+    assert_eq!(
+        syllable_readings(&lines[0]),
+        vec![
+            ("こ", "ko"),
+            ("ん", "n"),
+            ("に", "ni"),
+            ("ち", "chi"),
+            ("は", "wa"),
+            ("世", "se"),
+            ("界", "kai"),
+        ]
+    );
+}
+
+/// A digraph or a doubled consonant is one mora, so the character after it is
+/// read with it rather than on its own.
+#[test]
+fn splits_japanese_readings_at_digraphs() {
+    let mut lines = timed_lines_from_raw("[1000,4000]ちょっとキョウ", &[]).unwrap();
+    segment_lines_into_words(&mut lines);
+
+    generate_local_romanization(&mut lines);
+
+    assert_eq!(
+        syllable_readings(&lines[0]),
+        vec![
+            ("ち", "cho"),
+            ("ょ", ""),
+            ("っ", "t"),
+            ("と", "to"),
+            ("キ", "kyo"),
+            ("ョ", ""),
+            ("ウ", "u"),
+        ]
+    );
+}
+
+/// A prolonged sound mark holds the vowel it lengthens, so every character of
+/// the word carries a reading of its own.
+#[test]
+fn reads_prolonged_sound_marks_as_the_lengthened_vowel() {
+    let mut lines = timed_lines_from_raw("[1000,4000]ノート", &[]).unwrap();
+    segment_lines_into_words(&mut lines);
+
+    generate_local_romanization(&mut lines);
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("nooto"));
+    assert_eq!(
+        syllable_readings(&lines[0]),
+        vec![("ノ", "no"), ("ー", "o"), ("ト", "to")]
+    );
+}
+
+/// A word is read from the line it sits in: the dictionary reads `好` with the
+/// word it belongs to and `君` as the pronoun it is here, and the word readings
+/// are a split of the line's own reading, so they add up to it instead of
+/// contradicting it.
+#[test]
+fn reads_japanese_words_from_the_reading_of_the_line() {
+    let mut lines = timed_lines_from_raw("[1000,4000]好きだよ(0,1000)君(1000,1000)", &[]).unwrap();
+    segment_lines_into_words(&mut lines);
+
+    generate_local_romanization(&mut lines);
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("suki da yo kimi"));
+    assert_eq!(
+        syllable_readings(&lines[0]),
+        vec![
+            ("好", "su"),
+            ("き", "ki"),
+            ("だ", "da"),
+            ("よ", "yo"),
+            ("君", "kimi")
+        ]
+    );
+}
+
+/// Whatever a view shows under a word is a split of the pronunciation shown for
+/// the line: the two can never disagree.
+#[test]
+fn japanese_word_readings_add_up_to_the_line_reading() {
+    for text in [
+        "こんにちは世界",
+        "好きだよ",
+        "今日はいい天気ですね",
+        "ちょっと",
+        "ノート",
+        "だって、そうだよ",
+        "がっこうへ行く",
+        "しんいち",
+        "スーパーマーケット",
+        "食べる",
+    ] {
+        let mut lines = vec![line(0, Some(9_000), text)];
+        segment_lines_into_words(&mut lines);
+
+        generate_local_romanization(&mut lines);
+
+        let line = &lines[0];
+        // Separators are what the two sides differ in: the line reading keeps
+        // the space between words, the word readings do not.
+        let words = line
+            .syllables
+            .iter()
+            .map(|syllable| syllable.romanization.as_str())
+            .collect::<String>()
+            .chars()
+            .filter(|character| character.is_ascii_alphanumeric() || *character == '\'')
+            .collect::<String>();
+        let expected = line
+            .romanization
+            .as_deref()
+            .unwrap_or_default()
+            .chars()
+            .filter(|character| character.is_ascii_alphanumeric() || *character == '\'')
+            .collect::<String>();
+        assert!(!expected.is_empty(), "{text}");
+        assert_eq!(words, expected, "{text}");
+    }
+}
+
+/// A kanji is read with the word it sits in rather than on its own, and a word
+/// whose reading spans several kanji keeps it on the one it starts at.
+#[test]
+fn reads_japanese_kanji_with_the_word_it_belongs_to() {
+    for (text, reading) in [
+        ("君の名前を呼んでいる", "kimi no namae wo yon de iru"),
+        ("今日は雨が降る", "kyou wa ame ga furu"),
+        ("運命の人", "unmei no hito"),
+        ("一昨日の話", "ototoi no hanashi"),
+        ("世界中の誰より", "sekaijuu no dare yori"),
+    ] {
+        let lines = romanized_lines(&format!("[00:01.00]{text}"));
+
+        assert_eq!(lines[0].romanization.as_deref(), Some(reading), "{text}");
+    }
+}
+
+/// `は` and `へ` are read as the sounds they are heard as when they stand for the
+/// particles of those names, while an orthographic long vowel keeps the spelling
+/// the word is written with.
+#[test]
+fn reads_japanese_particles_as_they_are_pronounced() {
+    for (text, reading) in [
+        ("こんにちは", "konnichiwa"),
+        ("学校へ行く", "gakkou e iku"),
+        ("本を読む", "hon wo yomu"),
+    ] {
+        let lines = romanized_lines(&format!("[00:01.00]{text}"));
+
+        assert_eq!(lines[0].romanization.as_deref(), Some(reading), "{text}");
+    }
+}
+
+/// A small tsu is heard as the consonant of the mora after it even when the
+/// analyzer ends its word there, so `がっ` and `こう` together read "gakkou".
+#[test]
+fn reads_a_double_consonant_across_the_words_of_a_line() {
+    let mut lines = timed_lines_from_raw("[1000,4000]がっこう", &[]).unwrap();
+    segment_lines_into_words(&mut lines);
+
+    generate_local_romanization(&mut lines);
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("gakkou"));
+    assert_eq!(
+        syllable_readings(&lines[0]),
+        vec![("が", "ga"), ("っ", "k"), ("こ", "ko"), ("う", "u")]
+    );
+}
+
+/// Kana the dictionary does not list are read as they are written, an ん the next
+/// word starts with a vowel after is written with an apostrophe, and a word that
+/// starts with a y stays a word of its own.
+#[test]
+fn reads_kana_the_dictionary_does_not_list() {
+    let lines = romanized_lines("[00:01.00]ラララ\n[00:03.00]しんいち\n[00:05.00]少年よ");
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("rarara"));
+    assert_eq!(lines[1].romanization.as_deref(), Some("shin'ichi"));
+    assert_eq!(lines[2].romanization.as_deref(), Some("shounen yo"));
+}
+
+/// The kana of a word that the dictionary reads as a unit is handed to the
+/// characters that spell it, which is what a view renders as furigana.
+#[test]
+fn aligns_japanese_furigana_with_the_kana_of_the_word() {
+    let mut lines = timed_lines_from_raw("[1000,4000]食べる", &[]).unwrap();
+    segment_lines_into_words(&mut lines);
+
+    generate_local_romanization(&mut lines);
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("taberu"));
+    assert_eq!(
+        syllable_readings(&lines[0]),
+        vec![("食", "ta"), ("べ", "be"), ("る", "ru")]
+    );
+}
+
+/// Final jamo are read as the sounds they stand for: a cluster keeps one of its
+/// two jamo, and the seven sounds a syllable can end with decide the rest.
+#[test]
+fn reads_korean_final_jamo_as_they_are_pronounced() {
+    for (text, reading) in [
+        ("닭", "dak"),
+        ("값", "gap"),
+        ("읽다", "ikda"),
+        ("없어", "eopseo"),
+        ("꽃", "kkot"),
+        ("삶", "sam"),
+        ("여덟", "yeodeol"),
+    ] {
+        let lines = romanized_lines(&format!("[00:01.00]{text}"));
+
+        assert_eq!(lines[0].romanization.as_deref(), Some(reading), "{text}");
+    }
+}
+
+/// A syllable is read with its neighbours, and the readings are handed out one
+/// syllable at a time in the order the syllables are written.
+#[test]
+fn reads_korean_sound_changes_between_syllables() {
+    for (text, reading) in [
+        ("신라", "silla"),
+        ("종로", "jongno"),
+        ("백마", "baengma"),
+        ("한국말", "hangungmal"),
+        ("학여울", "hangnyeoul"),
+        ("십육", "simnyuk"),
+        ("알약", "allyak"),
+        ("같이", "gachi"),
+        ("좋은", "joeun"),
+        ("넓다", "neolda"),
+        ("감사합니다", "gamsahamnida"),
+    ] {
+        let lines = romanized_lines(&format!("[00:01.00]{text}"));
+
+        assert_eq!(lines[0].romanization.as_deref(), Some(reading), "{text}");
+    }
+
+    let mut lines = timed_lines_from_raw("[1000,4000]신라", &[]).unwrap();
+    segment_lines_into_words(&mut lines);
+
+    generate_local_romanization(&mut lines);
+
+    assert_eq!(
+        syllable_readings(&lines[0]),
+        vec![("신", "sil"), ("라", "la")]
+    );
+}
+
+/// A character is read the way its word is read, so a polyphone is not read with
+/// the reading it has on its own.
+#[test]
+fn reads_chinese_polyphones_from_the_word_they_are_in() {
+    for (text, reading) in [
+        ("音乐", "yīn yuè"),
+        ("银行", "yín háng"),
+        ("长大", "zhǎng dà"),
+        ("还是", "hái shi"),
+        ("还是喜欢你", "hái shi xǐ huan nǐ"),
+    ] {
+        let lines = romanized_lines(&format!("[00:01.00]{text}"));
+
+        assert_eq!(lines[0].romanization.as_deref(), Some(reading), "{text}");
+    }
+}
+
+/// Provider word timing keeps its syllables, and one spanning several morae
+/// receives the readings covering it, joined the way the source is written.
+#[test]
+fn joins_japanese_readings_across_a_syllable() {
+    let mut lines =
+        timed_lines_from_raw("[1000,4000]こんにちは(0,1000)世界(1000,1000)", &[]).unwrap();
+
+    generate_local_romanization(&mut lines);
+
+    assert_eq!(
+        syllable_readings(&lines[0]),
+        vec![("こんにちは", "konnichiwa"), ("世界", "sekai")]
+    );
+}
+
+/// Cantonese readings are annotated per word, so a word is handed out one
+/// character at a time.
+#[test]
+fn attaches_cantonese_readings_to_timed_syllables() {
+    let mut lines = timed_lines_from_raw("[1000,4000]我喜歡你", &[]).unwrap();
+    segment_lines_into_words(&mut lines);
+
+    generate_local_romanization_with_mode(&mut lines, ChineseRomanizationMode::CantoneseJyutping);
+
+    assert_eq!(
+        lines[0].romanization.as_deref(),
+        Some("ngo5 hei2 fun1 nei5")
+    );
+    assert_eq!(
+        syllable_readings(&lines[0]),
+        vec![
+            ("我", "ngo5"),
+            ("喜", "hei2"),
+            ("歡", "fun1"),
+            ("你", "nei5")
+        ]
+    );
+}
+
+#[test]
+fn leaves_latin_syllable_readings_empty() {
+    let mut lines = timed_lines_from_raw("[1000,2000]안녕(0,500) Hello(500,500)", &[]).unwrap();
+
+    generate_local_romanization(&mut lines);
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("annyeong"));
+    assert_eq!(lines[0].syllables[0].romanization, "annyeong");
+    assert!(lines[0].syllables[1].romanization.is_empty());
+}
+
+#[test]
+fn stops_attaching_readings_at_the_first_unmatched_syllable() {
+    let mut lines = vec![line(0, Some(1_000), "안녕하세요")];
+    lines[0].syllables = vec![syllable(0, 500, "다른"), syllable(500, 1_000, "안녕하세요")];
+
+    generate_local_romanization(&mut lines);
+
+    assert!(
+        lines[0]
+            .syllables
+            .iter()
+            .all(|syllable| syllable.romanization.is_empty()),
+        "a stale reading must never be attached to the wrong syllable"
+    );
+}
+
+#[test]
+fn clears_stale_syllable_readings_when_no_romanization_is_generated() {
+    let mut lines = vec![line(0, Some(1_000), "Hello world")];
+    lines[0].syllables = vec![syllable(0, 500, "Hello")];
+    lines[0].syllables[0].romanization = "stale".to_string();
+
+    generate_local_romanization(&mut lines);
+
+    assert_eq!(lines[0].romanization, None);
+    assert!(lines[0].syllables[0].romanization.is_empty());
+}
+
+#[test]
+fn joins_readings_inside_one_syllable_with_a_space_when_the_source_has_one() {
+    let mut lines = timed_lines_from_raw("[1000,2000]안녕 세계(0,1000)", &[]).unwrap();
+
+    generate_local_romanization(&mut lines);
+
+    assert_eq!(lines[0].romanization.as_deref(), Some("annyeong segye"));
+    assert_eq!(lines[0].syllables[0].romanization, "annyeong segye");
+}
+
+#[test]
 fn replaces_romanization_supplied_by_the_lyrics_source() {
     let mut lines = vec![line(1_000, None, "こんにちは")];
     lines[0].romanization = Some("source romanization".to_string());
 
     generate_local_romanization(&mut lines);
 
-    assert_eq!(lines[0].romanization.as_deref(), Some("konnichiha"));
+    assert_eq!(lines[0].romanization.as_deref(), Some("konnichiwa"));
 }
 
 #[test]
 fn distinguishes_chinese_lines_in_mixed_japanese_lyrics() {
     let lines = romanized_lines("[00:01.00]こんにちは\n[00:03.00]我喜欢你");
 
-    assert_eq!(lines[0].romanization.as_deref(), Some("konnichiha"));
-    assert_eq!(lines[1].romanization.as_deref(), Some("wǒ xǐ huān nǐ"));
+    assert_eq!(lines[0].romanization.as_deref(), Some("konnichiwa"));
+    assert_eq!(lines[1].romanization.as_deref(), Some("wǒ xǐ huan nǐ"));
 }
 
 #[test]
@@ -206,7 +842,7 @@ fn recognizes_japanese_lyrics_written_only_with_kanji() {
 
 #[test]
 fn parsing_does_not_generate_romanization_until_requested() {
-    let lines = timed_lines_from_raw("[00:01.00]¿Cómo estás?").unwrap();
+    let lines = timed_lines_from_raw("[00:01.00]¿Cómo estás?", &[]).unwrap();
 
     assert_eq!(lines[0].romanization, None);
     assert!(lines[0].romanization_segments.is_empty());
@@ -218,7 +854,7 @@ fn combines_translation_lrc_into_timed_lines() {
         "[00:01.00]Hello\n[00:03.00]World",
         Some("[00:01.00]你好\n[00:03.00]世界"),
     );
-    let lines = timed_lines_from_raw(&raw).unwrap();
+    let lines = timed_lines_from_raw(&raw, &[]).unwrap();
 
     assert_eq!(lines.len(), 2);
     assert_eq!(lines[0].text, "Hello");
@@ -233,7 +869,7 @@ fn ignores_placeholder_translation_lines() {
         "[00:01.00]Hello\n[00:03.00]World",
         Some("[00:01.00]//\n[00:03.00]世界"),
     );
-    let lines = timed_lines_from_raw(&raw).unwrap();
+    let lines = timed_lines_from_raw(&raw, &[]).unwrap();
 
     assert_eq!(lines[0].translation, None);
     assert_eq!(lines[1].translation.as_deref(), Some("世界"));
@@ -245,7 +881,7 @@ fn combines_translation_qrc_into_timed_lines() {
         "[1000,2000]Hel(1000,500)lo(1500,500)\n[3000,2000]World",
         Some("[1000,2000]你好\n[3000,2000]世界"),
     );
-    let lines = timed_lines_from_raw(&raw).unwrap();
+    let lines = timed_lines_from_raw(&raw, &[]).unwrap();
 
     assert_eq!(lines.len(), 2);
     assert_eq!(lines[0].start_ms, 1_000);
@@ -257,11 +893,15 @@ fn combines_translation_qrc_into_timed_lines() {
                 start_ms: 1_000,
                 end_ms: 1_500,
                 text: "Hel".to_string(),
+                romanization: String::new(),
+                furigana: String::new(),
             },
             TimedSyllable {
                 start_ms: 1_500,
                 end_ms: 2_000,
                 text: "lo".to_string(),
+                romanization: String::new(),
+                furigana: String::new(),
             },
         ]
     );
@@ -279,7 +919,7 @@ fn filters_intro_title_credit_and_speaker_label_lines() {
 [3800,1200]Both：(3800,1200)
 [5000,1600]Camila (5000,500)Cabello：(5500,500)
 [6600,2000]Ooh (6600,600)when (7200,400)your (7600,400)lips(8000,600)";
-    let lines = timed_lines_from_raw(raw).unwrap();
+    let lines = timed_lines_from_raw(raw, &[]).unwrap();
 
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].start_ms, 6_600);
@@ -292,7 +932,7 @@ fn filters_non_lyric_translation_credit_lines() {
         "[0,2000]Song(0,1000) - Artist(1000,1000)\n[2000,2000]Hello(2000,1000)",
         Some("[00:00.00]QQ音乐享有本翻译作品的著作权\n[00:02.00]你好"),
     );
-    let lines = timed_lines_from_raw(&raw).unwrap();
+    let lines = timed_lines_from_raw(&raw, &[]).unwrap();
 
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].text, "Hello");
@@ -301,13 +941,12 @@ fn filters_non_lyric_translation_credit_lines() {
 
 #[test]
 fn filters_chinese_standalone_credit_lines() {
-    // 词：XXX and 曲：XXX should be filtered (standalone single-char credits)
     let raw = "\
 [0,314]BIZNESS(0,157) - XLOV(158,157)
 [315,314]词：(315,157)SCORE(473,157)
 [630,158]曲：(630,158)QSTNMRKS(788,0)
 [789,1000]Dance (789,300)dance(1089,700)";
-    let lines = timed_lines_from_raw(raw).unwrap();
+    let lines = timed_lines_from_raw(raw, &[]).unwrap();
 
     assert_eq!(
         lines.len(),
@@ -320,13 +959,12 @@ fn filters_chinese_standalone_credit_lines() {
 
 #[test]
 fn filters_english_composer_and_arranged_by_lines() {
-    // Composer：XXX and Arranged by：XXX should be filtered
     let raw = "\
 [0,1060]Song(0,400) - Artist(400,660)
 [1060,1060]Composer：(1060,500)Zacharie Raymond(1560,500)
 [2120,1060]Arranged (2120,300)by：(2420,500)Charlie Puth(2920,500)
 [3180,1000]Hello (3180,400)World(3580,600)";
-    let lines = timed_lines_from_raw(raw).unwrap();
+    let lines = timed_lines_from_raw(raw, &[]).unwrap();
 
     assert_eq!(
         lines.len(),
@@ -349,9 +987,138 @@ fn filters_extended_live_performance_header_lines() {
 [16208,622]柳(16208,103)琴(16312,103)：(16416,103)李(16520,103)雨(16624,103)涵(16728,103)
 [16832,623]打(16832,103)击(16936,103)乐(17039,103)：(17143,103)郑(17247,103)瑀(17351,103)
 [17456,3563]滚(17456,186)烫(17642,216)的(17858,284)伤(18142,372)口(18514,233) (18747,233)会(18980,215)冷(19195,291)成(19486,348)月(19834,336)牙(20170,849)";
-    let lines = timed_lines_from_raw(raw).unwrap();
+    let lines = timed_lines_from_raw(raw, &[]).unwrap();
 
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].start_ms, 17_456);
     assert_eq!(lines[0].text, "滚烫的伤口 会冷成月牙");
+}
+
+#[test]
+fn splits_a_bracketed_tail_into_a_background_vocal() {
+    let raw = "[1000,2000]Hold (1000,500)on (oh(1500,1000)yeah)(2500,500)";
+    let lines = timed_lines_from_raw(raw, &[]).unwrap();
+
+    assert_eq!(lines[0].text, "Hold on");
+    assert_eq!(
+        lines[0]
+            .background
+            .as_ref()
+            .map(|background| background.text.as_str()),
+        Some("ohyeah")
+    );
+    assert_eq!(
+        lines[0]
+            .syllables
+            .iter()
+            .map(|syllable| syllable.text.as_str())
+            .collect::<String>()
+            .trim(),
+        lines[0].text
+    );
+}
+
+#[test]
+fn folds_a_bracketed_echo_into_the_line_it_answers() {
+    let raw = "\
+[1000,2000]Know (1000,1000)the way(2000,1000)
+[3000,1000]((3000,100)My (3100,400)way)(3500,500)";
+    let lines = timed_lines_from_raw(raw, &[]).unwrap();
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, "Know the way");
+    assert_eq!(
+        lines[0]
+            .background
+            .as_ref()
+            .map(|background| background.text.as_str()),
+        Some("My way")
+    );
+}
+
+#[test]
+fn a_folded_echo_keeps_its_own_translation_beside_its_parent() {
+    let raw = combine_lyrics_with_translation(
+        "\
+[1000,2000]Know (1000,1000)the way(2000,1000)
+[3000,1000]((3000,100)My (3100,400)way)(3500,500)",
+        Some("[00:01.00]要知道方法\n[00:03.00]（从你身边离开的方法）"),
+    );
+    let lines = timed_lines_from_raw(&raw, &[]).unwrap();
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].translation.as_deref(), Some("要知道方法"));
+    let background = lines[0].background.as_ref().expect("the echo is folded in");
+    assert_eq!(background.text, "My way");
+    assert_eq!(
+        (background.start_ms, background.end_ms),
+        (3_100, Some(4_000)),
+        "the echo keeps the timing its own words were sung with"
+    );
+    assert_eq!(
+        background
+            .syllables
+            .iter()
+            .map(|syllable| (syllable.text.as_str(), syllable.start_ms, syllable.end_ms))
+            .collect::<Vec<_>>(),
+        vec![("My ", 3_100, 3_500), ("way", 3_500, 4_000)],
+        "every word of the echo keeps its own timing, so a listener fills them as it hears them"
+    );
+    assert_eq!(
+        background.translation.as_deref(),
+        Some("从你身边离开的方法"),
+        "the bracket that marked the phrase goes with the phrase"
+    );
+}
+
+#[test]
+fn a_bracketed_line_elsewhere_in_the_song_stays_its_own_line() {
+    let raw = "\
+[1000,1000]Know (1000,500)the way(1500,500)
+[9000,1000]((9000,100)Instrumental)(9100,900)";
+    let lines = timed_lines_from_raw(raw, &[]).unwrap();
+
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[1].text, "(Instrumental)");
+    assert!(lines[0].background.is_none());
+}
+
+#[test]
+fn a_line_timed_source_keeps_a_bracketed_tail_as_sung_text() {
+    let raw = "[00:01.00]Know the way (My way)";
+    let lines = timed_lines_from_raw(raw, &[]).unwrap();
+
+    assert_eq!(lines[0].text, "Know the way (My way)");
+    assert!(lines[0].background.is_none());
+}
+
+#[test]
+fn reads_speaker_labels_against_the_providers_artists() {
+    let artists = vec!["Ariana Grande".to_string(), "Iggy Azalea".to_string()];
+    let raw = "\
+[0,500]Iggy Azalea/Ariana Grande：(0,500)
+[1000,1000]Uh-huh (1000,500)it's Iggy(1500,500)
+[2000,500]Big Sean/Ariana Grande：(2000,500)
+[3000,1000]One (3000,500)less problem(3500,500)
+[12000,1000]Love: it hurts(12000,1000)";
+    let lines = timed_lines_from_raw(raw, &artists).unwrap();
+
+    assert_eq!(lines.len(), 3);
+    assert_eq!(lines[0].text, "Uh-huh it's Iggy");
+    assert_eq!(lines[0].voice, Voice::Secondary);
+    assert_eq!(lines[1].text, "One less problem");
+    assert_eq!(lines[1].voice, Voice::Primary);
+    // A sung line containing a colon names no artist, so it keeps its text.
+    assert_eq!(lines[2].text, "Love: it hurts");
+    assert_eq!(lines[2].voice, Voice::Primary);
+}
+
+#[test]
+fn a_speaker_label_without_provider_artists_is_not_read() {
+    let raw = "[0,500]The Weeknd：(0,500)\n[1000,1000]I can't feel my face(1000,1000)";
+    let lines = timed_lines_from_raw(raw, &[]).unwrap();
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, "I can't feel my face");
+    assert_eq!(lines[0].voice, Voice::Primary);
 }

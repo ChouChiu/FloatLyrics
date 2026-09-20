@@ -21,15 +21,19 @@ import { advanceUiState, type UiState } from "./ui-store";
 if (!("MouseEvent" in globalThis)) {
   Object.assign(globalThis, { MouseEvent: class MouseEvent extends Event {} });
 }
+
 const { AppleMusicLyrics, LyricSlot, LyricsViewport } = await import("./app");
 const {
   addFontFamily,
+  addLyricsProvider,
   ControlCenter,
   FontPickerWindow,
   ManualSearchWindow,
   moveFontFamily,
+  moveLyricsProvider,
   OverlayShell,
   removeFontFamily,
+  removeLyricsProvider,
 } = await import("./shell");
 
 const style = {
@@ -108,7 +112,7 @@ describe("WebKit bridge", () => {
 
 describe("React application shell", () => {
   const config: AppConfig = {
-    general: { language: "en" },
+    general: { language: "en", mode: "floating" },
     window: {
       anchor: "bottom-center",
       remember_position: true,
@@ -135,6 +139,8 @@ describe("React application shell", () => {
       romanization_color: "#B8D8F0E6",
     },
     player: { preferred_players: ["spotify"], ignored_players: [] },
+    amll: { address: "localhost:11444" },
+    tray: { enabled: true },
   };
   const initial: UiState = {
     surface: null,
@@ -205,6 +211,64 @@ describe("React application shell", () => {
     expect(html).toContain(">Colors<");
   });
 
+  test("renders the integration page with mode, address, and tray controls", () => {
+    const strings = {
+      Integration: "Integration",
+      RunMode: "Run mode",
+      RunModeDescription: "The floating overlay and the AMLL sender cannot run at the same time",
+      RunModeFloating: "Floating overlay",
+      RunModeAmll: "AMLL WebSocket sender",
+      RunModeRestartHint: "Restart FloatLyrics to apply this change",
+      AmllAddress: "AMLL player address",
+      AmllAddressDescription: "Host and port",
+      TrayIcon: "System tray icon",
+      TrayIconDescription: "Show the icon",
+      ChangesSavedAutomatically: "Changes are saved automatically",
+    };
+    const bootstrapped = (incoming: AppConfig) =>
+      advanceUiState(initial, {
+        type: "bootstrap",
+        surface: "control-center",
+        config: incoming,
+        strings,
+        version: "1.2.0",
+        about: { dependencies: [], licenses: [] },
+        available_fonts: [],
+      });
+    const integration = advanceUiState(bootstrapped(config), {
+      type: "navigate",
+      page: "integration",
+    });
+
+    const html = renderToStaticMarkup(<ControlCenter state={integration} />);
+    expect(html).toContain("Run mode");
+    expect(html).toContain('value="localhost:11444"');
+    expect(html).toContain("disabled");
+    expect(html).toContain('role="switch"');
+    expect(html).toContain("Restart FloatLyrics to apply this change");
+
+    const amll = advanceUiState(
+      bootstrapped({ ...config, general: { language: "en", mode: "amll" } }),
+      { type: "navigate", page: "integration" },
+    );
+    const amllHtml = renderToStaticMarkup(<ControlCenter state={amll} />);
+    expect(amllHtml).not.toContain("disabled");
+  });
+
+  test("offers a quit action from the settings sidebar", () => {
+    const state = advanceUiState(initial, {
+      type: "bootstrap",
+      surface: "control-center",
+      config,
+      strings: { Quit: "Quit FloatLyrics" },
+      version: "1.2.0",
+      about: { dependencies: [], licenses: [] },
+      available_fonts: [],
+    });
+
+    expect(renderToStaticMarkup(<ControlCenter state={state} />)).toContain("Quit FloatLyrics");
+  });
+
   test("renders manual search as a standalone window without the settings sidebar", () => {
     let state = advanceUiState(initial, {
       type: "bootstrap",
@@ -243,6 +307,66 @@ describe("React application shell", () => {
     expect(html).toContain('class="manual-search-window"');
     expect(html).toContain('id="manual-search-title"');
     expect(html).not.toContain('class="sidebar"');
+  });
+
+  test("reorders and enables lyrics sources", () => {
+    expect(addLyricsProvider(["qq-music"], "kugou")).toEqual(["qq-music", "kugou"]);
+    expect(addLyricsProvider(["qq-music"], "qq-music")).toEqual(["qq-music"]);
+    expect(moveLyricsProvider(["qq-music", "kugou", "lrclib"], 2, -1)).toEqual([
+      "qq-music",
+      "lrclib",
+      "kugou",
+    ]);
+    expect(moveLyricsProvider(["qq-music", "kugou"], 0, -1)).toEqual(["qq-music", "kugou"]);
+    expect(removeLyricsProvider(["qq-music", "kugou", "lrclib"], 1)).toEqual([
+      "qq-music",
+      "lrclib",
+    ]);
+    expect(removeLyricsProvider(["qq-music"], 0)).toEqual(["qq-music"]);
+  });
+
+  test("renders the source order with the sources that are not enabled yet", () => {
+    let state = advanceUiState(initial, {
+      type: "bootstrap",
+      surface: "control-center",
+      config,
+      strings: {
+        General: "General",
+        Display: "Display",
+        LyricsSources: "Lyrics Sources",
+        About: "About",
+        SourcesTitle: "Lyrics Sources",
+        SourcesDescription: "Search online sources in order",
+        SearchPriority: "Search priority",
+        SearchPriorityDescription: "Search the sources in this order",
+        AvailableSources: "Add a source",
+        MoveSourceUp: "Move source up",
+        MoveSourceDown: "Move source down",
+        RemoveSource: "Remove source",
+        ProviderNameQqMusic: "QQ Music",
+        ProviderNameNetEase: "NetEase Cloud Music",
+        ProviderNameKugou: "Kugou Music",
+        ProviderNameLrclib: "LRCLIB",
+        ProviderNameSodaMusic: "Soda Music",
+      },
+      version: "1.1.2",
+      about: { dependencies: [], licenses: [] },
+      available_fonts: [],
+    });
+    state = advanceUiState(state, { type: "navigate", page: "sources" });
+
+    const html = renderToStaticMarkup(<ControlCenter state={state} />);
+    expect(html).toContain("Search priority");
+    // Both enabled sources are rows of the ordered list, in their stored order.
+    expect(html.indexOf("QQ Music")).toBeLessThan(html.indexOf("NetEase Cloud Music"));
+    expect(html).toContain('title="Move source down"');
+    expect(html).toContain('title="Remove source"');
+    // A source that is not enabled is offered instead of being listed.
+    expect(html).toContain("Add a source");
+    expect(html).toContain(">Kugou Music<");
+    // Only the enabled sources are rows of the list; the rest are offered.
+    expect(html.match(/QQ Music/g)?.length).toBe(1);
+    expect(html.match(/Kugou Music/g)?.length).toBe(1);
   });
 
   test("renders the original two-column font selection workflow", () => {
@@ -301,6 +425,11 @@ describe("AMLL conversion", () => {
     romanization: "hello",
     translation: "你好",
     background: "echo",
+    background_translation: "回声",
+    background_start_ms: 1_000,
+    background_end_ms: null,
+    background_syllables: [],
+    voice: "primary",
   };
 
   test("resolves missing line ends in document order", () => {
@@ -331,6 +460,47 @@ describe("AMLL conversion", () => {
       words: [{ word: "Hello", startTime: 1_000, endTime: 1_800 }],
     });
     expect(lines[1]).toMatchObject({ isBG: true, words: [{ word: "echo" }] });
+  });
+
+  test("attaches syllable readings to their own word", () => {
+    const document: LyricsDocument = {
+      revision: 1,
+      duration_ms: 4_000,
+      lines: [
+        {
+          ...line,
+          romanization: "annyeong segye",
+          syllables: [
+            { text: "안녕", start_ms: 1_000, end_ms: 1_500, romanization: "annyeong" },
+            { text: " ", start_ms: 1_500, end_ms: 1_600 },
+            { text: "세계", start_ms: 1_600, end_ms: 2_000, romanization: "segye" },
+          ],
+        },
+      ],
+    };
+    const lines = documentToAmllLines(document);
+
+    expect(lines[0]?.words.map((word) => word.romanWord)).toEqual(["annyeong", "", "segye"]);
+    // Per-word readings replace the line-level romanization in AMLL.
+    expect(lines[0]?.romanLyric).toBe("");
+  });
+
+  test("keeps the line-level romanization when no word has a reading", () => {
+    const document: LyricsDocument = {
+      revision: 1,
+      duration_ms: 4_000,
+      lines: [
+        {
+          ...line,
+          romanization: "konnichiha",
+          syllables: [{ text: "こんにちは", start_ms: 1_000, end_ms: 2_000 }],
+        },
+      ],
+    };
+    const lines = documentToAmllLines(document);
+
+    expect(lines[0]?.words[0]?.romanWord).toBe("");
+    expect(lines[0]?.romanLyric).toBe("konnichiha");
   });
 
   test("selects only the current primary line and its background vocal", () => {
@@ -469,6 +639,11 @@ describe("React markup", () => {
           romanization: "",
           translation: "",
           background: "",
+          background_translation: "",
+          background_start_ms: 0,
+          background_end_ms: null,
+          background_syllables: [],
+          voice: "primary",
         },
         {
           start_ms: 2_000,
@@ -478,6 +653,11 @@ describe("React markup", () => {
           romanization: "",
           translation: "",
           background: "",
+          background_translation: "",
+          background_start_ms: 0,
+          background_end_ms: null,
+          background_syllables: [],
+          voice: "primary",
         },
       ],
     };
@@ -511,6 +691,11 @@ describe("React markup", () => {
           romanization: "romanization",
           translation: "translation",
           background: "",
+          background_translation: "",
+          background_start_ms: 0,
+          background_end_ms: null,
+          background_syllables: [],
+          voice: "primary",
         },
       ],
     };

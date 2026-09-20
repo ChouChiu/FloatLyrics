@@ -7,15 +7,17 @@
 
 use std::{path::Path, rc::Rc, sync::mpsc};
 
-use crate::shared::runtime::LyricsRuntimeConfig;
+use crate::shared::{config::AmllConfig, runtime::LyricsRuntimeConfig};
 use anyhow::{Context, Result};
 
+mod amll;
 mod cache;
 mod controller;
 mod manual_search;
 mod model;
 pub mod mpris;
 
+pub(crate) use amll::AmllSender;
 pub(crate) use controller::{Controller, ControllerHandle, LyricsView};
 pub(crate) use manual_search::ManualSearchService;
 
@@ -41,13 +43,8 @@ impl Backend {
         sender: mpsc::Sender<mpris::PlayerWatcherEvent>,
         hint_sender: mpsc::Sender<mpris::PlayerLyricsHintEvent>,
         selection: mpris::PlayerSelection,
-    ) {
-        mpris::spawn_player_watcher_with_hints(
-            self.runtime.handle(),
-            sender,
-            hint_sender,
-            selection,
-        );
+    ) -> mpris::MediaControlHandle {
+        mpris::spawn_player_watcher(self.runtime.handle(), sender, hint_sender, selection)
     }
 
     pub(crate) fn controller(
@@ -69,5 +66,16 @@ impl Backend {
 
     pub(crate) fn manual_search(&self) -> ManualSearchService {
         ManualSearchService::new(self.runtime.handle().clone(), self.cache.service())
+    }
+
+    /// Creates the AMLL WebSocket sender used instead of the floating overlay.
+    pub(crate) fn amll_sender(&self, config: &AmllConfig) -> Rc<AmllSender> {
+        Rc::new(AmllSender::new(self.runtime.handle(), &config.address))
+    }
+
+    /// Returns a handle for frontend work that must run on this backend's
+    /// asynchronous runtime, such as the system tray service.
+    pub(crate) fn runtime(&self) -> tokio::runtime::Handle {
+        self.runtime.handle().clone()
     }
 }

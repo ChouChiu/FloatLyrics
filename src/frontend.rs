@@ -14,23 +14,35 @@ mod manual_search;
 mod manual_search_window;
 mod settings;
 mod style;
+mod tray;
 mod view;
 
 use anyhow::Result;
 use gtk::prelude::*;
 use relm4::{ComponentParts, ComponentSender, MessageBroker, RelmApp, SimpleComponent};
 use serde::Deserialize;
-use std::{ffi::OsStr, rc::Rc, sync::mpsc};
+use std::{
+    ffi::OsStr,
+    rc::Rc,
+    sync::{Arc, mpsc},
+    time::Duration,
+};
 
 use crate::{
-    backend::{self},
+    backend::{
+        self,
+        mpris::{MediaCommand, MediaControlHandle},
+    },
     shared::{
-        config::{AppConfig, WindowPosition},
+        config::{AppConfig, AppMode, WindowPosition},
         presentation::{LyricsDocument, LyricsFrame},
         runtime::LyricsRuntimeConfig,
     },
 };
 use floatlyrics_core::{i18n::I18n, paths::AppPaths};
+
+/// Controller pump interval used when no overlay frame clock drives the app.
+const TICK_INTERVAL_MS: u64 = 100;
 
 static APP_BROKER: MessageBroker<AppMsg> = MessageBroker::new();
 
@@ -43,7 +55,7 @@ struct AppInit {
 struct AppModel {
     config: AppConfig,
     i18n: I18n,
-    overlay: view::OverlayView,
+    overlay: Option<view::OverlayView>,
     control_center: control_center::ControlCenterView,
     font_picker: font_picker_window::FontPickerView,
     manual_search: manual_search::ManualSearchCoordinator,
@@ -51,16 +63,20 @@ struct AppModel {
     config_saver: settings::ConfigSaveService,
     save_revision: u64,
     controller: backend::Controller,
+    media_control: MediaControlHandle,
+    /// Playback requests sent by the AMLL listener, drained on every tick.
+    remote_commands: Option<tokio::sync::mpsc::UnboundedReceiver<MediaCommand>>,
     song_info: String,
     track_offset_ms: i64,
     lyrics: LyricsPresentation,
     lyrics_document: Option<LyricsDocument>,
+    tray: Option<tray::TrayHandle>,
     _backend: backend::Backend,
 }
 
 #[derive(Debug, Clone)]
 enum LyricsPresentation {
-    Content(LyricsFrame),
+    Content(Arc<LyricsFrame>),
     Status(floatlyrics_core::i18n::Text),
 }
 
@@ -70,7 +86,7 @@ enum AppMsg {
     SetSongInfo(String),
     SetTrackOffset(i64),
     SetLyricsDocument(LyricsDocument),
-    ShowLyrics(LyricsFrame),
+    ShowLyrics(Arc<LyricsFrame>),
     ShowStatus(floatlyrics_core::i18n::Text),
     OpenSettings,
     OpenManualSearch,
@@ -94,6 +110,7 @@ enum UiAction {
     Quit,
     AdjustTrackOffset { delta_ms: i64 },
     ResetTrackOffset,
+    ReloadLyrics,
     SaveConfig { config: Box<AppConfig> },
     SearchLyrics { title: String, artist: String },
     PreviewLyrics { index: usize },
@@ -145,16 +162,24 @@ impl SimpleComponent for AppModel {
             config_saver,
         } = init;
         let i18n = I18n::new(config.general.language);
-        let overlay = view::build(
-            &root,
-            &config,
-            i18n.clone(),
-            Rc::new(serde_json::json!({ "dependencies": [], "licenses": [] })),
-            sender.input_sender().clone(),
-        );
+        let overlay = (config.general.mode == AppMode::Floating).then(|| {
+            view::build(
+                &root,
+                &config,
+                i18n.clone(),
+                Rc::new(serde_json::json!({ "dependencies": [], "licenses": [] })),
+                sender.input_sender().clone(),
+            )
+        });
+        let amll_sender =
+            (config.general.mode == AppMode::Amll).then(|| backend.amll_sender(&config.amll));
+        let remote_commands = amll_sender
+            .as_ref()
+            .and_then(|sender| sender.take_media_commands());
+        let tray = tray::spawn(&config, &backend.runtime());
         let (player_sender, player_receiver) = mpsc::channel();
         let (player_hint_sender, player_hint_receiver) = mpsc::channel();
-        backend.spawn_player_watcher(
+        let media_control = backend.spawn_player_watcher(
             player_sender,
             player_hint_sender,
             backend::mpris::PlayerSelection {
@@ -164,10 +189,14 @@ impl SimpleComponent for AppModel {
             },
         );
         let controller_config = LyricsRuntimeConfig::from(&config);
+        let lyrics_view: Rc<dyn backend::LyricsView> = match &amll_sender {
+            Some(amll_sender) => amll_sender.clone(),
+            None => Rc::new(view::OverlaySender::new(sender.input_sender().clone())),
+        };
         let controller = backend.controller(
             player_receiver,
             player_hint_receiver,
-            Rc::new(view::OverlaySender::new(sender.input_sender().clone())),
+            lyrics_view,
             controller_config,
         );
 
@@ -185,12 +214,23 @@ impl SimpleComponent for AppModel {
         let font_picker =
             font_picker_window::FontPickerView::new(&config, sender.input_sender().clone());
 
-        {
-            let input = sender.input_sender().clone();
-            overlay.tick_widget().add_tick_callback(move |_, _| {
-                let _ = input.send(AppMsg::Tick);
-                gtk::glib::ControlFlow::Continue
-            });
+        match &overlay {
+            Some(overlay) => {
+                let input = sender.input_sender().clone();
+                overlay.tick_widget().add_tick_callback(move |_, _| {
+                    let _ = input.send(AppMsg::Tick);
+                    gtk::glib::ControlFlow::Continue
+                });
+            }
+            None => {
+                // The overlay provides the frame clock; without it the sender
+                // mode needs its own pump for MPRIS events and progress.
+                let input = sender.input_sender().clone();
+                gtk::glib::timeout_add_local(Duration::from_millis(TICK_INTERVAL_MS), move || {
+                    let _ = input.send(AppMsg::Tick);
+                    gtk::glib::ControlFlow::Continue
+                });
+            }
         }
 
         let model = Self {
@@ -204,10 +244,13 @@ impl SimpleComponent for AppModel {
             config_saver,
             save_revision: 0,
             controller,
+            media_control,
+            remote_commands,
             song_info: "FloatLyrics".to_string(),
             track_offset_ms: 0,
             lyrics: LyricsPresentation::Status(floatlyrics_core::i18n::Text::OpenPlayer),
             lyrics_document: None,
+            tray,
             _backend: backend,
         };
         let widgets = view_output!();
@@ -216,7 +259,10 @@ impl SimpleComponent for AppModel {
 
     fn update(&mut self, message: Self::Input, sender: ComponentSender<Self>) {
         match message {
-            AppMsg::Tick => self.controller.tick(),
+            AppMsg::Tick => {
+                self.controller.tick();
+                self.drain_media_commands();
+            }
             AppMsg::SetSongInfo(value) => self.song_info = value,
             AppMsg::SetTrackOffset(value) => self.track_offset_ms = value,
             AppMsg::SetLyricsDocument(document) => self.lyrics_document = Some(document),
@@ -253,16 +299,19 @@ impl SimpleComponent for AppModel {
     }
 
     fn post_view() {
-        self.overlay.set_song_info(&self.song_info);
-        self.overlay.set_track_offset(self.track_offset_ms);
+        let Some(overlay) = &self.overlay else {
+            return;
+        };
+        overlay.set_song_info(&self.song_info);
+        overlay.set_track_offset(self.track_offset_ms);
         if let Some(document) = &self.lyrics_document {
-            self.overlay.set_lyrics_document(document);
+            overlay.set_lyrics_document(document);
         }
         match &self.lyrics {
             LyricsPresentation::Content(frame) => {
-                self.overlay.show_lyrics(frame.clone());
+                overlay.show_lyrics(Arc::clone(frame));
             }
-            LyricsPresentation::Status(key) => self.overlay.show_status(*key),
+            LyricsPresentation::Status(key) => overlay.show_status(*key),
         }
     }
 }
@@ -286,6 +335,7 @@ impl AppModel {
                 self.controller.handle().adjust_track_offset(delta_ms)
             }
             UiAction::ResetTrackOffset => self.controller.handle().reset_track_offset(),
+            UiAction::ReloadLyrics => self.controller.handle().reload_lyrics(),
             UiAction::SaveConfig { config } => self.save_config(*config, sender),
             UiAction::SearchLyrics { title, artist } => {
                 self.manual_search.search(title, artist, sender);
@@ -311,6 +361,16 @@ impl AppModel {
                     tracing::warn!(%error, %url, "failed to open project link");
                 }
             }
+        }
+    }
+
+    /// Forwards playback requests that arrived over the AMLL WebSocket.
+    fn drain_media_commands(&mut self) {
+        let Some(receiver) = self.remote_commands.as_mut() else {
+            return;
+        };
+        while let Ok(command) = receiver.try_recv() {
+            self.media_control.send(command);
         }
     }
 
@@ -354,8 +414,13 @@ impl AppModel {
 
     fn apply_config(&mut self, next_config: AppConfig) {
         let reload_lyrics = should_reload_lyrics(&self.config, &next_config);
-        self.overlay.apply_config(&next_config);
+        if let Some(overlay) = &self.overlay {
+            overlay.apply_config(&next_config);
+        }
         self.i18n.set_language(next_config.general.language);
+        if let Some(tray) = &self.tray {
+            tray.set_language(next_config.general.language);
+        }
         self.controller
             .update_config(LyricsRuntimeConfig::from(&next_config));
         self.config = next_config;
@@ -411,6 +476,7 @@ pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
     });
 
     RelmApp::from_app(app)
+        .visible_on_activate(config.general.mode == AppMode::Floating)
         .with_broker(&APP_BROKER)
         .run::<AppModel>(AppInit {
             config,

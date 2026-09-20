@@ -72,6 +72,7 @@ pub(in crate::frontend) enum UiSurface {
 pub(in crate::frontend) enum ControlPage {
     General,
     Display,
+    Integration,
     Sources,
     About,
 }

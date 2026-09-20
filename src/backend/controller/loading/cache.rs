@@ -8,7 +8,7 @@ use std::sync::mpsc;
 use floatlyrics_core::i18n::{Message, Text};
 use floatlyrics_lyrics::{
     cache::CachedLyrics,
-    lyrics::{LyricsProvider, SearchPlan, timed_lines_from_raw},
+    lyrics::{LyricsProvider, SearchPlan, segment_lines_into_words, timed_lines_from_raw},
 };
 
 use crate::{backend::model::LyricsDisplayState, shared::runtime::LyricsRuntimeConfig};
@@ -28,7 +28,7 @@ pub(super) fn lyrics_state_from_cached(
     runtime: &tokio::runtime::Handle,
     romanization_sender: &mpsc::Sender<RomanizationEvent>,
 ) -> LyricsDisplayState {
-    let lines = match timed_lines_from_raw(&cached.raw_lyrics) {
+    let mut lines = match timed_lines_from_raw(&cached.raw_lyrics, &cached.artists) {
         Ok(lines) => lines,
         Err(error) => {
             return LyricsDisplayState {
@@ -38,6 +38,9 @@ pub(super) fn lyrics_state_from_cached(
             };
         }
     };
+    // Split every timed unit into animatable words before the readings are
+    // generated, so per-word readings follow the tokens the view renders.
+    segment_lines_into_words(&mut lines);
 
     if config.show_romanization {
         spawn_local_romanization(
@@ -59,6 +62,7 @@ pub(super) fn lyrics_state_from_cached(
         track_fingerprint: Some(fingerprint),
         lines,
         status_message,
+        credited_artists: cached.artists.clone(),
     }
 }
 

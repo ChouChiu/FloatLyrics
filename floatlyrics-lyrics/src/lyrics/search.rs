@@ -13,6 +13,7 @@ mod ranking;
 
 use anyhow::Result;
 use floatlyrics_core::track::TrackMetadata;
+use lyrics_helper::SearchError;
 
 use super::model::{FetchedLyrics, LyricsCandidate, LyricsLookupHint, LyricsProvider};
 use provider::{
@@ -26,18 +27,33 @@ pub use ranking::SearchPlan;
 
 /// Searches configured providers and returns ranked, deduplicated candidates.
 ///
-/// At most twelve candidates are returned.
+/// At most twelve candidates are returned. A provider that reports a failure is
+/// skipped so the remaining ones still answer, and the failure is returned only
+/// when no provider produced a candidate.
 ///
 /// # Errors
-/// Returns an error when a provider search reports a recoverable failure.
+/// Returns an error when every provider failed and none returned a candidate.
 pub async fn search_lyrics_candidates(
     track: &TrackMetadata,
     provider_order: &[LyricsProvider],
 ) -> Result<Vec<LyricsCandidate>> {
     let metadata = lyrics_helper_metadata(track);
     let mut candidates = Vec::new();
+    let mut failure: Option<SearchError> = None;
     for provider in provider_order {
-        candidates.extend(search_provider_candidates(*provider, &metadata).await);
+        match search_provider_candidates(*provider, &metadata).await {
+            Ok(results) => candidates.extend(results),
+            Err(error) => {
+                tracing::warn!(provider = provider.as_str(), %error, "provider search failed");
+                failure = Some(error);
+            }
+        }
+    }
+
+    if candidates.is_empty()
+        && let Some(failure) = failure
+    {
+        return Err(failure.into());
     }
 
     Ok(finalize_candidates(candidates))
@@ -48,12 +64,12 @@ pub async fn search_lyrics_candidates(
 /// Empty provider responses are returned as `Ok(None)`.
 ///
 /// # Errors
-/// Returns an error when a provider reports a recoverable download failure.
+/// Returns an error when the provider reports a download failure.
 pub async fn fetch_candidate_lyrics(candidate: &LyricsCandidate) -> Result<Option<FetchedLyrics>> {
-    let raw_lyrics = fetch_candidate_raw_lyrics(candidate).await;
-    let Some(raw_lyrics) = raw_lyrics.map(|value| value.trim().to_string()) else {
+    let Some(raw_lyrics) = fetch_candidate_raw_lyrics(candidate).await? else {
         return Ok(None);
     };
+    let raw_lyrics = raw_lyrics.trim().to_string();
     if raw_lyrics.is_empty() {
         return Ok(None);
     }
@@ -83,16 +99,18 @@ pub async fn search_best_lyrics(
 ///
 /// Hints for providers absent from `provider_order` are ignored. A missing or
 /// stale identifier is recoverable and falls back to the same metadata search
-/// used by [`search_best_lyrics`].
+/// used by [`search_best_lyrics`], and so is a provider that reports a failure:
+/// the next provider in the order is asked instead.
 ///
 /// # Errors
-/// Returns an error when a provider search reports a recoverable failure.
+/// Returns an error when no provider returned lyrics and at least one failed.
 pub async fn search_best_lyrics_with_hint(
     track: &TrackMetadata,
     provider_order: &[LyricsProvider],
     hint: Option<&LyricsLookupHint>,
 ) -> Result<Option<FetchedLyrics>> {
     let metadata = lyrics_helper_metadata(track);
+    let mut failure: Option<SearchError> = None;
 
     for provider in provider_order {
         if let Some(hint) = hint
@@ -101,12 +119,20 @@ pub async fn search_best_lyrics_with_hint(
         {
             return Ok(Some(fetched));
         }
-        if let Some(fetched) = search_provider_best(*provider, &metadata).await? {
-            return Ok(Some(fetched));
+        match search_provider_best(*provider, &metadata).await {
+            Ok(Some(fetched)) => return Ok(Some(fetched)),
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(provider = provider.as_str(), %error, "provider search failed");
+                failure = Some(error);
+            }
         }
     }
 
-    Ok(None)
+    match failure {
+        Some(failure) => Err(failure.into()),
+        None => Ok(None),
+    }
 }
 
 #[cfg(test)]

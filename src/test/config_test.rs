@@ -5,7 +5,7 @@ use std::fs;
 fn default_provider_order_matches_plan() {
     assert_eq!(
         AppConfig::default().lyrics.provider_order,
-        vec![LyricsProvider::QqMusic, LyricsProvider::NetEase]
+        LyricsProvider::default_order()
     );
 }
 
@@ -408,6 +408,121 @@ fn chinese_romanization_mode_round_trips_in_config() {
 
     assert!(serialized.contains("chinese_romanization = \"cantonese-jyutping-no-tones\""));
     assert_eq!(restored, config);
+}
+
+#[test]
+fn configuration_without_integration_sections_recovers_and_keeps_current_values() {
+    let previous_format = r##"
+[general]
+language = "zh-TW"
+
+[window]
+anchor = "bottom-center"
+margin = 48
+width = 420
+opacity = 0.5
+bottom_panel_height = 0
+
+[lyrics]
+offset_ms = 120
+provider_order = ["netease", "qq-music"]
+show_translation = false
+show_romanization = true
+chinese_romanization = "cantonese-jyutping"
+font_order = ["Noto Sans CJK SC"]
+lyric_font_size = 30
+translation_font_size = 14
+romanization_font_size = 13
+played_color = "#11223344"
+unplayed_color = "#55667788"
+translation_color = "#99AABBCC"
+romanization_color = "#DDEEFF00"
+
+[player]
+preferred_players = ["spotify"]
+ignored_players = []
+"##;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+    fs::write(&path, previous_format).unwrap();
+
+    let config = AppConfig::load_or_default(&path).unwrap();
+
+    assert_eq!(config.general.language, Language::TraditionalChinese);
+    assert_eq!(config.window.width, 420);
+    assert_eq!(config.lyrics.offset_ms, 120);
+    assert_eq!(config.general.mode, AppMode::Floating);
+    assert_eq!(config.amll.address, "localhost:11444");
+    assert!(config.tray.enabled);
+    assert!(incompatible_backup(&path).exists());
+
+    let saved = fs::read_to_string(&path).unwrap();
+    assert!(saved.contains("mode = \"floating\""));
+    assert!(saved.contains("[amll]"));
+    assert!(saved.contains("[tray]"));
+}
+
+#[test]
+fn unusable_amll_address_falls_back_to_the_local_listener() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+    let mut value = toml::Value::try_from(AppConfig::default()).unwrap();
+    value["amll"]["address"] = toml::Value::String("not-an-address".to_string());
+    value["general"]["mode"] = toml::Value::String("amll".to_string());
+    fs::write(&path, toml::to_string(&value).unwrap()).unwrap();
+
+    let recovered = AppConfig::load_or_default(&path).unwrap();
+
+    assert_eq!(recovered.amll.address, AppConfig::default().amll.address);
+    assert_eq!(
+        recovered.general.mode,
+        AppMode::Amll,
+        "a valid mode survives beside an invalid address"
+    );
+}
+
+#[test]
+fn amll_mode_and_tray_preferences_round_trip_in_config() {
+    let mut config = AppConfig::default();
+    config.general.mode = AppMode::Amll;
+    config.amll.address = "192.168.1.20:11445".to_string();
+    config.tray.enabled = false;
+
+    let serialized = toml::to_string(&config).unwrap();
+    let restored: AppConfig = toml::from_str(&serialized).unwrap();
+
+    assert!(serialized.contains("mode = \"amll\""));
+    assert_eq!(restored, config);
+}
+
+#[test]
+fn invalid_listener_addresses_are_rejected_by_validation() {
+    for address in [
+        "",
+        "11444",
+        "localhost",
+        "127.0.0.1:0",
+        "127.0.0.1:70000",
+        "host:port",
+    ] {
+        let mut config = AppConfig::default();
+        config.amll.address = address.to_string();
+        assert!(
+            config.validate().is_err(),
+            "{address:?} must not be accepted as an AMLL listener address"
+        );
+    }
+
+    for address in [
+        "127.0.0.1:11444",
+        "localhost:1",
+        "[::1]:11444",
+        "media.local:11444",
+    ] {
+        let mut config = AppConfig::default();
+        config.amll.address = address.to_string();
+        assert!(config.validate().is_ok(), "{address:?} must be accepted");
+    }
 }
 
 fn incompatible_backup(path: &std::path::Path) -> std::path::PathBuf {

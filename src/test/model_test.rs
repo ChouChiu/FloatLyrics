@@ -1,7 +1,9 @@
 use super::*;
+
 use crate::backend::mpris::PlayerState;
 use crate::shared::config::AppConfig;
-use floatlyrics_lyrics::lyrics::TimedSyllable;
+use crate::shared::presentation::PlayerControl;
+use floatlyrics_lyrics::lyrics::{BackgroundVocal, TimedSyllable, Voice};
 use std::time::Duration;
 
 #[test]
@@ -87,6 +89,8 @@ fn romanization_is_shown_with_translation_and_karaoke() {
         start_ms: 1_000,
         end_ms: 2_000,
         text: "Hello".to_string(),
+        romanization: String::new(),
+        furigana: String::new(),
     });
     let mut config = runtime_config();
     config.show_romanization = true;
@@ -148,7 +152,13 @@ fn lyrics_document_applies_secondary_text_preferences_and_preserves_background()
     let mut line = test_line();
     line.translation = Some("你好".to_string());
     line.romanization = Some("nǐ hǎo".to_string());
-    line.background = Some(" echo ".to_string());
+    line.background = Some(BackgroundVocal {
+        text: " echo ".to_string(),
+        translation: Some(" 回声 ".to_string()),
+        start_ms: 1_200,
+        end_ms: Some(1_500),
+        syllables: Vec::new(),
+    });
     let state = LyricsDisplayState {
         lines: vec![line],
         ..LyricsDisplayState::default()
@@ -160,6 +170,7 @@ fn lyrics_document_applies_secondary_text_preferences_and_preserves_background()
     assert_eq!(hidden.lines[0].translation, "你好");
     assert!(hidden.lines[0].romanization.is_empty());
     assert_eq!(hidden.lines[0].background, "echo");
+    assert_eq!(hidden.lines[0].background_translation, "回声");
 
     let mut config = runtime_config();
     config.show_translation = false;
@@ -195,12 +206,14 @@ fn player_state_with_status(
         bus_name: "org.mpris.MediaPlayer2.spotify".to_string(),
         playback_status,
         position_ms: Some(position_ms),
+        control: PlayerControl::default(),
         track: Some(TrackMetadata {
             title: title.to_string(),
             artists: vec!["Artist".to_string()],
             album: None,
             duration_ms: Some(20_000),
             mpris_track_id: None,
+            art_url: None,
         }),
     }
 }
@@ -219,5 +232,6 @@ fn test_line() -> TimedLine {
         romanization: None,
         romanization_segments: Vec::new(),
         background: None,
+        voice: Voice::Primary,
     }
 }

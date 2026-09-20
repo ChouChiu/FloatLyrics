@@ -27,6 +27,10 @@ pub struct AppConfig {
     /// MPRIS player discovery and selection preferences.
     #[serde(alias = "spotify")]
     pub player: PlayerConfig,
+    /// AMLL WebSocket sender preferences.
+    pub amll: AmllConfig,
+    /// System tray preferences.
+    pub tray: TrayConfig,
 }
 
 impl AppConfig {
@@ -41,6 +45,53 @@ impl AppConfig {
 pub struct GeneralConfig {
     /// Active user-interface language.
     pub language: Language,
+    /// Run mode selected for this installation.
+    pub mode: AppMode,
+}
+
+/// Mutually exclusive application run modes.
+///
+/// The floating overlay and the AMLL WebSocket sender present the same
+/// playback state in two different ways, so only one of them can own the
+/// lyrics output at a time.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AppMode {
+    /// Draw lyrics in the GTK layer-shell overlay.
+    #[default]
+    Floating,
+    /// Forward playback state and lyrics to an AMLL WebSocket listener.
+    Amll,
+}
+
+/// AMLL WebSocket sender preferences.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct AmllConfig {
+    /// Host and port of the AMLL player listener, for example `localhost:11444`.
+    pub address: String,
+}
+
+impl Default for AmllConfig {
+    fn default() -> Self {
+        Self {
+            address: default_amll_address(),
+        }
+    }
+}
+
+/// System tray preferences.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct TrayConfig {
+    /// Whether the StatusNotifierItem tray icon is published.
+    pub enabled: bool,
+}
+
+impl Default for TrayConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
 }
 
 /// Overlay window geometry and appearance preferences.
@@ -228,6 +279,10 @@ impl PlayerConfig {
             self.preferred_players = vec![prefix];
         }
     }
+}
+
+fn default_amll_address() -> String {
+    "localhost:11444".to_string()
 }
 
 fn default_anchor() -> WindowAnchor {

@@ -11,6 +11,7 @@ use std::{
     sync::mpsc::Sender,
     time::{Duration, Instant},
 };
+use tokio::sync::mpsc;
 use zbus::{
     Connection, Proxy,
     fdo::{DBusProxy, PropertiesProxy},
@@ -18,8 +19,11 @@ use zbus::{
 };
 use zvariant::OwnedValue;
 
+use crate::shared::presentation::PlayerControl;
+
 use super::{
     compat::lyrics_lookup_hint,
+    control::{self, ControlContext, MediaCommand, MediaControlHandle},
     model::{
         PlaybackStatus, PlayerState, PlayerWatcherEvent, metadata_from_mpris, source_url_from_mpris,
     },
@@ -28,8 +32,6 @@ use super::{
 
 /// Prefix shared by all standard MPRIS well-known bus names.
 pub const MPRIS_BUS_PREFIX: &str = "org.mpris.MediaPlayer2.";
-/// Default D-Bus well-known-name prefix used by Spotify for Linux.
-pub const SPOTIFY_MPRIS_PREFIX: &str = "org.mpris.MediaPlayer2.spotify";
 const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
 const ROOT_IFACE: &str = "org.mpris.MediaPlayer2";
 const PLAYER_IFACE: &str = "org.mpris.MediaPlayer2.Player";
@@ -78,19 +80,6 @@ struct PlayerObservation {
     lyrics_hint: Option<LyricsLookupHint>,
 }
 
-/// Returns whether `name` is the Spotify MPRIS name or one of its instances.
-pub fn is_spotify_mpris_name(name: &str) -> bool {
-    is_mpris_name_with_prefix(name, SPOTIFY_MPRIS_PREFIX)
-}
-
-/// Lists Spotify MPRIS instances currently registered on `connection`.
-///
-/// # Errors
-/// Returns a D-Bus error when names cannot be queried.
-pub async fn spotify_mpris_names(connection: &Connection) -> zbus::Result<Vec<String>> {
-    mpris_names_with_prefix(connection, SPOTIFY_MPRIS_PREFIX).await
-}
-
 /// Lists all standard MPRIS player names currently registered on `connection`.
 ///
 /// # Errors
@@ -108,17 +97,6 @@ pub async fn mpris_player_names(connection: &Connection) -> zbus::Result<Vec<Str
         .collect())
 }
 
-async fn mpris_names_with_prefix(
-    connection: &Connection,
-    prefix: &str,
-) -> zbus::Result<Vec<String>> {
-    Ok(mpris_player_names(connection)
-        .await?
-        .into_iter()
-        .filter(|name| is_mpris_name_with_prefix(name, prefix))
-        .collect())
-}
-
 fn is_mpris_name_with_prefix(name: &str, prefix: &str) -> bool {
     name == prefix
         || name
@@ -126,66 +104,34 @@ fn is_mpris_name_with_prefix(name: &str, prefix: &str) -> bool {
             .is_some_and(|suffix| suffix.starts_with('.'))
 }
 
-/// Spawns a watcher that automatically follows the most likely active MPRIS player.
+/// Spawns a watcher that automatically follows the most likely active MPRIS
+/// player.
 ///
 /// Events are delivered on `sender`; fatal background errors become
-/// [`PlayerWatcherEvent::Error`].
-pub fn spawn_player_watcher(
-    runtime: &tokio::runtime::Handle,
-    sender: Sender<PlayerWatcherEvent>,
-    selection: PlayerSelection,
-) {
-    spawn_player_watcher_impl(runtime, sender, None, selection);
-}
-
-pub(crate) fn spawn_player_watcher_with_hints(
+/// [`PlayerWatcherEvent::Error`]. Player hints inferred from exact metadata are
+/// delivered on `hint_sender`.
+pub(crate) fn spawn_player_watcher(
     runtime: &tokio::runtime::Handle,
     sender: Sender<PlayerWatcherEvent>,
     hint_sender: Sender<PlayerLyricsHintEvent>,
     selection: PlayerSelection,
-) {
-    spawn_player_watcher_impl(runtime, sender, Some(hint_sender), selection);
-}
-
-fn spawn_player_watcher_impl(
-    runtime: &tokio::runtime::Handle,
-    sender: Sender<PlayerWatcherEvent>,
-    hint_sender: Option<Sender<PlayerLyricsHintEvent>>,
-    selection: PlayerSelection,
-) {
+) -> MediaControlHandle {
+    let (commands, receiver) = mpsc::unbounded_channel();
     runtime.spawn(async move {
-        if let Err(error) = watch_players(sender.clone(), hint_sender.as_ref(), &selection).await {
+        if let Err(error) =
+            watch_players(sender.clone(), &hint_sender, &selection, Some(receiver)).await
+        {
             let _ = sender.send(PlayerWatcherEvent::Error(error.to_string()));
         }
     });
-}
-
-/// Spawns an MPRIS watcher using [`SPOTIFY_MPRIS_PREFIX`].
-pub fn spawn_spotify_watcher(runtime: &tokio::runtime::Handle, sender: Sender<PlayerWatcherEvent>) {
-    spawn_spotify_watcher_with_prefix(runtime, sender, SPOTIFY_MPRIS_PREFIX.to_string());
-}
-
-/// Spawns an MPRIS watcher restricted to player names matching `mpris_prefix`.
-pub fn spawn_spotify_watcher_with_prefix(
-    runtime: &tokio::runtime::Handle,
-    sender: Sender<PlayerWatcherEvent>,
-    mpris_prefix: String,
-) {
-    spawn_player_watcher(
-        runtime,
-        sender,
-        PlayerSelection {
-            preferred_players: vec![mpris_prefix.clone()],
-            ignored_players: Vec::new(),
-            allowed_bus_prefixes: vec![mpris_prefix],
-        },
-    );
+    MediaControlHandle::new(commands)
 }
 
 async fn watch_players(
     sender: Sender<PlayerWatcherEvent>,
-    hint_sender: Option<&Sender<PlayerLyricsHintEvent>>,
+    hint_sender: &Sender<PlayerLyricsHintEvent>,
     selection: &PlayerSelection,
+    mut commands: Option<mpsc::UnboundedReceiver<MediaCommand>>,
 ) -> Result<()> {
     let connection = Connection::session()
         .await
@@ -206,7 +152,16 @@ async fn watch_players(
         };
 
         disconnected_announced = false;
-        match watch_player(&connection, bus_name, &sender, hint_sender, selection).await {
+        match watch_player(
+            &connection,
+            bus_name,
+            &sender,
+            hint_sender,
+            selection,
+            &mut commands,
+        )
+        .await
+        {
             Ok(PlayerWatchExit::Switch) => {}
             Ok(PlayerWatchExit::Disconnected) => {
                 let _ = sender.send(PlayerWatcherEvent::Disconnected);
@@ -335,8 +290,9 @@ async fn watch_player(
     connection: &Connection,
     bus_name: String,
     sender: &Sender<PlayerWatcherEvent>,
-    hint_sender: Option<&Sender<PlayerLyricsHintEvent>>,
+    hint_sender: &Sender<PlayerLyricsHintEvent>,
     selection: &PlayerSelection,
+    commands: &mut Option<mpsc::UnboundedReceiver<MediaCommand>>,
 ) -> Result<PlayerWatchExit> {
     let player = player_proxy(connection, &bus_name).await?;
     let properties = PropertiesProxy::builder(connection)
@@ -348,7 +304,11 @@ async fn watch_player(
     let mut seeked = player.receive_signal("Seeked").await?;
     let identity = player_identity(connection, &bus_name).await;
 
-    let observation = read_player_state(&player, &bus_name, &identity).await?;
+    let mut control = control::read_player_control(&player).await;
+    let observation = read_player_state(&player, &bus_name, &identity, &control).await?;
+    // Identity of the observed track. The 250 ms position poll reuses it instead
+    // of reading the metadata and re-deriving it four times a second.
+    let mut track_identity = player_track_identity(&observation.state);
     let _ = sender.send(PlayerWatcherEvent::Connected(observation.state.clone()));
     send_hint(hint_sender, &observation);
 
@@ -364,6 +324,22 @@ async fn watch_player(
 
     loop {
         tokio::select! {
+            command = next_command(commands) => {
+                let Some(command) = command else {
+                    // Every control handle is gone; stop watching the queue.
+                    *commands = None;
+                    continue;
+                };
+                let observation = read_player_state(&player, &bus_name, &identity, &control).await
+                    .context("reading the player before applying a control command")?;
+                let context = control_context(&observation.state);
+                match control::apply(&player, command, &context).await {
+                    Ok(()) => tracing::debug!(?command, "applied an MPRIS control command"),
+                    Err(error) => {
+                        tracing::debug!(%error, ?command, "MPRIS control command was not applied");
+                    }
+                }
+            }
             changed = changes.next() => {
                 let Some(changed) = changed else {
                     return Ok(PlayerWatchExit::Disconnected);
@@ -376,13 +352,24 @@ async fn watch_player(
 
                 let changed_properties = args.changed_properties();
                 let invalidated_properties = args.invalidated_properties();
-                let player_changed = ["Metadata", "PlaybackStatus", "Position"].iter().any(|property| {
-                    changed_properties.contains_key(*property)
-                        || invalidated_properties.contains(property)
-                });
+                let was_changed = |property: &str| {
+                    changed_properties.contains_key(property)
+                        || invalidated_properties.contains(&property)
+                };
+                let control_changed = control::CONTROL_PROPERTIES
+                    .iter()
+                    .any(|property| was_changed(property));
+                let player_changed = ["Metadata", "PlaybackStatus", "Position"]
+                    .iter()
+                    .any(|property| was_changed(property));
 
-                if player_changed {
-                    let observation = read_player_state(&player, &bus_name, &identity).await?;
+                if control_changed || player_changed {
+                    if control_changed {
+                        control = control::read_player_control(&player).await;
+                    }
+                    let observation =
+                        read_player_state(&player, &bus_name, &identity, &control).await?;
+                    track_identity = player_track_identity(&observation.state);
                     let _ = sender.send(PlayerWatcherEvent::Updated(observation.state.clone()));
                     send_hint(hint_sender, &observation);
                 }
@@ -393,7 +380,9 @@ async fn watch_player(
                 };
 
                 if let Some(position_ms) = seeked_position_ms(&signal) {
-                    let mut observation = read_player_state(&player, &bus_name, &identity).await?;
+                    let mut observation =
+                        read_player_state(&player, &bus_name, &identity, &control).await?;
+                    track_identity = player_track_identity(&observation.state);
                     observation.state.position_ms = Some(position_ms);
                     let _ = sender.send(PlayerWatcherEvent::Updated(observation.state.clone()));
                     send_hint(hint_sender, &observation);
@@ -401,12 +390,10 @@ async fn watch_player(
             }
             _ = position_poll.tick() => {
                 if let Some(position_ms) = read_player_position(&player).await {
-                    let sampled_at = Instant::now();
-                    let observation = read_player_state(&player, &bus_name, &identity).await?;
                     let _ = sender.send(PlayerWatcherEvent::PositionUpdated {
-                        track_identity: player_track_identity(&observation.state),
+                        track_identity: track_identity.clone(),
                         position_ms,
-                        sampled_at,
+                        sampled_at: Instant::now(),
                     });
                 }
             }
@@ -420,8 +407,10 @@ async fn watch_player(
                 }
             }
             _ = health_check.tick() => {
-                match read_player_state(&player, &bus_name, &identity).await {
+                control = control::read_player_control(&player).await;
+                match read_player_state(&player, &bus_name, &identity, &control).await {
                     Ok(observation) => {
+                        track_identity = player_track_identity(&observation.state);
                         let _ = sender.send(PlayerWatcherEvent::Updated(observation.state.clone()));
                         send_hint(hint_sender, &observation);
                     }
@@ -429,6 +418,31 @@ async fn watch_player(
                 }
             }
         }
+    }
+}
+
+/// Waits for the next control command.
+///
+/// Never completes once the last control handle is dropped, so the caller's
+/// select loop keeps running without spinning on a closed channel.
+async fn next_command(
+    commands: &mut Option<mpsc::UnboundedReceiver<MediaCommand>>,
+) -> Option<MediaCommand> {
+    match commands {
+        Some(commands) => commands.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Extracts the player state a control command is resolved against.
+fn control_context(state: &PlayerState) -> ControlContext {
+    ControlContext {
+        control: state.control,
+        track_id: state
+            .track
+            .as_ref()
+            .and_then(|track| track.mpris_track_id.clone()),
+        position_ms: state.position_ms,
     }
 }
 
@@ -472,6 +486,7 @@ async fn read_player_state(
     player: &Proxy<'_>,
     bus_name: &str,
     identity: &str,
+    control: &PlayerControl,
 ) -> Result<PlayerObservation> {
     let metadata = player
         .get_property::<HashMap<String, OwnedValue>>("Metadata")
@@ -493,15 +508,13 @@ async fn read_player_state(
             playback_status,
             position_ms: position_us.and_then(position_us_to_ms),
             track,
+            control: *control,
         },
         lyrics_hint,
     })
 }
 
-fn send_hint(sender: Option<&Sender<PlayerLyricsHintEvent>>, observation: &PlayerObservation) {
-    let Some(sender) = sender else {
-        return;
-    };
+fn send_hint(sender: &Sender<PlayerLyricsHintEvent>, observation: &PlayerObservation) {
     let _ = sender.send(PlayerLyricsHintEvent {
         bus_name: observation.state.bus_name.clone(),
         track_fingerprint: observation

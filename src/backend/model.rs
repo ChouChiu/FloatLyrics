@@ -25,6 +25,12 @@ pub(super) struct LyricsDisplayState {
     pub(super) track_fingerprint: Option<String>,
     pub(super) lines: Vec<TimedLine>,
     pub(super) status_message: Option<Message>,
+    /// Artists as the provider that supplied these lyrics credits them.
+    ///
+    /// A provider matches a release rather than a playback session, so its
+    /// billing can name featured performers the playback source omits. Empty for
+    /// lyrics resolved from a provider identifier the player itself suggested.
+    pub(super) credited_artists: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -87,6 +93,7 @@ pub(super) fn lyrics_document(
             .iter()
             .map(|line| {
                 let visible = line_text(Some(line), config);
+                let background = line.background.as_ref();
                 PresentedLyricLine {
                     start_ms: line.start_ms,
                     end_ms: line.end_ms,
@@ -94,13 +101,23 @@ pub(super) fn lyrics_document(
                     syllables: line.syllables.clone(),
                     romanization: visible.romanization,
                     translation: visible.translation,
-                    background: line
-                        .background
-                        .as_deref()
+                    background: background
+                        .map(|sung| sung.text.trim())
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or_default()
+                        .to_string(),
+                    background_translation: background
+                        .and_then(|sung| sung.translation.as_deref())
                         .map(str::trim)
                         .filter(|value| !value.is_empty())
                         .unwrap_or_default()
                         .to_string(),
+                    background_start_ms: background.map_or(line.start_ms, |sung| sung.start_ms),
+                    background_end_ms: background.and_then(|sung| sung.end_ms),
+                    background_syllables: background
+                        .map(|sung| sung.syllables.clone())
+                        .unwrap_or_default(),
+                    voice: line.voice,
                 }
             })
             .collect(),

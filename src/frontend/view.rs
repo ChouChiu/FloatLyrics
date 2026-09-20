@@ -9,6 +9,7 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
+    sync::Arc,
 };
 
 use floatlyrics_core::i18n::{I18n, Text};
@@ -80,7 +81,9 @@ pub(super) struct OverlayView {
     state: OverlayStateHandle,
     placement: PlacementState,
     song_info: Rc<RefCell<String>>,
-    track_offset_ms: Rc<Cell<i64>>,
+    /// Offset the overlay state was last built with, or `None` before the first
+    /// one, so an unchanged offset does not resend the command every frame.
+    track_offset_ms: Rc<Cell<Option<i64>>>,
     lyrics_viewport: gtk::Box,
     web_lyrics: WebLyricsView,
     measurement_label: gtk::Label,
@@ -256,7 +259,7 @@ pub(super) fn build(
         state: OverlayStateHandle::new(config, panel_width),
         placement,
         song_info: Rc::new(RefCell::new("FloatLyrics".to_string())),
-        track_offset_ms: Rc::new(Cell::new(0)),
+        track_offset_ms: Rc::new(Cell::new(None)),
         lyrics_viewport,
         web_lyrics,
         measurement_label: gtk::Label::new(None),
@@ -291,13 +294,13 @@ fn apply_panel_width(
 }
 
 fn set_status_lyrics(floating: &OverlayView, message: &str, key: Text) {
-    floating.render_lyrics(LyricsFrame {
+    floating.render_lyrics(Arc::new(LyricsFrame {
         key: format!("status:{key:?}"),
         content: LyricSlotText::message(message),
         position_ms: None,
         playing: false,
         seeking: false,
-    });
+    }));
 }
 
 impl OverlayView {
@@ -310,13 +313,18 @@ impl OverlayView {
     }
 
     pub(super) fn set_track_offset(&self, offset_ms: i64) {
-        self.track_offset_ms.set(offset_ms);
+        // The frame clock calls this every frame, so the returned state is only
+        // rebuilt when the offset it renders actually changes.
+        if self.track_offset_ms.get() == Some(offset_ms) {
+            return;
+        }
+        self.track_offset_ms.set(Some(offset_ms));
         self.render_overlay_state(self.i18n.language());
     }
 
     fn render_overlay_state(&self, language: floatlyrics_core::i18n::Language) {
         let label = track_offset_label(
-            self.track_offset_ms.get(),
+            self.track_offset_ms.get().unwrap_or_default(),
             language.text(Text::MillisecondsShort),
         );
         self.web_lyrics
@@ -327,7 +335,7 @@ impl OverlayView {
         self.web_lyrics.set_document(document);
     }
 
-    pub(super) fn show_lyrics(&self, frame: LyricsFrame) {
+    pub(super) fn show_lyrics(&self, frame: Arc<LyricsFrame>) {
         self.state.show_content();
         self.render_lyrics(frame);
     }
@@ -414,7 +422,7 @@ impl OverlayView {
         });
     }
 
-    fn render_lyrics(&self, frame: LyricsFrame) {
+    fn render_lyrics(&self, frame: Arc<LyricsFrame>) {
         let resize = self.state.register_frame(&frame);
         if let Some(animate) = resize {
             self.resize_for_lyrics(&frame.content, animate);

@@ -88,7 +88,11 @@ class LyricsStore {
   };
 
   readonly dispatch = (command: LyricsCommand): void => {
-    this.state = advanceLyricsViewState(this.state, command);
+    const next = advanceLyricsViewState(this.state, command);
+    // Every command reaches this store, so a command that does not touch the
+    // lyrics view must not notify the subscribers.
+    if (next === this.state) return;
+    this.state = next;
     for (const listener of this.listeners) listener();
   };
 }
