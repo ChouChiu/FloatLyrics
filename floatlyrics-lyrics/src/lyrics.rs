@@ -32,9 +32,9 @@ pub use search::{
 pub use segmentation::segment_lines_into_words;
 pub use timeline::{active_line_index, line_index_at_or_before};
 
-/// Detects and parses a non-XML lyrics document.
+/// Detects and parses a lyrics document.
 ///
-/// Returns `None` for XML-based formats and unrecognized input.
+/// Returns `None` for unrecognized input.
 #[must_use]
 pub fn parse_auto(content: &str) -> Option<LyricsData> {
     parse_local_lyrics(content).ok()

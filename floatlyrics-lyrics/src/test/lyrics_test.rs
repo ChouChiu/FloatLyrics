@@ -71,6 +71,7 @@ fn search_plan_keeps_mvp_provider_order() {
     assert_eq!(
         SearchPlan::default_mvp().providers(),
         &[
+            LyricsProvider::AmllTtmlDb,
             LyricsProvider::QqMusic,
             LyricsProvider::NetEase,
             LyricsProvider::Kugou,
@@ -105,11 +106,18 @@ fn parse_and_export_lrc_through_lyrics_helper() {
 }
 
 #[test]
-fn rejects_xml_lyrics_before_the_dependency_parser() {
-    let error = parse_local_lyrics("\u{feff}  <tt><body /></tt>").unwrap_err();
+fn parses_ttml_lyrics_through_lyrics_helper() {
+    let parsed = parse_local_lyrics(
+        "<tt xmlns=\"http://www.w3.org/ns/ttml\"><body><div>\
+         <p begin=\"00:01.000\" end=\"00:02.000\"><span begin=\"00:01.000\" end=\"00:02.000\">Hello</span></p>\
+         </div></body></tt>",
+    )
+    .unwrap();
+    let lines = timed_lines_from_data(&parsed, &[]);
 
-    assert!(error.to_string().contains("XML lyrics"));
-    assert!(parse_auto("<tt><body /></tt>").is_none());
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].start_ms, 1_000);
+    assert_eq!(lines[0].text, "Hello");
 }
 
 #[test]
@@ -907,7 +915,9 @@ fn combines_translation_qrc_into_timed_lines() {
     );
     assert_eq!(lines[0].translation.as_deref(), Some("你好"));
     assert_eq!(lines[1].start_ms, 3_000);
+    assert_eq!(lines[1].end_ms, Some(5_000));
     assert_eq!(lines[1].text, "World");
+    assert!(lines[1].syllables.is_empty());
     assert_eq!(lines[1].translation.as_deref(), Some("世界"));
 }
 
@@ -1121,4 +1131,60 @@ fn a_speaker_label_without_provider_artists_is_not_read() {
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].text, "I can't feel my face");
     assert_eq!(lines[0].voice, Voice::Primary);
+}
+
+/// The row-timed transcription of a track written by a provider that also times
+/// its words is read with the words of that document, and with the translation of
+/// the transcription rather than the one written for the words.
+#[test]
+fn parses_a_payload_that_carries_both_documents() {
+    let payload = combine_word_timing(
+        "[90,2070](90,330,0)Ugh(690,540,0)you're (1230,900,0)a monster",
+        "[00:00.396]Ugh, you're a monster\n",
+        Some("[00:00.396]呕，你真是只怪兽\n"),
+    );
+
+    let lines = timed_lines_from_raw(&payload, &[]).unwrap();
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, "Ugh, you're a monster");
+    assert_eq!(lines[0].translation.as_deref(), Some("呕，你真是只怪兽"));
+    // The comma is the transcription's: the words are spelled from it and timed
+    // by the document beside it.
+    assert_eq!(
+        lines[0]
+            .syllables
+            .iter()
+            .map(|syllable| (syllable.start_ms, syllable.text.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            (90, "Ugh, ".to_string()),
+            (690, "you're ".to_string()),
+            (1230, "a monster".to_string()),
+        ]
+    );
+}
+
+/// AMLL TTML DB states the duet side, the background vocal, and the translation
+/// of a line in the TTML itself, so they are read from the markup rather than from
+/// the conventions of the text.
+#[test]
+fn reads_an_amll_ttml_db_transcription() {
+    let ttml = r#"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" xmlns:itunes="http://music.apple.com/lyric-ttml-internal"><head><metadata><ttm:agent type="person" xml:id="v1"/><ttm:agent type="person" xml:id="v2"/></metadata></head><body><div><p begin="00:01.000" end="00:03.000" ttm:agent="v1" itunes:key="L1"><span begin="00:01.000" end="00:02.000">Hello</span> <span begin="00:02.000" end="00:03.000">world</span><span ttm:role="x-translation" xml:lang="zh-CN">你好世界</span><span ttm:role="x-bg"><span begin="00:02.500" end="00:03.000">(echo)</span></span></p><p begin="00:04.000" end="00:05.000" ttm:agent="v2" itunes:key="L2"><span begin="00:04.000" end="00:05.000">Answer</span></p></div></body></tt>"#;
+
+    let lines = timed_lines_from_raw(ttml, &[]).unwrap();
+
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0].start_ms, 1_000);
+    assert_eq!(lines[0].text, "Hello world");
+    assert_eq!(lines[0].translation.as_deref(), Some("你好世界"));
+    assert_eq!(lines[0].voice, Voice::Primary);
+    let background = lines[0]
+        .background
+        .as_ref()
+        .expect("x-bg is a background vocal");
+    assert_eq!(background.start_ms, 2_500);
+    assert!(background.text.contains("echo"));
+    assert_eq!(lines[1].text, "Answer");
+    assert_eq!(lines[1].voice, Voice::Secondary);
 }

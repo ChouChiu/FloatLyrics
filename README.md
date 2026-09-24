@@ -21,7 +21,7 @@ FloatLyrics 是一款面向 Linux Wayland 的 MPRIS 悬浮歌词应用。它会�
 
 - **通用播放器支持**：自动发现 Spotify、VLC、mpv、Rhythmbox、浏览器等兼容 MPRIS 的播放器，并在多个实例之间选择当前活跃播放器。
 - **流畅的同步歌词**：支持 Apple Music 风格逐字高亮、平滑换行动画以及普通同步歌词。
-- **自动搜索，也可手动选择**：按配置顺序搜索 QQ 音乐、网易云音乐、酷狗音乐、LRCLIB 与汽水音乐，前一个来源没有结果时自动尝试下一个，来源与顺序都能在设置里增删调整；匹配不理想时可手动选择结果。
+- **自动搜索，也可手动选择**：按配置顺序搜索 AMLL TTML DB、QQ 音乐、网易云音乐、酷狗音乐、LRCLIB 与汽水音乐，前一个来源没有结果时自动尝试下一个，来源与顺序都能在设置里增删调整；匹配不理想时可手动选择结果。
 - **翻译、罗马音与振假名**：支持歌词翻译、普通话拼音、粤拼、韩语罗马音和日语罗马音／振假名。中文按词消歧多音字（音乐 yīn yuè、银行 yín háng、长大 zhǎng dà），日语用 IPADIC 做词法分析后按词读音生成赫本式罗马音（今日 kyou、君 kimi，助词は读 wa、へ读 e），并用 JmdictFurigana 把读音拆到每个汉字上——`世界` 读作 世[せ] 界[かい]，`大人` 这类整体读音的词则把假名横跨整个词显示。读音随 AMLL 歌词以 TTML 发出，每个汉字上方带自己的假名（ruby）、下方带自己的读音；韩语按《国语罗马字表记法》的发音规则逐音节给出读音（신라 silla、종로 jongno、닭 dak）。
 - **逐词分词与特效**：按 AMLL TTML Tool 的分词规则把整行歌词切成可逐词动画的单元（CJK 逐字、西文逐词、标点归属相邻词），把提供方的整词时间细化到字，并据此分配读音，使逐字高亮、逐词读音和逐词特效能落到正确的字词上。
 - **媒体控制（AMLL 专属）**：在 AMLL 发送端模式下接受 AMLL 客户端发来的控制指令（播放暂停、上一首 / 下一首、拖动进度、音量、循环与随机模式）并转成 MPRIS 调用；浮窗与托盘都不提供播放控制。
@@ -78,17 +78,17 @@ sudo apt install ./floatlyrics_*.deb
 
 ### 从源码构建
 
-先安装 Rust 1.93+、Bun 1.3.14、C 工具链以及 GTK、layer-shell、WebKitGTK、OpenSSL 的开发包。Bun 请按[官方安装说明](https://bun.com/docs/installation)安装：
+先安装 Rust 1.93+、Bun 1.4.2、C 工具链以及 GTK、layer-shell、WebKitGTK 的开发包。Bun 请按[官方安装说明](https://bun.com/docs/installation)安装：
 
 ```bash
 # Arch Linux
-sudo pacman -S --needed base-devel git gtk4 gtk4-layer-shell webkitgtk-6.0 openssl rust
+sudo pacman -S --needed base-devel git gtk4 gtk4-layer-shell webkitgtk-6.0 rust
 
 # Fedora
-sudo dnf install gcc git gtk4-devel gtk4-layer-shell-devel webkitgtk6.0-devel openssl-devel rust cargo
+sudo dnf install gcc git gtk4-devel gtk4-layer-shell-devel webkitgtk6.0-devel rust cargo
 
 # Debian / Ubuntu 25.04+
-sudo apt install build-essential git libgtk-4-dev libgtk4-layer-shell-dev libwebkitgtk-6.0-dev libssl-dev rustc cargo
+sudo apt install build-essential git libgtk-4-dev libgtk4-layer-shell-dev libwebkitgtk-6.0-dev rustc cargo
 ```
 
 然后构建：
@@ -233,7 +233,7 @@ bottom_panel_height = 36
 [lyrics]
 offset_ms = 0
 apple_music_style = false
-provider_order = ["qq-music", "netease", "kugou", "lrclib", "soda-music"]
+provider_order = ["amll-ttml-db", "qq-music", "netease", "kugou", "lrclib", "soda-music"]
 show_translation = true
 show_romanization = false
 chinese_romanization = "auto"                    # auto | mandarin-pinyin | cantonese-jyutping | cantonese-jyutping-no-tones
@@ -272,7 +272,7 @@ enabled = true
 - **浮窗没有出现：** 确认当前是 Wayland 会话、合成器支持 layer-shell，并且播放器正在通过 MPRIS 暴露播放状态。
 - **播放器没有被识别：** 运行 `busctl --user list` 检查 `org.mpris.MediaPlayer2.*` 名称，必要时调整 `player.preferred_players` 或 `player.ignored_players`。
 - **歌词时间不准：** 使用浮窗按钮校准当前歌曲，或在设置中调整全局偏移 `lyrics.offset_ms`。播放器未正确更新 `Position` 或 `Metadata` 时可能无法可靠同步。
-- **逐词高亮与演唱不完全一致：** 逐词时间只取自歌词源自己的逐字数据（QQ 音乐 QRC、网易云逐字、汽水 KRC）；只提供整行时间的歌词源（例如 LRC）不做逐词高亮，整行一起点亮。网易云的逐字歌词是它单独一份时间表，FloatLyrics 只取其中的时间、文字仍用它的整行版本，对不上的行（例如逐字版给某个词打了码）同样退回整行高亮。
+- **逐词高亮与演唱不完全一致：** 逐词时间只取自歌词源自己的逐字数据（AMLL TTML DB 的逐词 TTML、QQ 音乐 QRC、网易云逐字、汽水 KRC）；只提供整行时间的歌词源（例如 LRC）不做逐词高亮，整行一起点亮。网易云的逐字歌词是它单独一份时间表，FloatLyrics 只取其中的时间、文字仍用它的整行版本，对不上的行（例如逐字版给某个词打了码）同样退回整行高亮。
 - **日语读音有缺字或韩语读音与演唱略有出入：** 读音来自本地词典与规则，不联网也不猜测。日语未收录的汉字（多为生僻字、人名）不给读音；中文的粤拼与韩语的读音按标准发音规则生成，需要词法判断的例外（例如 꽃잎 的ㄴ 첨가、신문로 的ㄴㄹ 处理）按规则本身读，可能与个别标准例词不同。整行只写汉字、且这些字都被日语词典收录时，会优先按日语读。
 - **媒体控制没有反应：** 播放控制只在 AMLL 发送端模式下由 AMLL 客户端驱动，且只作用于当前活跃的播放器，需要该播放器实现 MPRIS 的可控方法；播放器把 `CanControl`、`CanGoNext`、`CanSeek` 等属性报告为 false 时，对应指令会被拒绝并记录调试日志。此外，仅当歌词源返回了 `mpris:trackid` 时才使用 `SetPosition` 精确跳转，否则退回相对跳转。
 - **歌词显示方框或乱码：** 在 `lyrics.font_order` 中加入已安装的中文、日文或韩文字体。

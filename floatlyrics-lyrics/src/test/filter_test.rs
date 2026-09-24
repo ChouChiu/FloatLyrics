@@ -1,27 +1,11 @@
 use super::*;
 
-use crate::lyrics::model::Voice;
-
-fn line_at(text: &str, start_ms: u64) -> TimedLine {
-    TimedLine {
-        start_ms,
-        end_ms: None,
-        text: text.to_string(),
-        syllables: vec![],
-        translation: None,
-        romanization: None,
-        romanization_segments: Vec::new(),
-        background: None,
-        voice: Voice::Primary,
-    }
-}
-
 /// The rows the lyrics view draws, out of the rows of a payload in the order the
 /// transcription wrote them.
 fn drawn(rows: &[(&str, u64)]) -> Vec<String> {
     let mut metadata = Metadata::new();
     rows.iter()
-        .filter(|(text, start)| !metadata.drops(&line_at(text, *start)))
+        .filter(|(text, start)| !metadata.drops(*start, text))
         .map(|(text, _)| (*text).to_string())
         .collect()
 }
@@ -131,10 +115,8 @@ fn filters_generic_key_value_metadata_in_intro() {
 
 #[test]
 fn filters_intro_title_line() {
-    let line = line_at("Hello World - Adele", 100);
-    assert!(is_intro_title_line(&line, "Hello World - Adele"));
-    let line = line_at("Hello World - Adele", 6000);
-    assert!(!is_intro_title_line(&line, "Hello World - Adele"));
+    assert!(is_intro_title_line(100, "Hello World - Adele"));
+    assert!(!is_intro_title_line(6000, "Hello World - Adele"));
 }
 
 #[test]

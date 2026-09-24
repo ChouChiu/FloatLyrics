@@ -12,26 +12,26 @@
 
 ## 准备开发环境
 
-项目使用 Rust 2024 edition，最低支持 Rust 1.93；React 歌词前端使用 Bun 1.3.14、TypeScript 和 Biome。`rust-toolchain.toml` 会选择 stable，并安装 `rustfmt`、Clippy、Rust 源码与 rust-analyzer。Bun 请按[官方安装说明](https://bun.com/docs/installation)安装。
+项目使用 Rust 2024 edition，最低支持 Rust 1.93；React 歌词前端使用 Bun 1.4.2、TypeScript 和 Biome。`rust-toolchain.toml` 会选择 stable，并安装 `rustfmt`、Clippy、Rust 源码与 rust-analyzer。Bun 请按[官方安装说明](https://bun.com/docs/installation)安装。
 
-运行完整应用需要 Linux Wayland、支持 layer-shell 的合成器、会话 D-Bus、GTK 4.12+、gtk4-layer-shell、WebKitGTK 6.0 和 OpenSSL。运行单元测试则不需要桌面会话。
+运行完整应用需要 Linux Wayland、支持 layer-shell 的合成器、会话 D-Bus、GTK 4.12+、gtk4-layer-shell 和 WebKitGTK 6.0。运行单元测试则不需要桌面会话。
 
 Arch Linux 可直接安装所需依赖：
 
 ```bash
-sudo pacman -S --needed base-devel git gtk4 gtk4-layer-shell webkitgtk-6.0 openssl rust
+sudo pacman -S --needed base-devel git gtk4 gtk4-layer-shell webkitgtk-6.0 rust
 ```
 
 Fedora：
 
 ```bash
-sudo dnf install gcc git gtk4-devel gtk4-layer-shell-devel webkitgtk6.0-devel openssl-devel rust cargo
+sudo dnf install gcc git gtk4-devel gtk4-layer-shell-devel webkitgtk6.0-devel rust cargo
 ```
 
 Debian / Ubuntu 25.04+：
 
 ```bash
-sudo apt install build-essential git libgtk-4-dev libgtk4-layer-shell-dev libwebkitgtk-6.0-dev libssl-dev rustc cargo
+sudo apt install build-essential git libgtk-4-dev libgtk4-layer-shell-dev libwebkitgtk-6.0-dev rustc cargo
 ```
 
 获取代码并验证环境：
