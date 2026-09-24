@@ -132,7 +132,7 @@ between Rust and JS — changing it requires coordinated updates on both sides.
 
 `rust-toolchain.toml` selects stable Rust and the `rustfmt`, `clippy`, `rust-src`,
 and `rust-analyzer` components. CI runs in an Arch Linux container with GTK4,
-gtk4-layer-shell, OpenSSL, and packaging tools. The React lyrics frontend uses
+gtk4-layer-shell, and packaging tools. The React lyrics frontend uses
 Bun 1.3.14, TypeScript, and Biome. Compiling the root crate locally requires Bun
 and the corresponding system development libraries; Cargo installs the locked
 frontend dependencies and generates the embedded page through `build.rs`.
@@ -381,8 +381,11 @@ order, not in the parsers.
 
 Neither QRC nor plain LRC has a field for a duet part, a background vocal, or a
 sentence the transcriber broke across rows, so all three are read from the
-conventions the transcriber wrote the lyrics with, in
-`floatlyrics-lyrics/src/lyrics/parsing/conventions.rs`, and nothing beyond them:
+conventions the transcriber wrote the lyrics with, by upstream's
+`lyrics_helper::helpers::conventions` on the parsed `LineInfo` rows (a background
+vocal is the row's `sub_line`, the side a label gives it is its `alignment`),
+which `floatlyrics-lyrics/src/lyrics/parsing.rs` calls in order before it converts
+the rows to `TimedLine`, and nothing beyond them:
 
 - **A speaker label must name an artist the provider listed.** A row such as
   `Doja Cat:` or `The Weeknd：` sets `TimedLine::voice`; a sung line containing a
@@ -468,7 +471,8 @@ not agree: the word-timed one drops the separators between its words, reads the
 brackets of an aside as the brackets of a tag, and censors words its row-timed
 document spells out. The row-timed transcription is the text a listener reads, so
 a payload carries both — the fetch writes `combine_word_timing`, the parse splits
-the section again — and `parsing/word_timing.rs` reads the times of the words onto
+the section again — and upstream's `lyrics_helper::helpers::word_timing` reads
+the times of the words onto
 the row-timed text, one row at a time. A row whose words cannot be spelled from
 that text (a masked word, an aside the word-timed document never carried) keeps
 its row timing and carries no words, and the words of a row always spell exactly

@@ -3,6 +3,8 @@
 
 //! Stable cryptographic digests shared by domain and persistence code.
 
+use std::fmt::Write as _;
+
 use sha2::{Digest, Sha256};
 
 /// Returns the lowercase hexadecimal SHA-256 digest of `content`.
@@ -20,5 +22,11 @@ use sha2::{Digest, Sha256};
 pub fn sha256_hex(content: impl AsRef<[u8]>) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_ref());
-    format!("{:x}", hasher.finalize())
+    let digest = hasher.finalize();
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        // Writing into a `String` cannot fail.
+        let _ = write!(hex, "{byte:02x}");
+    }
+    hex
 }

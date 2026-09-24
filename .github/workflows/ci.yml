@@ -38,7 +38,6 @@ jobs:
           gtk4
           gtk4-layer-shell
           webkitgtk-6.0
-          openssl
           rust
           unzip
 

@@ -6,8 +6,6 @@
 use lyrics_helper::helpers::chinese_helper::to_simplified;
 use lyrics_helper::helpers::optimization::info_lines::is_info_line;
 
-use crate::lyrics::model::TimedLine;
-
 /// The longest a credit role is written with.
 ///
 /// QQ Music writes `Mixed in Dolby Atmos by` and `Computer programming by`, which
@@ -49,17 +47,18 @@ impl Metadata {
         }
     }
 
-    /// Reads `line` as part of the block and returns whether the view draws it.
+    /// Reads the row `text` that starts at `start_ms` as part of the block and
+    /// returns whether the view draws it.
     ///
     /// The credits it reads are the ones a row of their own may continue, so the
     /// rows are read in the order the transcription wrote them.
-    pub(super) fn drops(&mut self, line: &TimedLine) -> bool {
-        let text = line.text.trim();
+    pub(super) fn drops(&mut self, start_ms: u64, text: &str) -> bool {
+        let text = text.trim();
         let credit = is_credit_line(text, self.open);
         let row = credit
             || (self.after_credit && is_bracketed_name_list(text))
             || text.is_empty()
-            || is_intro_title_line(line, text)
+            || is_intro_title_line(start_ms, text)
             || is_speaker_label_line(text);
 
         self.after_credit = credit;
@@ -90,8 +89,8 @@ fn is_bracketed_name_list(text: &str) -> bool {
     inner.trim().split('/').count() >= CREDIT_CONTINUATION_NAMES
 }
 
-fn is_intro_title_line(line: &TimedLine, text: &str) -> bool {
-    if line.start_ms > 5_000 {
+fn is_intro_title_line(start_ms: u64, text: &str) -> bool {
+    if start_ms > 5_000 {
         return false;
     }
 

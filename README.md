@@ -78,17 +78,17 @@ sudo apt install ./floatlyrics_*.deb
 
 ### 从源码构建
 
-先安装 Rust 1.93+、Bun 1.3.14、C 工具链以及 GTK、layer-shell、WebKitGTK、OpenSSL 的开发包。Bun 请按[官方安装说明](https://bun.com/docs/installation)安装：
+先安装 Rust 1.93+、Bun 1.3.14、C 工具链以及 GTK、layer-shell、WebKitGTK 的开发包。Bun 请按[官方安装说明](https://bun.com/docs/installation)安装：
 
 ```bash
 # Arch Linux
-sudo pacman -S --needed base-devel git gtk4 gtk4-layer-shell webkitgtk-6.0 openssl rust
+sudo pacman -S --needed base-devel git gtk4 gtk4-layer-shell webkitgtk-6.0 rust
 
 # Fedora
-sudo dnf install gcc git gtk4-devel gtk4-layer-shell-devel webkitgtk6.0-devel openssl-devel rust cargo
+sudo dnf install gcc git gtk4-devel gtk4-layer-shell-devel webkitgtk6.0-devel rust cargo
 
 # Debian / Ubuntu 25.04+
-sudo apt install build-essential git libgtk-4-dev libgtk4-layer-shell-dev libwebkitgtk-6.0-dev libssl-dev rustc cargo
+sudo apt install build-essential git libgtk-4-dev libgtk4-layer-shell-dev libwebkitgtk-6.0-dev rustc cargo
 ```
 
 然后构建：

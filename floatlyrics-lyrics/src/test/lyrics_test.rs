@@ -105,11 +105,18 @@ fn parse_and_export_lrc_through_lyrics_helper() {
 }
 
 #[test]
-fn rejects_xml_lyrics_before_the_dependency_parser() {
-    let error = parse_local_lyrics("\u{feff}  <tt><body /></tt>").unwrap_err();
+fn parses_ttml_lyrics_through_lyrics_helper() {
+    let parsed = parse_local_lyrics(
+        "<tt xmlns=\"http://www.w3.org/ns/ttml\"><body><div>\
+         <p begin=\"00:01.000\" end=\"00:02.000\"><span begin=\"00:01.000\" end=\"00:02.000\">Hello</span></p>\
+         </div></body></tt>",
+    )
+    .unwrap();
+    let lines = timed_lines_from_data(&parsed, &[]);
 
-    assert!(error.to_string().contains("XML lyrics"));
-    assert!(parse_auto("<tt><body /></tt>").is_none());
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].start_ms, 1_000);
+    assert_eq!(lines[0].text, "Hello");
 }
 
 #[test]
@@ -878,7 +885,7 @@ fn ignores_placeholder_translation_lines() {
 #[test]
 fn combines_translation_qrc_into_timed_lines() {
     let raw = combine_lyrics_with_translation(
-        "[1000,2000]Hel(1000,500)lo(1500,500)\n[3000,2000]World",
+        "[1000,2000]Hel(1000,500)lo(1500,500)\n[3000,2000]World(3000,2000)",
         Some("[1000,2000]你好\n[3000,2000]世界"),
     );
     let lines = timed_lines_from_raw(&raw, &[]).unwrap();
@@ -1121,4 +1128,36 @@ fn a_speaker_label_without_provider_artists_is_not_read() {
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].text, "I can't feel my face");
     assert_eq!(lines[0].voice, Voice::Primary);
+}
+
+/// The row-timed transcription of a track written by a provider that also times
+/// its words is read with the words of that document, and with the translation of
+/// the transcription rather than the one written for the words.
+#[test]
+fn parses_a_payload_that_carries_both_documents() {
+    let payload = combine_word_timing(
+        "[90,2070](90,330,0)Ugh(690,540,0)you're (1230,900,0)a monster",
+        "[00:00.396]Ugh, you're a monster\n",
+        Some("[00:00.396]呕，你真是只怪兽\n"),
+    );
+
+    let lines = timed_lines_from_raw(&payload, &[]).unwrap();
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, "Ugh, you're a monster");
+    assert_eq!(lines[0].translation.as_deref(), Some("呕，你真是只怪兽"));
+    // The comma is the transcription's: the words are spelled from it and timed
+    // by the document beside it.
+    assert_eq!(
+        lines[0]
+            .syllables
+            .iter()
+            .map(|syllable| (syllable.start_ms, syllable.text.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            (90, "Ugh, ".to_string()),
+            (690, "you're ".to_string()),
+            (1230, "a monster".to_string()),
+        ]
+    );
 }
