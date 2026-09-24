@@ -21,6 +21,8 @@ pub enum LyricsProvider {
     Lrclib,
     /// Soda Music.
     SodaMusic,
+    /// AMLL TTML DB, the community-maintained library of word-timed TTML lyrics.
+    AmllTtmlDb,
 }
 
 /// Provider-specific track identifier suggested by a playback source.
@@ -39,12 +41,16 @@ pub struct LyricsLookupHint {
 impl LyricsProvider {
     /// Returns the default automatic search priority.
     ///
-    /// The two Chinese sources that time every word come first, then the Chinese
-    /// source that times only the rows, then the international one, and last the
-    /// source whose ranking prefers the covers of a song over the song itself.
-    /// Only a track the earlier sources cannot answer reaches the later ones.
+    /// The community library comes first: it holds fewer tracks than any provider,
+    /// but each one is transcribed by hand with every word timed and the duet sides
+    /// and background vocals stated outright. The two Chinese sources that time
+    /// every word follow, then the Chinese source that times only the rows, then
+    /// the international one, and last the source whose ranking prefers the covers
+    /// of a song over the song itself. Only a track the earlier sources cannot
+    /// answer reaches the later ones.
     pub fn default_order() -> Vec<Self> {
         vec![
+            Self::AmllTtmlDb,
             Self::QqMusic,
             Self::NetEase,
             Self::Kugou,
@@ -61,6 +67,7 @@ impl LyricsProvider {
             Self::Kugou => "kugou",
             Self::Lrclib => "lrclib",
             Self::SodaMusic => "soda-music",
+            Self::AmllTtmlDb => "amll-ttml-db",
         }
     }
 }
@@ -81,6 +88,7 @@ impl std::str::FromStr for LyricsProvider {
             "kugou" => Ok(Self::Kugou),
             "lrclib" => Ok(Self::Lrclib),
             "soda-music" => Ok(Self::SodaMusic),
+            "amll-ttml-db" => Ok(Self::AmllTtmlDb),
             _ => Err(LyricsProviderParseError(value.to_string())),
         }
     }

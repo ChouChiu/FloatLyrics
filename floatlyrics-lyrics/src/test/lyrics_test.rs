@@ -71,6 +71,7 @@ fn search_plan_keeps_mvp_provider_order() {
     assert_eq!(
         SearchPlan::default_mvp().providers(),
         &[
+            LyricsProvider::AmllTtmlDb,
             LyricsProvider::QqMusic,
             LyricsProvider::NetEase,
             LyricsProvider::Kugou,
@@ -1162,4 +1163,28 @@ fn parses_a_payload_that_carries_both_documents() {
             (1230, "a monster".to_string()),
         ]
     );
+}
+
+/// AMLL TTML DB states the duet side, the background vocal, and the translation
+/// of a line in the TTML itself, so they are read from the markup rather than from
+/// the conventions of the text.
+#[test]
+fn reads_an_amll_ttml_db_transcription() {
+    let ttml = r#"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" xmlns:itunes="http://music.apple.com/lyric-ttml-internal"><head><metadata><ttm:agent type="person" xml:id="v1"/><ttm:agent type="person" xml:id="v2"/></metadata></head><body><div><p begin="00:01.000" end="00:03.000" ttm:agent="v1" itunes:key="L1"><span begin="00:01.000" end="00:02.000">Hello</span> <span begin="00:02.000" end="00:03.000">world</span><span ttm:role="x-translation" xml:lang="zh-CN">你好世界</span><span ttm:role="x-bg"><span begin="00:02.500" end="00:03.000">(echo)</span></span></p><p begin="00:04.000" end="00:05.000" ttm:agent="v2" itunes:key="L2"><span begin="00:04.000" end="00:05.000">Answer</span></p></div></body></tt>"#;
+
+    let lines = timed_lines_from_raw(ttml, &[]).unwrap();
+
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0].start_ms, 1_000);
+    assert_eq!(lines[0].text, "Hello world");
+    assert_eq!(lines[0].translation.as_deref(), Some("你好世界"));
+    assert_eq!(lines[0].voice, Voice::Primary);
+    let background = lines[0]
+        .background
+        .as_ref()
+        .expect("x-bg is a background vocal");
+    assert_eq!(background.start_ms, 2_500);
+    assert!(background.text.contains("echo"));
+    assert_eq!(lines[1].text, "Answer");
+    assert_eq!(lines[1].voice, Voice::Secondary);
 }

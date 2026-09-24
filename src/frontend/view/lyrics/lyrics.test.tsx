@@ -348,6 +348,7 @@ describe("React application shell", () => {
         ProviderNameKugou: "Kugou Music",
         ProviderNameLrclib: "LRCLIB",
         ProviderNameSodaMusic: "Soda Music",
+        ProviderNameAmllTtmlDb: "AMLL TTML DB",
       },
       version: "1.1.2",
       about: { dependencies: [], licenses: [] },

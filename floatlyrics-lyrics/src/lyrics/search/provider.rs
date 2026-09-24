@@ -15,8 +15,9 @@ pub(super) async fn search_provider_candidates(
     metadata: &lyrics_helper::models::TrackMetadata,
 ) -> Result<Vec<LyricsCandidate>, SearchError> {
     use lyrics_helper::searchers::{
-        kugou::KugouSearcher, lrclib::LRCLIBSearcher, netease::NeteaseSearcher,
-        qq_music::QQMusicSearcher, search_with_refinement, soda_music::SodaMusicSearcher,
+        amll_ttml_db::AmllTtmlDbSearcher, kugou::KugouSearcher, lrclib::LRCLIBSearcher,
+        netease::NeteaseSearcher, qq_music::QQMusicSearcher, search_with_refinement,
+        soda_music::SodaMusicSearcher,
     };
 
     let results = match provider {
@@ -30,6 +31,9 @@ pub(super) async fn search_provider_candidates(
         LyricsProvider::Lrclib => search_with_refinement(&LRCLIBSearcher, metadata, false).await?,
         LyricsProvider::SodaMusic => {
             search_with_refinement(&SodaMusicSearcher, metadata, false).await?
+        }
+        LyricsProvider::AmllTtmlDb => {
+            search_with_refinement(&AmllTtmlDbSearcher, metadata, false).await?
         }
     };
 
@@ -77,7 +81,10 @@ pub(super) async fn fetch_hint_lyrics(
         LyricsProvider::NetEase => (hint.provider_track_id.as_str(), None),
         // No playback source states a track in the terms the remaining providers
         // address theirs, so they are only ever searched by metadata.
-        LyricsProvider::Kugou | LyricsProvider::Lrclib | LyricsProvider::SodaMusic => return None,
+        LyricsProvider::Kugou
+        | LyricsProvider::Lrclib
+        | LyricsProvider::SodaMusic
+        | LyricsProvider::AmllTtmlDb => return None,
     };
     // The hint only shortcuts the search below: an identifier the provider can no
     // longer serve — and a failed request — falls back to it, so the outcome here
@@ -115,9 +122,9 @@ pub(super) async fn search_provider_best(
     metadata: &lyrics_helper::models::TrackMetadata,
 ) -> Result<Option<FetchedLyrics>, SearchError> {
     use lyrics_helper::searchers::{
-        compare_helper::MatchType, kugou::KugouSearcher, lrclib::LRCLIBSearcher,
-        netease::NeteaseSearcher, qq_music::QQMusicSearcher, search_for_best_result_with_match,
-        soda_music::SodaMusicSearcher,
+        amll_ttml_db::AmllTtmlDbSearcher, compare_helper::MatchType, kugou::KugouSearcher,
+        lrclib::LRCLIBSearcher, netease::NeteaseSearcher, qq_music::QQMusicSearcher,
+        search_for_best_result_with_match, soda_music::SodaMusicSearcher,
     };
 
     let result = match provider {
@@ -135,6 +142,10 @@ pub(super) async fn search_provider_best(
         }
         LyricsProvider::SodaMusic => {
             search_for_best_result_with_match(&SodaMusicSearcher, metadata, MatchType::Medium)
+                .await?
+        }
+        LyricsProvider::AmllTtmlDb => {
+            search_for_best_result_with_match(&AmllTtmlDbSearcher, metadata, MatchType::Medium)
                 .await?
         }
     };
@@ -220,7 +231,9 @@ struct ProviderTrackRef<'a> {
 }
 
 async fn fetch_raw_lyrics(track: ProviderTrackRef<'_>) -> Result<Option<String>, SearchError> {
-    use lyrics_helper::search::providers::web::{kugou, lrclib, qq_music, soda_music};
+    use lyrics_helper::search::providers::web::{
+        amll_ttml_db, kugou, lrclib, qq_music, soda_music,
+    };
 
     let (lyrics, translation) = match track.provider {
         LyricsProvider::QqMusic => {
@@ -265,6 +278,10 @@ async fn fetch_raw_lyrics(track: ProviderTrackRef<'_>) -> Result<Option<String>,
             (lyric.synced_lyrics, None)
         }
         LyricsProvider::SodaMusic => soda_music::api::get_lyrics(track.id).await?,
+        // The library names a transcription by the file it is stored in, and the
+        // TTML in that file carries its translation, its duet sides, and its
+        // background vocals itself.
+        LyricsProvider::AmllTtmlDb => (amll_ttml_db::api::get_raw_lyrics(track.id).await?, None),
     };
 
     Ok(lyrics.map(|lyrics| combine_lyrics_with_translation(&lyrics, translation.as_deref())))

@@ -347,6 +347,7 @@ define_text_keys!(
     ProviderNameKugou,
     ProviderNameLrclib,
     ProviderNameSodaMusic,
+    ProviderNameAmllTtmlDb,
     Integration,
     RunMode,
     RunModeDescription,

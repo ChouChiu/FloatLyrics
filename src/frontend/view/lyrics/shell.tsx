@@ -848,6 +848,7 @@ export function addFontFamily(fonts: string[], family: string): string[] {
 
 /** The lyrics sources the settings page can enable, in the order it offers them. */
 export const ALL_PROVIDERS: LyricsProvider[] = [
+  "amll-ttml-db",
   "qq-music",
   "netease",
   "kugou",
@@ -856,6 +857,7 @@ export const ALL_PROVIDERS: LyricsProvider[] = [
 ];
 
 const PROVIDER_NAMES: Record<LyricsProvider, string> = {
+  "amll-ttml-db": "ProviderNameAmllTtmlDb",
   "qq-music": "ProviderNameQqMusic",
   netease: "ProviderNameNetEase",
   kugou: "ProviderNameKugou",
