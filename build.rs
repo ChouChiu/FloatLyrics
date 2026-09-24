@@ -29,7 +29,7 @@ fn main() {
         .status()
         .unwrap_or_else(|error| {
             panic!(
-                "failed to start Bun while building the React lyrics view: {error}; install Bun 1.3.14"
+                "failed to start Bun while building the React lyrics view: {error}; install Bun 1.4.2"
             )
         });
     assert!(
@@ -51,7 +51,7 @@ fn run_bun(manifest_dir: &str, args: &[&str], action: &str) {
         .current_dir(manifest_dir)
         .status()
         .unwrap_or_else(|error| {
-            panic!("failed to start Bun to {action}: {error}; install Bun 1.3.14")
+            panic!("failed to start Bun to {action}: {error}; install Bun 1.4.2")
         });
     assert!(status.success(), "Bun failed to {action}");
 }

@@ -78,7 +78,7 @@ sudo apt install ./floatlyrics_*.deb
 
 ### 从源码构建
 
-先安装 Rust 1.93+、Bun 1.3.14、C 工具链以及 GTK、layer-shell、WebKitGTK 的开发包。Bun 请按[官方安装说明](https://bun.com/docs/installation)安装：
+先安装 Rust 1.93+、Bun 1.4.2、C 工具链以及 GTK、layer-shell、WebKitGTK 的开发包。Bun 请按[官方安装说明](https://bun.com/docs/installation)安装：
 
 ```bash
 # Arch Linux

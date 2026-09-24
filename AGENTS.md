@@ -133,7 +133,7 @@ between Rust and JS — changing it requires coordinated updates on both sides.
 `rust-toolchain.toml` selects stable Rust and the `rustfmt`, `clippy`, `rust-src`,
 and `rust-analyzer` components. CI runs in an Arch Linux container with GTK4,
 gtk4-layer-shell, and packaging tools. The React lyrics frontend uses
-Bun 1.3.14, TypeScript, and Biome. Compiling the root crate locally requires Bun
+Bun 1.4.2, TypeScript, and Biome. Compiling the root crate locally requires Bun
 and the corresponding system development libraries; Cargo installs the locked
 frontend dependencies and generates the embedded page through `build.rs`.
 Use `bun run format` to format the React frontend and apply Biome's safe fixes;
