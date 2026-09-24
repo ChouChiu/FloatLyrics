@@ -37,21 +37,74 @@ pub fn parse_local_lyrics(content: &str) -> Result<LyricsData> {
     Ok(parsed)
 }
 
-/// Applies `lyrics-helper`'s normalization for a payload format that needs one.
+/// Applies the normalization a payload format needs after `lyrics-helper` read it.
 ///
 /// NetEase times the space between two words as a unit of its own, which upstream
 /// folds into the word before it; a renderer would otherwise animate the gap
-/// between two words as if it were one.
+/// between two words as if it were one. QQ Music may write a row of a word-timed
+/// document without any word tag, which upstream reads as a row without text.
 fn standardize_parsed_payload(content: &str, data: &mut LyricsData) {
     use lyrics_helper::LyricsRawTypes;
     use lyrics_helper::helpers::{optimization::yrc, type_helper::get_lyrics_types};
 
-    if get_lyrics_types(content) != LyricsRawTypes::Yrc {
+    let Some(lines) = data.lines.as_mut() else {
+        return;
+    };
+    match get_lyrics_types(content) {
+        LyricsRawTypes::Yrc => yrc::standardize_yrc_lyrics(lines),
+        LyricsRawTypes::Qrc => restore_untimed_qrc_rows(content, lines),
+        _ => {}
+    }
+}
+
+/// Gives the rows of a QRC payload that time no word back the text they wrote.
+///
+/// Upstream only keeps the text a word tag follows, so a row such as
+/// `[3000,2000]World` parses into a row timed by its header with no words at all.
+/// Those rows are paired in order with the raw rows that carry no word tag, and
+/// become line-timed rows with the times upstream read, including any offset. A
+/// payload where the two do not pair up is left as upstream read it.
+fn restore_untimed_qrc_rows(content: &str, lines: &mut [LineInfo]) {
+    let raw_rows = content
+        .lines()
+        .filter_map(|row| qrc_row_body(row.trim()))
+        .filter(|body| !has_qrc_word_tag(body))
+        .collect::<Vec<_>>();
+    let mut parsed_rows = lines
+        .iter_mut()
+        .filter(|line| {
+            matches!(line, LineInfo::Syllable { syllables, .. } if syllables.is_empty())
+                && line.start_time().is_some()
+        })
+        .collect::<Vec<_>>();
+    if raw_rows.is_empty() || raw_rows.len() != parsed_rows.len() {
         return;
     }
-    if let Some(lines) = data.lines.as_mut() {
-        yrc::standardize_yrc_lyrics(lines);
+
+    for (line, body) in parsed_rows.iter_mut().zip(raw_rows) {
+        let restored =
+            LineInfo::new_line(body.trim().to_string(), line.start_time(), line.end_time());
+        **line = restored;
     }
+}
+
+/// Returns the text after the `[start,duration]` header of a QRC row.
+fn qrc_row_body(row: &str) -> Option<&str> {
+    let (header, body) = row.strip_prefix('[')?.split_once(']')?;
+    parse_qrc_time_pair(header).map(|_| body)
+}
+
+/// Returns whether `body` contains a `(start,duration)` word tag.
+fn has_qrc_word_tag(body: &str) -> bool {
+    body.split('(')
+        .skip(1)
+        .filter_map(|after_open| after_open.split_once(')'))
+        .any(|(tag, _)| parse_qrc_time_pair(tag).is_some())
+}
+
+fn parse_qrc_time_pair(tag: &str) -> Option<(i32, i32)> {
+    let (start, duration) = tag.split_once(',')?;
+    Some((start.trim().parse().ok()?, duration.trim().parse().ok()?))
 }
 
 /// Parses raw provider lyrics into sorted, display-ready lines.

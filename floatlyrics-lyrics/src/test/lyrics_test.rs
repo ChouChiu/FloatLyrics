@@ -885,7 +885,7 @@ fn ignores_placeholder_translation_lines() {
 #[test]
 fn combines_translation_qrc_into_timed_lines() {
     let raw = combine_lyrics_with_translation(
-        "[1000,2000]Hel(1000,500)lo(1500,500)\n[3000,2000]World(3000,2000)",
+        "[1000,2000]Hel(1000,500)lo(1500,500)\n[3000,2000]World",
         Some("[1000,2000]你好\n[3000,2000]世界"),
     );
     let lines = timed_lines_from_raw(&raw, &[]).unwrap();
@@ -914,7 +914,9 @@ fn combines_translation_qrc_into_timed_lines() {
     );
     assert_eq!(lines[0].translation.as_deref(), Some("你好"));
     assert_eq!(lines[1].start_ms, 3_000);
+    assert_eq!(lines[1].end_ms, Some(5_000));
     assert_eq!(lines[1].text, "World");
+    assert!(lines[1].syllables.is_empty());
     assert_eq!(lines[1].translation.as_deref(), Some("世界"));
 }
 
