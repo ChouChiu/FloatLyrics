@@ -34,13 +34,13 @@ FloatLyrics 是一款面向 Linux Wayland 的 MPRIS 悬浮歌词应用。它会�
 
 | 组件 | 要求 |
 |---|---|
-| 桌面会话 | Linux Wayland，合成器支持 layer-shell |
+| 桌面会话 | Linux Wayland；悬浮覆盖层需要合成器支持 layer-shell，否则退化为普通窗口 |
 | 播放器 | 提供 `PlaybackStatus`、`Position` 和含标题 `Metadata` 的 MPRIS 播放器 |
 | 运行库 | GTK 4.12 或更高版本、gtk4-layer-shell、WebKitGTK 6.0 |
 
-FloatLyrics 依赖 layer-shell，目前不支持 X11。可运行 `echo "$XDG_SESSION_TYPE"` 检查当前会话类型。
+FloatLyrics 依赖 layer-shell 实现悬浮覆盖层，目前不支持 X11。可运行 `echo "$XDG_SESSION_TYPE"` 检查当前会话类型。
 
-已知兼容的合成器包括 GNOME（Mutter）、KDE（KWin）、Hyprland 和 Sway；其他支持 layer-shell 的合成器也可能正常工作。
+KDE（KWin）、Hyprland 和 Sway 等合成器原生支持 layer-shell；GNOME（Mutter）不支持该协议，浮窗会退化为可拖拽的普通窗口，点击穿透与屏幕吸附不可用。
 
 ## 安装
 

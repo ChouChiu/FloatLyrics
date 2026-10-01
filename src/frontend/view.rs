@@ -98,7 +98,17 @@ pub(super) fn build(
     about: Rc<serde_json::Value>,
     sender: relm4::Sender<AppMsg>,
 ) -> OverlayView {
-    let drag_mode = desktop_drag_mode(std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref());
+    let layer_shell_supported = gtk4_layer_shell::is_supported();
+    if !layer_shell_supported {
+        tracing::warn!(
+            "the compositor does not support the layer shell protocol; \
+             falling back to a plain draggable window"
+        );
+    }
+    let drag_mode = overlay_drag_mode(
+        layer_shell_supported,
+        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+    );
     let panel_width = compact_panel_width(config.window.width);
     let initial_placement = if config.window.remember_position {
         config.window.position.map(WindowPlacement::from_position)
@@ -117,34 +127,41 @@ pub(super) fn build(
     window.set_decorated(false);
     window.set_resizable(false);
 
-    window.init_layer_shell();
-    window.set_namespace(Some("floatlyrics"));
-    window.set_layer(Layer::Overlay);
-    window.set_keyboard_mode(KeyboardMode::None);
-    window.set_anchor(Edge::Bottom, true);
-    window.set_anchor(Edge::Left, true);
-    // KWin can apply desktop effects whenever a layer surface moves. On KDE,
-    // keep the surface fixed to the output and drag only its child panel.
-    window.set_anchor(Edge::Right, drag_mode.is_internal());
-    window.set_anchor(Edge::Top, drag_mode.is_internal());
-    if !drag_mode.is_internal() {
-        window.set_margin(
-            Edge::Left,
-            initial_placement
-                .and_then(|placement| left_position_for_width(window, &placement, panel_width))
-                .or_else(|| initial_x(panel_width))
-                .unwrap_or_default(),
-        );
-        window.set_margin(
-            Edge::Bottom,
-            initial_placement
-                .and_then(|placement| {
-                    bottom_margin_from_placement(window, &placement, panel_width, fallback_height)
-                })
-                .unwrap_or_else(|| effective_bottom_margin(config)),
-        );
+    if drag_mode.uses_layer_shell() {
+        window.init_layer_shell();
+        window.set_namespace(Some("floatlyrics"));
+        window.set_layer(Layer::Overlay);
+        window.set_keyboard_mode(KeyboardMode::None);
+        window.set_anchor(Edge::Bottom, true);
+        window.set_anchor(Edge::Left, true);
+        // KWin can apply desktop effects whenever a layer surface moves. On KDE,
+        // keep the surface fixed to the output and drag only its child panel.
+        window.set_anchor(Edge::Right, drag_mode.is_internal());
+        window.set_anchor(Edge::Top, drag_mode.is_internal());
+        if !drag_mode.is_internal() {
+            window.set_margin(
+                Edge::Left,
+                initial_placement
+                    .and_then(|placement| left_position_for_width(window, &placement, panel_width))
+                    .or_else(|| initial_x(panel_width))
+                    .unwrap_or_default(),
+            );
+            window.set_margin(
+                Edge::Bottom,
+                initial_placement
+                    .and_then(|placement| {
+                        bottom_margin_from_placement(
+                            window,
+                            &placement,
+                            panel_width,
+                            fallback_height,
+                        )
+                    })
+                    .unwrap_or_else(|| effective_bottom_margin(config)),
+            );
+        }
+        window.set_exclusive_zone(-1);
     }
-    window.set_exclusive_zone(-1);
     window.add_css_class("floating-window");
 
     super::style::install(
@@ -199,6 +216,10 @@ pub(super) fn build(
         },
         move |placement| placement_view.set_overlay_placement(snap_classes(&placement)),
         move |position| {
+            if !drag_mode.uses_layer_shell() {
+                // A compositor-driven move reports no position to persist.
+                return;
+            }
             let _ = sender.send(AppMsg::WindowMoved(position));
             if drag_mode.is_internal() {
                 let (Some(window), Some(content)) =
@@ -235,7 +256,9 @@ pub(super) fn build(
                 panel_width,
                 fallback_height,
             );
-            setup_input_region(window, &content);
+            if !placement.uses_native_window() {
+                setup_input_region(window, &content);
+            }
             gtk::glib::idle_add_local_once(move || {
                 let picked = web_stack.pick(16.0, 16.0, gtk::PickFlags::DEFAULT);
                 if picked
@@ -290,7 +313,9 @@ fn apply_panel_width(
     content.set_width_request(width);
     lyrics_viewport.set_width_request(width);
     reposition_for_width(window, stage, content, placement, width);
-    setup_input_region(window, content);
+    if !placement.uses_native_window() {
+        setup_input_region(window, content);
+    }
 }
 
 fn set_status_lyrics(floating: &OverlayView, message: &str, key: Text) {
@@ -371,7 +396,7 @@ impl OverlayView {
                 width,
                 fallback_height,
             );
-        } else {
+        } else if self.placement.uses_layer_margins() {
             self.window.set_margin(
                 Edge::Bottom,
                 bottom_margin_from_placement(
@@ -413,12 +438,19 @@ impl OverlayView {
                     width,
                     fallback_height,
                 );
-            } else if let Some(bottom_margin) =
-                bottom_margin_from_placement(&window, &placement.current(), width, fallback_height)
+            } else if placement.uses_layer_margins()
+                && let Some(bottom_margin) = bottom_margin_from_placement(
+                    &window,
+                    &placement.current(),
+                    width,
+                    fallback_height,
+                )
             {
                 window.set_margin(Edge::Bottom, bottom_margin);
             }
-            setup_input_region(&window, &content);
+            if !placement.uses_native_window() {
+                setup_input_region(&window, &content);
+            }
         });
     }
 
@@ -538,6 +570,13 @@ fn track_offset_label(offset_ms: i64, unit: &str) -> String {
         std::cmp::Ordering::Less => format!("−{} {unit}", offset_ms.unsigned_abs()),
         std::cmp::Ordering::Equal => format!("0 {unit}"),
     }
+}
+
+fn overlay_drag_mode(layer_shell_supported: bool, desktop: Option<&str>) -> DragMode {
+    if !layer_shell_supported {
+        return DragMode::ToplevelWindow;
+    }
+    desktop_drag_mode(desktop)
 }
 
 fn desktop_drag_mode(desktop: Option<&str>) -> DragMode {
