@@ -38,9 +38,9 @@ FloatLyrics 是一款面向 Linux Wayland 的 MPRIS 悬浮歌词应用。它会�
 | 播放器 | 提供 `PlaybackStatus`、`Position` 和含标题 `Metadata` 的 MPRIS 播放器 |
 | 运行库 | GTK 4.12 或更高版本、gtk4-layer-shell、WebKitGTK 6.0 |
 
-FloatLyrics 依赖 layer-shell 实现悬浮覆盖层，目前不支持 X11。可运行 `echo "$XDG_SESSION_TYPE"` 检查当前会话类型。
+FloatLyrics 依赖 layer-shell 实现悬浮覆盖层，目前不支持 X11；X11 下同样会退化为普通窗口，但不在支持范围内。可运行 `echo "$XDG_SESSION_TYPE"` 检查当前会话类型。
 
-KDE（KWin）、Hyprland 和 Sway 等合成器原生支持 layer-shell；GNOME（Mutter）不支持该协议，浮窗会退化为可拖拽的普通窗口，点击穿透与屏幕吸附不可用。
+KDE（KWin）、Hyprland 和 Sway 等合成器原生支持 layer-shell；GNOME（Mutter）不支持该协议，浮窗会退化为可拖拽的普通窗口，点击穿透、屏幕吸附与记住窗口位置不可用；可在窗口上按 `Alt+Space` 打开“置顶”与“在所有工作区显示”
 
 ## 安装
 
@@ -269,7 +269,7 @@ enabled = true
 
 ## 常见问题与限制
 
-- **浮窗没有出现：** 确认当前是 Wayland 会话、合成器支持 layer-shell，并且播放器正在通过 MPRIS 暴露播放状态。
+- **浮窗没有出现：** 确认当前是 Wayland 会话，并且播放器正在通过 MPRIS 暴露播放状态。
 - **播放器没有被识别：** 运行 `busctl --user list` 检查 `org.mpris.MediaPlayer2.*` 名称，必要时调整 `player.preferred_players` 或 `player.ignored_players`。
 - **歌词时间不准：** 使用浮窗按钮校准当前歌曲，或在设置中调整全局偏移 `lyrics.offset_ms`。播放器未正确更新 `Position` 或 `Metadata` 时可能无法可靠同步。
 - **逐词高亮与演唱不完全一致：** 逐词时间只取自歌词源自己的逐字数据（AMLL TTML DB 的逐词 TTML、QQ 音乐 QRC、网易云逐字、汽水 KRC）；只提供整行时间的歌词源（例如 LRC）不做逐词高亮，整行一起点亮。网易云的逐字歌词是它单独一份时间表，FloatLyrics 只取其中的时间、文字仍用它的整行版本，对不上的行（例如逐字版给某个词打了码）同样退回整行高亮。

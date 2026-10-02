@@ -120,6 +120,7 @@
   "SearchingProviders": "Searching lyrics sources…",
   "SelectCandidatePreview": "Select a candidate to preview its lyrics",
   "SettingsWindowTitle": "FloatLyrics Settings",
+  "OverlayWindowTitle": "FloatLyrics Lyrics",
   "ShowRomanization": "Show romanization",
   "ShowRomanizationDescription": "Generated locally from the original lyrics",
   "ChineseRomanization": "Chinese pronunciation",

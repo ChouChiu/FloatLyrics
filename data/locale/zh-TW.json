@@ -120,6 +120,7 @@
   "SearchingProviders": "正在搜尋歌詞來源…",
   "SelectCandidatePreview": "選擇候選歌詞後會在這裡預覽",
   "SettingsWindowTitle": "FloatLyrics 設定",
+  "OverlayWindowTitle": "FloatLyrics 歌詞",
   "ShowRomanization": "顯示羅馬拼音",
   "ShowRomanizationDescription": "一律根據原歌詞在本機產生",
   "ChineseRomanization": "中文羅馬拼音",

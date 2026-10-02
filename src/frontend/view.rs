@@ -123,7 +123,7 @@ pub(super) fn build(
         config.lyrics.apple_music_style,
     );
     let fallback_height = fallback_panel_height(viewport_h);
-    window.set_title(Some("FloatLyrics Overlay"));
+    window.set_title(Some(i18n.text(Text::OverlayWindowTitle)));
     window.set_decorated(false);
     window.set_resizable(false);
 
@@ -215,11 +215,9 @@ pub(super) fn build(
             mode: drag_mode,
         },
         move |placement| placement_view.set_overlay_placement(snap_classes(&placement)),
+        // The plain-window fallback never calls this: a compositor-driven move
+        // reports no position to persist.
         move |position| {
-            if !drag_mode.uses_layer_shell() {
-                // A compositor-driven move reports no position to persist.
-                return;
-            }
             let _ = sender.send(AppMsg::WindowMoved(position));
             if drag_mode.is_internal() {
                 let (Some(window), Some(content)) =
@@ -292,6 +290,10 @@ pub(super) fn build(
     {
         let overlay = overlay.clone();
         i18n.subscribe(move |language| {
+            // Only the plain-window fallback shows this title to the user.
+            overlay
+                .window
+                .set_title(Some(language.text(Text::OverlayWindowTitle)));
             overlay.render_overlay_state(language);
             let static_status = overlay.state.static_status();
             if let Some(key) = static_status {

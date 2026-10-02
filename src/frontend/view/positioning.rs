@@ -232,23 +232,11 @@ pub(super) fn attach_floating_drag(
 
     {
         let placement = placement.clone();
-        let drag_handle = drag_handle.downgrade();
         gesture.connect_drag_end(move |_, _, _| {
-            if let Some(drag_handle) = drag_handle.upgrade() {
-                drag_handle.set_cursor_from_name(Some("grab"));
-            }
             on_drag_end(placement.current().position());
         });
     }
-
-    {
-        let drag_handle = drag_handle.downgrade();
-        gesture.connect_cancel(move |_, _| {
-            if let Some(drag_handle) = drag_handle.upgrade() {
-                drag_handle.set_cursor_from_name(Some("grab"));
-            }
-        });
-    }
+    restore_grab_cursor(&gesture, drag_handle);
 
     if mode.is_internal() {
         // GestureDrag reports offsets in the controller widget's coordinate
@@ -304,24 +292,27 @@ fn attach_toplevel_move(
             );
         });
     }
-    {
-        let drag_handle = drag_handle.downgrade();
-        gesture.connect_drag_end(move |_, _, _| {
-            if let Some(drag_handle) = drag_handle.upgrade() {
-                drag_handle.set_cursor_from_name(Some("grab"));
-            }
-        });
-    }
-    {
-        let drag_handle = drag_handle.downgrade();
-        gesture.connect_cancel(move |_, _| {
-            if let Some(drag_handle) = drag_handle.upgrade() {
-                drag_handle.set_cursor_from_name(Some("grab"));
-            }
-        });
-    }
+    restore_grab_cursor(&gesture, drag_handle);
     content.add_controller(gesture);
     PlacementState::new(placement, 0, 0, DragMode::ToplevelWindow)
+}
+
+/// Puts the open-hand cursor back on the drag handle when a drag ends or the
+/// gesture is cancelled.
+fn restore_grab_cursor(gesture: &gtk::GestureDrag, drag_handle: &gtk::Box) {
+    let restore = {
+        let drag_handle = drag_handle.downgrade();
+        move || {
+            if let Some(drag_handle) = drag_handle.upgrade() {
+                drag_handle.set_cursor_from_name(Some("grab"));
+            }
+        }
+    };
+    {
+        let restore = restore.clone();
+        gesture.connect_drag_end(move |_, _, _| restore());
+    }
+    gesture.connect_cancel(move |_, _| restore());
 }
 
 pub(super) fn initial_x(window_width: i32) -> Option<i32> {
