@@ -1,0 +1,66 @@
+# SPDX-FileCopyrightText: 2026 ChouChiu
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: Prepare Arch Linux build
+description: >-
+  Trusts the workspace, installs Bun for build.rs, and restores the Bun and
+  Cargo caches inside the archlinux container. The Cargo cache is only
+  restored here; the calling job saves it with the returned key.
+
+inputs:
+  cache-profile:
+    description: Name that separates Cargo caches of jobs building different profiles
+    required: true
+
+outputs:
+  cargo-cache-key:
+    description: Exact Cargo cache key for this toolchain, lockfile, and commit
+    value: ${{ steps.cargo-key.outputs.key }}
+  cargo-cache-hit:
+    description: Whether the exact Cargo cache key was restored
+    value: ${{ steps.cargo-cache.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Trust checked-out workspace
+      shell: bash
+      run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+    - name: Set up Bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: 1.4.2
+
+    - name: Restore Bun cache
+      uses: actions/cache@v6
+      with:
+        path: ~/.bun/install/cache
+        key: bun-arch-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+        restore-keys: |
+          bun-arch-${{ runner.arch }}-
+
+    # The toolchain comes from the rolling Arch package, so its version is part
+    # of the key: artifacts from another rustc would be rebuilt anyway.
+    - name: Compute Cargo cache key
+      id: cargo-key
+      shell: bash
+      run: |
+        rustc_version=$(rustc --version | cut -d' ' -f2)
+        prefix="cargo-arch-${{ runner.arch }}-${{ inputs.cache-profile }}-rustc${rustc_version}-${{ hashFiles('Cargo.lock') }}"
+        echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+        echo "key=$prefix-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore Cargo cache
+      id: cargo-cache
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+          target
+        key: ${{ steps.cargo-key.outputs.key }}
+        restore-keys: |
+          ${{ steps.cargo-key.outputs.prefix }}-
+          cargo-arch-${{ runner.arch }}-${{ inputs.cache-profile }}-

@@ -19,35 +19,23 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
   RUST_BACKTRACE: "1"
+  # Caches are saved only from main, so pull requests reuse them without
+  # filling the repository quota with per-branch copies.
+  SAVE_CACHE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
 jobs:
-  quality:
-    name: Frontend and Rust quality
+  frontend:
+    name: Frontend
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    container:
-      image: archlinux:latest
+    timeout-minutes: 15
 
     steps:
-      - name: Install build dependencies
-        run: >-
-          pacman -Syu --noconfirm --needed
-          base-devel
-          git
-          gtk4
-          gtk4-layer-shell
-          webkitgtk-6.0
-          rust
-          unzip
-
       - name: Check out source
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-
-      - name: Trust checked-out workspace
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -62,45 +50,141 @@ jobs:
           restore-keys: |
             bun-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Restore Cargo cache
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-arch-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-${{ github.sha }}
-          restore-keys: |
-            cargo-${{ runner.os }}-${{ runner.arch }}-arch-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-
-            cargo-${{ runner.os }}-${{ runner.arch }}-arch-
-
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
-      - name: Check frontend
-        run: |
-          bun run check
-          bun run typecheck
-          bun test
+      - name: Lint and format check
+        run: bun run check
 
-      - name: Verify dependency licenses
+      - name: Type check
+        run: bun run typecheck
+
+      - name: Test
+        run: bun test
+
+      - name: Build lyrics view
+        run: bun run build:lyrics
+
+  licenses:
+    name: Dependency licenses
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: archlinux:latest
+    env:
+      CARGO_ABOUT_VERSION: 0.9.1
+
+    steps:
+      - name: Install tools
+        run: pacman -Syu --noconfirm --needed base-devel git rust
+
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Trust checked-out workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Restore cargo-about
+        id: cargo-about
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/cargo-about
+          key: cargo-about-${{ env.CARGO_ABOUT_VERSION }}-arch-${{ runner.arch }}
+
+      - name: Install cargo-about
+        if: steps.cargo-about.outputs.cache-hit != 'true'
+        run: cargo install --locked --features cli --version "$CARGO_ABOUT_VERSION" cargo-about
+
+      - name: Verify generated license data is current
         run: |
-          cargo install --locked --features cli --version 0.9.1 cargo-about
+          export PATH="$HOME/.cargo/bin:$PATH"
           cargo about generate --locked --all-features data/licenses/about.hbs \
             --output-file data/licenses/dependencies.json
           git diff --exit-code -- data/licenses/dependencies.json
 
-      - name: Check Rust formatting
+  rust:
+    name: Rust checks and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    container:
+      image: archlinux:latest
+
+    steps:
+      - name: Install build dependencies
+        run: >-
+          pacman -Syu --noconfirm --needed
+          base-devel git gtk4 gtk4-layer-shell webkitgtk-6.0 rust unzip
+
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Prepare build
+        id: prepare
+        uses: ./.github/actions/arch-build
+        with:
+          cache-profile: debug
+
+      - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Lint Rust
+      - name: Lint
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
-      - name: Test workspace
+      - name: Test
         run: cargo test --locked --all-targets --all-features
 
       - name: Build documentation
         run: cargo docs
 
+      - name: Save Cargo cache
+        if: ${{ !cancelled() && env.SAVE_CACHE == 'true' && steps.prepare.outputs.cargo-cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.prepare.outputs.cargo-cache-key }}
+
+  release-build:
+    name: Release build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    container:
+      image: archlinux:latest
+
+    steps:
+      - name: Install build dependencies
+        run: >-
+          pacman -Syu --noconfirm --needed
+          base-devel git gtk4 gtk4-layer-shell webkitgtk-6.0 rust unzip
+
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Prepare build
+        id: prepare
+        uses: ./.github/actions/arch-build
+        with:
+          cache-profile: release
+
       - name: Build release binary
         run: cargo build --locked --release
+
+      - name: Save Cargo cache
+        if: ${{ !cancelled() && env.SAVE_CACHE == 'true' && steps.prepare.outputs.cargo-cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.prepare.outputs.cargo-cache-key }}

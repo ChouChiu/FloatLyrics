@@ -1,8 +1,9 @@
 use super::*;
 
 use std::rc::Rc;
-use std::sync::mpsc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
+use std::time::{Duration, Instant};
 
 use floatlyrics_core::track::TrackMetadata;
 use floatlyrics_lyrics::lyrics::{FetchedLyrics, LyricsProvider};
@@ -29,6 +30,12 @@ const CACHED_LYRICS: &str = "[1000,2000]안녕(1000,400) 세계(1400,400)";
 const LINE_TIMED_LYRICS: &str = "[00:01.00]안녕 세계\n[00:03.00]你好世界\n[00:05.00]bye\n";
 /// Wait for silence after the last protocol message before asserting.
 const IDLE: Duration = Duration::from_millis(600);
+/// How long the controller is pumped before the listener's messages are read.
+const PUMP: Duration = Duration::from_secs(2);
+/// The longest a test waits for the published state it needs. Loading the
+/// embedded CJK dictionaries in an unoptimized build can take far longer than
+/// [`PUMP`] on a shared CI runner.
+const SETTLE_LIMIT: Duration = Duration::from_secs(60);
 
 /// Runs the real controller with an [`AmllSender`] over a real socket and
 /// returns every protocol message a listening AMLL player received.
@@ -41,6 +48,23 @@ fn publish(raw_lyrics: Option<&str>, track_offset_ms: i64) -> Vec<Value> {
     publish_with(raw_lyrics, &["Artist"], &["Artist"], track_offset_ms)
 }
 
+/// [`publish`] that keeps pumping the controller past [`PUMP`] until the
+/// messages the listener has received so far satisfy `settled`, so a test that
+/// needs background work such as romanization does not race a fixed deadline.
+fn publish_until(
+    raw_lyrics: Option<&str>,
+    track_offset_ms: i64,
+    settled: impl Fn(&[Value]) -> bool,
+) -> Vec<Value> {
+    publish_settled(
+        raw_lyrics,
+        &["Artist"],
+        &["Artist"],
+        track_offset_ms,
+        settled,
+    )
+}
+
 /// [`publish`] with the player's own billing and the provider's kept apart, so a
 /// test can tell the artists the player reports from the ones the lyrics credit.
 fn publish_with(
@@ -48,6 +72,22 @@ fn publish_with(
     track_artists: &[&str],
     cached_artists: &[&str],
     track_offset_ms: i64,
+) -> Vec<Value> {
+    publish_settled(
+        raw_lyrics,
+        track_artists,
+        cached_artists,
+        track_offset_ms,
+        |_| true,
+    )
+}
+
+fn publish_settled(
+    raw_lyrics: Option<&str>,
+    track_artists: &[&str],
+    cached_artists: &[&str],
+    track_offset_ms: i64,
+    settled: impl Fn(&[Value]) -> bool,
 ) -> Vec<Value> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -58,19 +98,28 @@ fn publish_with(
         .block_on(async { tokio::net::TcpListener::bind("127.0.0.1:0").await })
         .expect("listener");
     let address = listener.local_addr().expect("address").to_string();
-    let player = runtime.spawn(async move {
-        let (stream, _) = listener.accept().await.expect("connection");
-        let mut socket = tokio_tungstenite::accept_async(stream)
-            .await
-            .expect("handshake");
-        let mut received = Vec::new();
-        while let Ok(Some(Ok(message))) = tokio::time::timeout(IDLE, socket.next()).await {
-            received.push(
-                serde_json::from_str::<Value>(message.to_text().expect("text frame"))
-                    .expect("protocol json"),
-            );
+    let received = Arc::new(Mutex::new(Vec::new()));
+    let pumping = Arc::new(AtomicBool::new(true));
+    let player = runtime.spawn({
+        let received = Arc::clone(&received);
+        let pumping = Arc::clone(&pumping);
+        async move {
+            let (stream, _) = listener.accept().await.expect("connection");
+            let mut socket = tokio_tungstenite::accept_async(stream)
+                .await
+                .expect("handshake");
+            loop {
+                match tokio::time::timeout(IDLE, socket.next()).await {
+                    Ok(Some(Ok(message))) => received.lock().unwrap().push(
+                        serde_json::from_str::<Value>(message.to_text().expect("text frame"))
+                            .expect("protocol json"),
+                    ),
+                    // Silence only ends the read once the controller is done.
+                    Err(_) if pumping.load(Ordering::Acquire) => {}
+                    _ => break,
+                }
+            }
         }
-        received
     });
 
     let directory = tempfile::tempdir().expect("temporary cache");
@@ -112,9 +161,11 @@ fn publish_with(
 
     // Pump the controller the way the GTK tick callback does, long enough for
     // the cached lyrics and the background romanization to be applied.
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let started = Instant::now();
     let mut offset_applied = false;
-    while std::time::Instant::now() < deadline {
+    while started.elapsed() < PUMP
+        || (!settled(&received.lock().unwrap()) && started.elapsed() < SETTLE_LIMIT)
+    {
         controller.tick();
         if !offset_applied {
             // The offset command needs the track the first tick has connected.
@@ -123,11 +174,13 @@ fn publish_with(
         }
         std::thread::sleep(Duration::from_millis(20));
     }
+    pumping.store(false, Ordering::Release);
 
     runtime
         .block_on(async { tokio::time::timeout(Duration::from_secs(5), player).await })
         .expect("the AMLL player finishes reading")
-        .expect("player task")
+        .expect("player task");
+    std::mem::take(&mut *received.lock().unwrap())
 }
 
 /// The player's volume and playback modes reach the listener, so its own
@@ -144,6 +197,19 @@ fn publishes_the_player_volume_and_modes_to_the_listener() {
         last(&received, "modeChanged"),
         serde_json::json!({ "update": "modeChanged", "repeat": "all", "shuffle": true })
     );
+}
+
+/// A settle condition for [`publish_until`]: the last lyrics document the
+/// listener received contains `needle`.
+fn lyrics_contain(needle: &str) -> impl Fn(&[Value]) -> bool + '_ {
+    move |received| {
+        received
+            .iter()
+            .rev()
+            .find(|value| value["value"]["update"] == "setLyric")
+            .and_then(|update| update["value"]["data"].as_str())
+            .is_some_and(|lyrics| lyrics.contains(needle))
+    }
 }
 
 /// Returns the TTML document of the last `setLyric` update that carried lyrics.
@@ -168,7 +234,7 @@ fn published_lyrics(received: &[Value]) -> String {
 /// and the playback progress.
 #[test]
 fn publishes_controller_state_to_a_listening_player() {
-    let received = publish(Some(CACHED_LYRICS), 0);
+    let received = publish_until(Some(CACHED_LYRICS), 0, lyrics_contain("<transliteration"));
 
     assert_eq!(received[0], serde_json::json!({ "type": "initialize" }));
     let music = only(&received, "setMusic");
@@ -250,7 +316,7 @@ fn publishes_the_player_position_rather_than_the_lyric_offset() {
 /// every token receives the reading that covers it.
 #[test]
 fn splits_line_timed_lyrics_into_words_with_readings() {
-    let received = publish(Some(LINE_TIMED_LYRICS), 0);
+    let received = publish_until(Some(LINE_TIMED_LYRICS), 0, lyrics_contain("jiè"));
     let lyrics = published_lyrics(&received);
 
     assert_eq!(
@@ -291,7 +357,11 @@ fn splits_line_timed_lyrics_into_words_with_readings() {
 #[test]
 fn splits_japanese_line_timed_lyrics_into_words_with_readings() {
     // A second line bounds the first one, which is what segmentation splits by.
-    let received = publish(Some("[00:01.00]こんにちは世界\n[00:05.00]bye"), 0);
+    let received = publish_until(
+        Some("[00:01.00]こんにちは世界\n[00:05.00]bye"),
+        0,
+        lyrics_contain("tts:ruby"),
+    );
     let lyrics = published_lyrics(&received);
 
     assert!(
