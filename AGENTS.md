@@ -315,7 +315,11 @@ discovery and is the preferred way to isolate catalogue tests.
   manual-selection precedence when changing search or cache behavior.
 - Relm4 initializes GTK; do not call `gtk::init()`.
 - The application is a Wayland layer-shell overlay and is not expected to run on
-  X11 or without compositor layer-shell support.
+  X11. When `gtk4_layer_shell::is_supported()` is false (GNOME's Mutter), the
+  overlay falls back to `DragMode::ToplevelWindow`: a plain undecorated window
+  the compositor moves, with no click-through input region, edge snapping, or
+  remembered position. Keep layer-shell calls and margin updates behind
+  `uses_layer_shell()` / `uses_layer_margins()` so that path never reaches them.
 - Before GTK initialization, `src/lib.rs` supplies default `GSK_RENDERER=gl` and
   `GTK_A11Y=none` values when unset. Preserve caller-provided values.
 

@@ -208,6 +208,7 @@ macro_rules! define_text_keys {
 
 define_text_keys!(
     SettingsWindowTitle,
+    OverlayWindowTitle,
     ChangesSavedAutomatically,
     Saved,
     SaveFailed,

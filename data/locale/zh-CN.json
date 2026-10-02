@@ -120,6 +120,7 @@
   "SearchingProviders": "正在搜索歌词源…",
   "SelectCandidatePreview": "选择候选歌词后将在这里预览",
   "SettingsWindowTitle": "FloatLyrics 设置",
+  "OverlayWindowTitle": "FloatLyrics 歌词",
   "ShowRomanization": "显示罗马音",
   "ShowRomanizationDescription": "始终根据原歌词在本地生成",
   "ChineseRomanization": "中文罗马音",

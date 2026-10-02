@@ -35,11 +35,17 @@ struct PlacedContent {
 pub(super) enum DragMode {
     LayerSurface,
     InternalPanel,
+    /// No layer shell protocol: a plain toplevel the compositor moves.
+    ToplevelWindow,
 }
 
 impl DragMode {
     pub(super) fn is_internal(self) -> bool {
         self == Self::InternalPanel
+    }
+
+    pub(super) fn uses_layer_shell(self) -> bool {
+        self != Self::ToplevelWindow
     }
 }
 
@@ -68,6 +74,14 @@ impl PlacementState {
         self.mode.is_internal()
     }
 
+    pub(super) fn uses_layer_margins(&self) -> bool {
+        self.mode == DragMode::LayerSurface
+    }
+
+    pub(super) fn uses_native_window(&self) -> bool {
+        self.mode == DragMode::ToplevelWindow
+    }
+
     fn set(&self, placement: WindowPlacement, left: i32, top: i32) {
         *self.content.borrow_mut() = PlacedContent {
             placement,
@@ -94,6 +108,11 @@ pub(super) fn attach_floating_drag(
     on_placement_changed: impl Fn(WindowPlacement) + 'static,
     on_drag_end: impl Fn(WindowPosition) + 'static,
 ) -> PlacementState {
+    if layout.mode == DragMode::ToplevelWindow {
+        // The layer modes mount the panel below; the plain window needs it too.
+        layout.stage.put(content, 0.0, 0.0);
+        return attach_toplevel_move(window, content, drag_handle, on_placement_changed);
+    }
     let FloatingDragLayout {
         stage,
         fallback_width,
@@ -213,23 +232,11 @@ pub(super) fn attach_floating_drag(
 
     {
         let placement = placement.clone();
-        let drag_handle = drag_handle.downgrade();
         gesture.connect_drag_end(move |_, _, _| {
-            if let Some(drag_handle) = drag_handle.upgrade() {
-                drag_handle.set_cursor_from_name(Some("grab"));
-            }
             on_drag_end(placement.current().position());
         });
     }
-
-    {
-        let drag_handle = drag_handle.downgrade();
-        gesture.connect_cancel(move |_, _| {
-            if let Some(drag_handle) = drag_handle.upgrade() {
-                drag_handle.set_cursor_from_name(Some("grab"));
-            }
-        });
-    }
+    restore_grab_cursor(&gesture, drag_handle);
 
     if mode.is_internal() {
         // GestureDrag reports offsets in the controller widget's coordinate
@@ -241,6 +248,71 @@ pub(super) fn attach_floating_drag(
         content.add_controller(gesture);
     }
     placement
+}
+
+/// Plain-window fallback: the compositor moves the toplevel, so the drag only
+/// hands the pointer to it and there is no placement to track or persist.
+fn attach_toplevel_move(
+    window: &gtk::ApplicationWindow,
+    content: &gtk::Box,
+    drag_handle: &gtk::Box,
+    on_placement_changed: impl Fn(WindowPlacement) + 'static,
+) -> PlacementState {
+    let placement = WindowPlacement::default();
+    on_placement_changed(placement);
+    let gesture = gtk::GestureDrag::new();
+    drag_handle.set_cursor_from_name(Some("grab"));
+    {
+        let window = window.downgrade();
+        let drag_handle = drag_handle.downgrade();
+        gesture.connect_drag_begin(move |gesture, _, _| {
+            let (Some(window), Some(drag_handle)) = (window.upgrade(), drag_handle.upgrade())
+            else {
+                return;
+            };
+            drag_handle.set_cursor_from_name(Some("grabbing"));
+            let Some(surface) = window.surface() else {
+                return;
+            };
+            let Some(device) = gesture.current_event_device() else {
+                return;
+            };
+            let Some((x, y, _)) = surface.device_position(&device) else {
+                return;
+            };
+            let Ok(toplevel) = surface.downcast::<gtk::gdk::Toplevel>() else {
+                return;
+            };
+            toplevel.begin_move(
+                &device,
+                gesture.current_button() as i32,
+                x,
+                y,
+                gesture.current_event_time(),
+            );
+        });
+    }
+    restore_grab_cursor(&gesture, drag_handle);
+    content.add_controller(gesture);
+    PlacementState::new(placement, 0, 0, DragMode::ToplevelWindow)
+}
+
+/// Puts the open-hand cursor back on the drag handle when a drag ends or the
+/// gesture is cancelled.
+fn restore_grab_cursor(gesture: &gtk::GestureDrag, drag_handle: &gtk::Box) {
+    let restore = {
+        let drag_handle = drag_handle.downgrade();
+        move || {
+            if let Some(drag_handle) = drag_handle.upgrade() {
+                drag_handle.set_cursor_from_name(Some("grab"));
+            }
+        }
+    };
+    {
+        let restore = restore.clone();
+        gesture.connect_drag_end(move |_, _, _| restore());
+    }
+    gesture.connect_cancel(move |_, _| restore());
 }
 
 pub(super) fn initial_x(window_width: i32) -> Option<i32> {
@@ -290,7 +362,7 @@ pub(super) fn reposition_for_width(
         }
         stage.move_(content, left as f64, top as f64);
         placement.set(current, left, top);
-    } else {
+    } else if placement.uses_layer_margins() {
         window.set_margin(Edge::Left, left);
     }
 }
