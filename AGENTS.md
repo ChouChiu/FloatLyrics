@@ -411,10 +411,17 @@ the rows to `TimedLine`, and nothing beyond them:
   own, wholly bracketed, which are folded into the line before them: the phrase
   may open on one row and close several rows later, and it answers after whatever
   rest the line leaves rather than always at its parent's last word. Both forms
-  need a letter or digit inside the brackets, so `(...)` is left alone. A row
-  with only line timing (Kugou's LRC, a NetEase row its word timing did not
-  match) still has the phrase split off, but the phrase has no words of its own
-  and takes the timing of the row.
+  need a letter or digit inside the brackets, so `(...)` is left alone, and so is
+  a repetition mark: `x 3`, `×3`, or `(x 14)` at the end of a row says how often
+  it is sung, and `strip_repetition_marks` drops it from the text, the words, and
+  the translation before anything reads the brackets. A row with only line
+  timing (Kugou's LRC, a NetEase row its word timing did not match) still has the
+  phrase split off, but the phrase has no words of its own and takes the timing
+  of the row. NetEase brackets the translation of the phrase inside the
+  translation of its line (`I'm a a diva （hey）` is `我是一个一个天后（嘿）`), so
+  a translation document is paired with its rows whole and
+  `split_background_translations` moves the bracketed part onto the phrase once
+  the pairing is done; a translation whose line has no phrase keeps its brackets.
   Folding runs after translations are paired, because the echo is translated where
   it is sung rather than where the line it answers is: it keeps its own timing, its
   own words, and its own translation in `BackgroundVocal`: the AMLL sender writes

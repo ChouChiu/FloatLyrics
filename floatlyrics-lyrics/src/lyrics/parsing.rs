@@ -8,7 +8,8 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result, anyhow};
 use lyrics_helper::helpers::conventions::{
-    apply_speaker_labels, fold_bracketed_echoes, merge_continued_lines, split_background_vocals,
+    apply_speaker_labels, fold_bracketed_echoes, merge_continued_lines,
+    split_background_translations, split_background_vocals, strip_repetition_marks,
     unwrap_brackets,
 };
 use lyrics_helper::helpers::optimization::explicit::fix_explicit;
@@ -148,8 +149,9 @@ pub fn timed_lines_from_raw(content: &str, artists: &[String]) -> Result<Vec<Tim
     if let Some(translation) = translation {
         // A translation document is written for the track rather than by one of
         // its performers, so no label in it names a voice.
-        let translation_lines = parse_lines_block(translation, &[])?;
+        let translation_lines = parse_translation_block(translation)?;
         merge_translation_lines(&mut lines, translation_lines);
+        split_background_translations(&mut lines);
     }
     // After the translations are paired: an echo is a line of its own until it is
     // folded away, so it collects the translation timed to it, and each row of a
@@ -177,15 +179,31 @@ fn parse_lines_block(content: &str, artists: &[String]) -> Result<Vec<LineInfo>>
     require_lines(lines_from_parsed(&parsed, artists))
 }
 
+/// Parses a translation document into rows whose text is the whole translation.
+///
+/// A translation brackets the background vocal it translates, but only the line
+/// it is paired with knows whether it has one, so the brackets stay in the text
+/// for [`split_background_translations`] to read after the pairing.
+fn parse_translation_block(content: &str) -> Result<Vec<LineInfo>> {
+    let parsed = parse_local_lyrics(content)?;
+    let mut lines = merge_translation_marker_lines(sorted_rows(&parsed));
+    strip_repetition_marks(&mut lines);
+    require_lines(filter_display_lines(lines))
+}
+
 /// Reads a provider's own transcription conventions and drops non-lyric rows.
 ///
 /// A label may name a performer, so it is read before the filter drops the rows
-/// that look like one; a bracketed tail is only split off a word-timed line, so
-/// this runs before the timed units are split into words.
+/// that look like one; a repetition mark is not sung, so it is dropped before a
+/// bracketed mark could be read as a background vocal; and a bracketed tail is
+/// split off before the timed units are split into words, taking the bracketed
+/// part of a translation the row already carries with it.
 fn finish(lines: Vec<LineInfo>, artists: &[String]) -> Vec<LineInfo> {
     let mut lines = merge_translation_marker_lines(lines);
     apply_speaker_labels(&mut lines, artists);
+    strip_repetition_marks(&mut lines);
     split_background_vocals(&mut lines);
+    split_background_translations(&mut lines);
     filter_display_lines(lines)
 }
 
@@ -218,6 +236,12 @@ pub fn timed_lines_from_data(data: &LyricsData, artists: &[String]) -> Vec<Timed
 /// paired, so a payload that arrived with a translation document of its own is
 /// read in this stage first.
 fn lines_from_parsed(data: &LyricsData, artists: &[String]) -> Vec<LineInfo> {
+    finish(sorted_rows(data), artists)
+}
+
+/// Returns the timed rows of parsed lyrics that carry text or a translation, in
+/// order of their start, each with at most one translation.
+fn sorted_rows(data: &LyricsData) -> Vec<LineInfo> {
     let Some(lines) = data.lines.as_deref() else {
         return Vec::new();
     };
@@ -239,7 +263,7 @@ fn lines_from_parsed(data: &LyricsData, artists: &[String]) -> Vec<LineInfo> {
         })
         .collect::<Vec<_>>();
     lines.sort_by_key(LineInfo::start_time_or_zero);
-    finish(lines, artists)
+    lines
 }
 
 /// Converts display rows whose conventions are read to timed lines.

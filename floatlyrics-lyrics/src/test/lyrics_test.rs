@@ -1106,6 +1106,61 @@ fn a_line_timed_source_splits_a_bracketed_tail_on_the_line_timing() {
 }
 
 #[test]
+fn a_translation_document_keeps_its_bracketed_tail() {
+    let raw = combine_lyrics_with_translation("[00:01.00]Hey there", Some("[00:01.00]你好（嘿）"));
+    let lines = timed_lines_from_raw(&raw, &[]).unwrap();
+
+    assert_eq!(lines[0].translation.as_deref(), Some("你好（嘿）"));
+}
+
+#[test]
+fn the_translation_of_a_background_vocal_moves_with_it() {
+    let raw = combine_lyrics_with_translation(
+        "[1000,2000]I'm (1000,500)a (1500,500)diva (2000,500)(hey)(2500,500)",
+        Some("[00:01.00]我是天后（嘿）"),
+    );
+    let lines = timed_lines_from_raw(&raw, &[]).unwrap();
+
+    assert_eq!(lines[0].text, "I'm a diva");
+    assert_eq!(lines[0].translation.as_deref(), Some("我是天后"));
+    let background = lines[0].background.as_ref().expect("bracketed tail");
+    assert_eq!(background.text, "hey");
+    assert_eq!(background.translation.as_deref(), Some("嘿"));
+}
+
+#[test]
+fn drops_a_trailing_repetition_mark() {
+    let raw =
+        combine_lyrics_with_translation("[00:01.00]I'm a diva x 3", Some("[00:01.00]我是天后 ×3"));
+    let lines = timed_lines_from_raw(&raw, &[]).unwrap();
+
+    assert_eq!(lines[0].text, "I'm a diva");
+    assert!(lines[0].background.is_none());
+    assert_eq!(lines[0].translation.as_deref(), Some("我是天后"));
+}
+
+#[test]
+fn drops_a_bracketed_repetition_mark_from_the_words() {
+    let raw = "[1000,2000]I'm (1000,500)a (1500,500)diva (2000,500)(x 14)(2500,500)";
+    let lines = timed_lines_from_raw(raw, &[]).unwrap();
+
+    assert_eq!(lines[0].text, "I'm a diva");
+    assert!(
+        lines[0].background.is_none(),
+        "a repetition mark is not a background vocal"
+    );
+    assert_eq!(
+        lines[0]
+            .syllables
+            .iter()
+            .map(|syllable| syllable.text.as_str())
+            .collect::<String>()
+            .trim(),
+        "I'm a diva"
+    );
+}
+
+#[test]
 fn reads_speaker_labels_against_the_providers_artists() {
     let artists = vec!["Ariana Grande".to_string(), "Iggy Azalea".to_string()];
     let raw = "\
