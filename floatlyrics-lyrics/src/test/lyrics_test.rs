@@ -1094,12 +1094,15 @@ fn a_bracketed_line_elsewhere_in_the_song_stays_its_own_line() {
 }
 
 #[test]
-fn a_line_timed_source_keeps_a_bracketed_tail_as_sung_text() {
+fn a_line_timed_source_splits_a_bracketed_tail_on_the_line_timing() {
     let raw = "[00:01.00]Know the way (My way)";
     let lines = timed_lines_from_raw(raw, &[]).unwrap();
 
-    assert_eq!(lines[0].text, "Know the way (My way)");
-    assert!(lines[0].background.is_none());
+    assert_eq!(lines[0].text, "Know the way");
+    let background = lines[0].background.as_ref().expect("bracketed tail");
+    assert_eq!(background.text, "My way");
+    assert_eq!(background.start_ms, lines[0].start_ms);
+    assert!(background.syllables.is_empty());
 }
 
 #[test]

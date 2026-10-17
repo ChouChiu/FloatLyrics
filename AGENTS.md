@@ -411,8 +411,10 @@ the rows to `TimedLine`, and nothing beyond them:
   own, wholly bracketed, which are folded into the line before them: the phrase
   may open on one row and close several rows later, and it answers after whatever
   rest the line leaves rather than always at its parent's last word. Both forms
-  need a letter or digit inside the brackets, so `(...)` is left alone, and a
-  line-timed source is left alone entirely: there is no timing to split off with.
+  need a letter or digit inside the brackets, so `(...)` is left alone. A row
+  with only line timing (Kugou's LRC, a NetEase row its word timing did not
+  match) still has the phrase split off, but the phrase has no words of its own
+  and takes the timing of the row.
   Folding runs after translations are paired, because the echo is translated where
   it is sung rather than where the line it answers is: it keeps its own timing, its
   own words, and its own translation in `BackgroundVocal`: the AMLL sender writes
