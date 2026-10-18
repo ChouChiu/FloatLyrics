@@ -253,6 +253,92 @@ fn playback_projection_follows_connection_lifecycle() {
     assert!(handle.current_track().is_none());
 }
 
+/// The cache is borrowed so it outlives the controller: dropping the worker
+/// joins its thread, which only ends once every service handle is gone.
+fn controller_without_providers(
+    cache: &CacheWorker,
+    runtime: &tokio::runtime::Runtime,
+) -> (Controller, mpsc::Sender<PlayerWatcherEvent>) {
+    let (sender, receiver) = mpsc::channel();
+    let (_hint_sender, hint_receiver) = mpsc::channel();
+    let mut config = LyricsRuntimeConfig::from(&AppConfig::default());
+    config.provider_order.clear();
+    let controller = Controller::new(
+        receiver,
+        hint_receiver,
+        runtime.handle().clone(),
+        Rc::new(NoopLyricsView),
+        cache.service(),
+        config,
+    );
+    (controller, sender)
+}
+
+#[test]
+fn a_view_switched_to_mid_track_is_told_the_current_track() {
+    let directory = tempfile::tempdir().unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let cache = CacheWorker::new(&directory.path().join("lyrics.db")).unwrap();
+    let (mut controller, sender) = controller_without_providers(&cache, &runtime);
+    sender
+        .send(PlayerWatcherEvent::Connected(snapshot("Song").state))
+        .unwrap();
+    controller.tick();
+    controller.state.track_offset_ms = 300;
+
+    let view = Rc::new(RecordingLyricsView::default());
+    controller.set_view(view.clone());
+
+    assert_eq!(view.song_info.borrow().as_slice(), ["Song - Artist"]);
+    assert_eq!(
+        view.metadata.borrow().as_slice(),
+        [vec!["Artist".to_string()]]
+    );
+    assert_eq!(view.offsets.borrow().as_slice(), [300]);
+    assert_eq!(
+        view.controls.borrow().as_slice(),
+        [Some(PlayerControl::default())]
+    );
+    assert!(view.statuses.borrow().is_empty());
+
+    controller.tick();
+    assert_eq!(
+        *view.documents.borrow(),
+        1,
+        "the lyrics document is published again on the next tick"
+    );
+}
+
+#[test]
+fn a_view_switched_to_without_a_player_shows_why() {
+    let directory = tempfile::tempdir().unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let cache = CacheWorker::new(&directory.path().join("lyrics.db")).unwrap();
+    let (mut controller, sender) = controller_without_providers(&cache, &runtime);
+
+    let idle = Rc::new(RecordingLyricsView::default());
+    controller.set_view(idle.clone());
+    assert_eq!(idle.statuses.borrow().as_slice(), [Text::OpenPlayer]);
+
+    sender
+        .send(PlayerWatcherEvent::Connected(snapshot("Song").state))
+        .unwrap();
+    sender
+        .send(PlayerWatcherEvent::Error("lost".to_string()))
+        .unwrap();
+    controller.tick();
+
+    let failed = Rc::new(RecordingLyricsView::default());
+    controller.set_view(failed.clone());
+    assert_eq!(failed.statuses.borrow().as_slice(), [Text::PlayerAttention]);
+    assert_eq!(failed.song_info.borrow().as_slice(), ["FloatLyrics"]);
+    assert_eq!(failed.controls.borrow().as_slice(), [None]);
+}
+
 struct NoopLyricsView;
 
 impl LyricsView for NoopLyricsView {
@@ -313,6 +399,10 @@ fn line(text: &str) -> TimedLine {
 struct RecordingLyricsView {
     metadata: RefCell<Vec<Vec<String>>>,
     song_info: RefCell<Vec<String>>,
+    offsets: RefCell<Vec<i64>>,
+    controls: RefCell<Vec<Option<PlayerControl>>>,
+    documents: RefCell<usize>,
+    statuses: RefCell<Vec<Text>>,
 }
 
 impl LyricsView for RecordingLyricsView {
@@ -326,17 +416,25 @@ impl LyricsView for RecordingLyricsView {
         }
     }
 
-    fn set_track_offset(&self, _offset_ms: i64) {}
+    fn set_track_offset(&self, offset_ms: i64) {
+        self.offsets.borrow_mut().push(offset_ms);
+    }
 
-    fn set_player_control(&self, _control: Option<&PlayerControl>) {}
+    fn set_player_control(&self, control: Option<&PlayerControl>) {
+        self.controls.borrow_mut().push(control.copied());
+    }
 
-    fn set_lyrics_document(&self, _document: LyricsDocument) {}
+    fn set_lyrics_document(&self, _document: LyricsDocument) {
+        *self.documents.borrow_mut() += 1;
+    }
 
     fn set_playback(&self, _position_ms: Option<u64>, _playing: bool) {}
 
     fn show_lyrics(&self, _frame: Arc<LyricsFrame>) {}
 
-    fn show_status(&self, _key: Text) {}
+    fn show_status(&self, key: Text) {
+        self.statuses.borrow_mut().push(key);
+    }
 }
 
 fn state_with_credits(lyrics_fingerprint: &str) -> ControllerState {

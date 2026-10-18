@@ -71,3 +71,32 @@ fn changing_enabled_chinese_romanization_reloads_current_lyrics() {
     next.lyrics.show_romanization = false;
     assert!(!should_reload_lyrics(&current, &next));
 }
+
+#[test]
+fn switching_run_mode_changes_the_output() {
+    let current = AppConfig::default();
+    let mut next = current.clone();
+    next.general.mode = AppMode::Amll;
+
+    assert_eq!(output_change(&current, &next), OutputChange::Mode);
+    assert_eq!(output_change(&next, &current), OutputChange::Mode);
+    assert_eq!(output_change(&current, &current), OutputChange::None);
+}
+
+#[test]
+fn a_new_amll_address_reconnects_only_the_sender() {
+    let mut floating = AppConfig::default();
+    floating.general.mode = AppMode::Floating;
+    let mut moved = floating.clone();
+    moved.amll.address = "127.0.0.1:12000".to_string();
+    assert_eq!(output_change(&floating, &moved), OutputChange::None);
+
+    let mut sender = floating.clone();
+    sender.general.mode = AppMode::Amll;
+    let mut moved_sender = sender.clone();
+    moved_sender.amll.address = "127.0.0.1:12000".to_string();
+    assert_eq!(
+        output_change(&sender, &moved_sender),
+        OutputChange::AmllAddress
+    );
+}

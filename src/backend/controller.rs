@@ -58,6 +58,11 @@ struct ControllerState {
     /// and is forgotten whenever the player's own metadata is published again,
     /// so the restatement follows that too.
     credited_billing: Option<(String, Vec<String>)>,
+    /// Status shown while no player is connected, restated to a new view.
+    ///
+    /// `None` until a player disconnects or fails, which reads as
+    /// [`Text::OpenPlayer`].
+    idle_status: Option<Text>,
 }
 
 impl ControllerState {
@@ -208,6 +213,38 @@ impl Controller {
 
     pub(crate) fn refresh_lyrics_presentation(&mut self) {
         self.state.refresh_lyrics_presentation();
+    }
+
+    /// Sends subsequent output to `view` and restates the current playback to it.
+    ///
+    /// A view replaced at runtime has seen none of the earlier notifications, so
+    /// the track, its offset, and the player control state are published again
+    /// here, and the lyrics document and credited billing on the next tick.
+    pub(crate) fn set_view(&mut self, view: Rc<dyn LyricsView>) {
+        self.floating = view;
+        let view = self.floating.as_ref();
+        let state = &mut self.state;
+        state.document_dirty = true;
+        state.credited_billing = None;
+        view.set_track_offset(state.track_offset_ms);
+        view.set_player_control(state.player_control.as_ref());
+        let Some(snapshot) = state.latest.as_deref() else {
+            view.set_track_metadata(None);
+            view.set_song_info("FloatLyrics");
+            view.show_status(state.idle_status.unwrap_or(Text::OpenPlayer));
+            return;
+        };
+        match &snapshot.state.track {
+            Some(track) => {
+                view.set_track_metadata(Some(track));
+                publish_song_info(&snapshot.state, view);
+            }
+            None => {
+                view.set_track_metadata(None);
+                view.set_song_info("FloatLyrics");
+                view.show_status(Text::WaitingForMetadata);
+            }
+        }
     }
 
     /// Process one frame: drain incoming events, check for new lyrics,
@@ -409,11 +446,13 @@ fn handle_player_event(
         }
         PlayerWatcherEvent::Disconnected => {
             reset_player_state(controller_state, ctx, playback);
+            controller_state.idle_status = Some(Text::OpenPlayer);
             ctx.floating.show_status(Text::OpenPlayer);
         }
         PlayerWatcherEvent::Error(message) => {
             tracing::warn!(%message, "MPRIS listener error");
             reset_player_state(controller_state, ctx, playback);
+            controller_state.idle_status = Some(Text::PlayerAttention);
             ctx.floating.show_status(Text::PlayerAttention);
         }
     }

@@ -624,9 +624,6 @@ export function IntegrationPage({ state }: { state: UiState }) {
             }
           />
         </SettingRow>
-        <div className="card-intro">
-          <p>{t("RunModeRestartHint")}</p>
-        </div>
       </Card>
     </div>
   );

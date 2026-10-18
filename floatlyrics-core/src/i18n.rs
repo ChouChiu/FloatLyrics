@@ -354,7 +354,6 @@ define_text_keys!(
     RunModeDescription,
     RunModeFloating,
     RunModeAmll,
-    RunModeRestartHint,
     AmllAddress,
     AmllAddressDescription,
     TrayIcon,

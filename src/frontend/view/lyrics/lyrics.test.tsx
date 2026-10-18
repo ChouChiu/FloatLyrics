@@ -332,7 +332,6 @@ describe("React application shell", () => {
       RunModeDescription: "The floating overlay and the AMLL sender cannot run at the same time",
       RunModeFloating: "Floating overlay",
       RunModeAmll: "AMLL WebSocket sender",
-      RunModeRestartHint: "Restart FloatLyrics to apply this change",
       AmllAddress: "AMLL player address",
       AmllAddressDescription: "Host and port",
       TrayIcon: "System tray icon",
@@ -359,7 +358,7 @@ describe("React application shell", () => {
     expect(html).toContain('value="localhost:11444"');
     expect(html).toContain("disabled");
     expect(html).toContain('role="switch"');
-    expect(html).toContain("Restart FloatLyrics to apply this change");
+    expect(html).not.toContain("card-intro");
 
     const amll = advanceUiState(
       bootstrapped({ ...config, general: { language: "en", mode: "amll" } }),

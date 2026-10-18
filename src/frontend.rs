@@ -44,6 +44,10 @@ use floatlyrics_core::{i18n::I18n, paths::AppPaths};
 /// Controller pump interval used when no overlay frame clock drives the app.
 const TICK_INTERVAL_MS: u64 = 100;
 
+/// Delay before a new AMLL address reconnects, so typing it does not reconnect
+/// on every keystroke.
+const AMLL_RECONNECT_DELAY_MS: u64 = 500;
+
 static APP_BROKER: MessageBroker<AppMsg> = MessageBroker::new();
 
 struct AppInit {
@@ -52,10 +56,108 @@ struct AppInit {
     config_saver: settings::ConfigSaveService,
 }
 
+/// The lyrics output selected by `general.mode`, switchable at runtime.
+///
+/// The overlay is built the first time floating mode is selected and is only
+/// hidden afterwards, because a layer-shell surface has to be configured before
+/// its window is first shown. The AMLL sender is dropped when another output is
+/// selected, which closes its connection.
+struct LyricsOutput {
+    root: gtk::ApplicationWindow,
+    mode: AppMode,
+    overlay: Option<view::OverlayView>,
+    /// Controller pump installed while the overlay frame clock is not running.
+    pump: Option<gtk::glib::SourceId>,
+    /// Playback requests sent by the AMLL listener, drained on every tick.
+    remote_commands: Option<tokio::sync::mpsc::UnboundedReceiver<MediaCommand>>,
+}
+
+impl LyricsOutput {
+    fn new(root: gtk::ApplicationWindow, mode: AppMode) -> Self {
+        Self {
+            root,
+            mode,
+            overlay: None,
+            pump: None,
+            remote_commands: None,
+        }
+    }
+
+    /// Selects `config.general.mode` and returns the view the controller
+    /// should publish to.
+    fn activate(
+        &mut self,
+        config: &AppConfig,
+        i18n: &I18n,
+        backend: &backend::Backend,
+        sender: &relm4::Sender<AppMsg>,
+    ) -> Rc<dyn backend::LyricsView> {
+        self.mode = config.general.mode;
+        match self.mode {
+            AppMode::Floating => {
+                self.remote_commands = None;
+                if self.overlay.is_none() {
+                    let overlay = view::build(
+                        &self.root,
+                        config,
+                        i18n.clone(),
+                        Rc::new(serde_json::json!({ "dependencies": [], "licenses": [] })),
+                        sender.clone(),
+                    );
+                    // The frame clock only runs while the overlay is mapped, so
+                    // it stops by itself while another output is selected.
+                    let input = sender.clone();
+                    overlay.tick_widget().add_tick_callback(move |_, _| {
+                        let _ = input.send(AppMsg::Tick);
+                        gtk::glib::ControlFlow::Continue
+                    });
+                    self.overlay = Some(overlay);
+                }
+                if let Some(pump) = self.pump.take() {
+                    pump.remove();
+                }
+                Rc::new(view::OverlaySender::new(sender.clone()))
+            }
+            AppMode::Amll => {
+                self.root.set_visible(false);
+                let amll_sender = backend.amll_sender(&config.amll);
+                self.remote_commands = amll_sender.take_media_commands();
+                if self.pump.is_none() {
+                    // The overlay provides the frame clock; without it the sender
+                    // mode needs its own pump for MPRIS events and progress.
+                    let input = sender.clone();
+                    self.pump = Some(gtk::glib::timeout_add_local(
+                        Duration::from_millis(TICK_INTERVAL_MS),
+                        move || {
+                            let _ = input.send(AppMsg::Tick);
+                            gtk::glib::ControlFlow::Continue
+                        },
+                    ));
+                }
+                amll_sender
+            }
+        }
+    }
+
+    /// Shows the overlay when it is the selected output.
+    fn present(&self) {
+        if self.mode == AppMode::Floating {
+            self.root.present();
+        }
+    }
+
+    /// The overlay, while it is the selected output.
+    fn overlay(&self) -> Option<&view::OverlayView> {
+        self.overlay
+            .as_ref()
+            .filter(|_| self.mode == AppMode::Floating)
+    }
+}
+
 struct AppModel {
     config: AppConfig,
     i18n: I18n,
-    overlay: Option<view::OverlayView>,
+    output: LyricsOutput,
     control_center: control_center::ControlCenterView,
     font_picker: font_picker_window::FontPickerView,
     manual_search: manual_search::ManualSearchCoordinator,
@@ -64,14 +166,15 @@ struct AppModel {
     save_revision: u64,
     controller: backend::Controller,
     media_control: MediaControlHandle,
-    /// Playback requests sent by the AMLL listener, drained on every tick.
-    remote_commands: Option<tokio::sync::mpsc::UnboundedReceiver<MediaCommand>>,
     song_info: String,
     track_offset_ms: i64,
     lyrics: LyricsPresentation,
     lyrics_document: Option<LyricsDocument>,
     tray: Option<tray::TrayHandle>,
-    _backend: backend::Backend,
+    /// Bumped by every output change, so a delayed reconnect that another
+    /// change superseded is ignored.
+    amll_reconnect_generation: u64,
+    backend: backend::Backend,
 }
 
 #[derive(Debug, Clone)]
@@ -83,6 +186,12 @@ enum LyricsPresentation {
 #[derive(Debug)]
 enum AppMsg {
     Tick,
+    /// The application was activated, by a launch or another instance.
+    Activated,
+    /// The AMLL address settled after an edit.
+    ReconnectAmll {
+        generation: u64,
+    },
     SetSongInfo(String),
     SetTrackOffset(i64),
     SetLyricsDocument(LyricsDocument),
@@ -162,20 +271,8 @@ impl SimpleComponent for AppModel {
             config_saver,
         } = init;
         let i18n = I18n::new(config.general.language);
-        let overlay = (config.general.mode == AppMode::Floating).then(|| {
-            view::build(
-                &root,
-                &config,
-                i18n.clone(),
-                Rc::new(serde_json::json!({ "dependencies": [], "licenses": [] })),
-                sender.input_sender().clone(),
-            )
-        });
-        let amll_sender =
-            (config.general.mode == AppMode::Amll).then(|| backend.amll_sender(&config.amll));
-        let remote_commands = amll_sender
-            .as_ref()
-            .and_then(|sender| sender.take_media_commands());
+        let mut output = LyricsOutput::new(root.clone(), config.general.mode);
+        let lyrics_view = output.activate(&config, &i18n, &backend, sender.input_sender());
         let tray = tray::spawn(&config, &backend.runtime());
         let (player_sender, player_receiver) = mpsc::channel();
         let (player_hint_sender, player_hint_receiver) = mpsc::channel();
@@ -189,10 +286,6 @@ impl SimpleComponent for AppModel {
             },
         );
         let controller_config = LyricsRuntimeConfig::from(&config);
-        let lyrics_view: Rc<dyn backend::LyricsView> = match &amll_sender {
-            Some(amll_sender) => amll_sender.clone(),
-            None => Rc::new(view::OverlaySender::new(sender.input_sender().clone())),
-        };
         let controller = backend.controller(
             player_receiver,
             player_hint_receiver,
@@ -214,29 +307,10 @@ impl SimpleComponent for AppModel {
         let font_picker =
             font_picker_window::FontPickerView::new(&config, sender.input_sender().clone());
 
-        match &overlay {
-            Some(overlay) => {
-                let input = sender.input_sender().clone();
-                overlay.tick_widget().add_tick_callback(move |_, _| {
-                    let _ = input.send(AppMsg::Tick);
-                    gtk::glib::ControlFlow::Continue
-                });
-            }
-            None => {
-                // The overlay provides the frame clock; without it the sender
-                // mode needs its own pump for MPRIS events and progress.
-                let input = sender.input_sender().clone();
-                gtk::glib::timeout_add_local(Duration::from_millis(TICK_INTERVAL_MS), move || {
-                    let _ = input.send(AppMsg::Tick);
-                    gtk::glib::ControlFlow::Continue
-                });
-            }
-        }
-
         let model = Self {
             config,
             i18n,
-            overlay,
+            output,
             control_center,
             font_picker,
             manual_search,
@@ -245,13 +319,13 @@ impl SimpleComponent for AppModel {
             save_revision: 0,
             controller,
             media_control,
-            remote_commands,
             song_info: "FloatLyrics".to_string(),
             track_offset_ms: 0,
             lyrics: LyricsPresentation::Status(floatlyrics_core::i18n::Text::OpenPlayer),
             lyrics_document: None,
             tray,
-            _backend: backend,
+            amll_reconnect_generation: 0,
+            backend,
         };
         let widgets = view_output!();
         ComponentParts { model, widgets }
@@ -262,6 +336,13 @@ impl SimpleComponent for AppModel {
             AppMsg::Tick => {
                 self.controller.tick();
                 self.drain_media_commands();
+            }
+            AppMsg::Activated => self.output.present(),
+            AppMsg::ReconnectAmll { generation } => {
+                if generation == self.amll_reconnect_generation && self.output.mode == AppMode::Amll
+                {
+                    self.switch_output(sender.input_sender());
+                }
             }
             AppMsg::SetSongInfo(value) => self.song_info = value,
             AppMsg::SetTrackOffset(value) => self.track_offset_ms = value,
@@ -299,7 +380,7 @@ impl SimpleComponent for AppModel {
     }
 
     fn post_view() {
-        let Some(overlay) = &self.overlay else {
+        let Some(overlay) = self.output.overlay() else {
             return;
         };
         overlay.set_song_info(&self.song_info);
@@ -366,7 +447,7 @@ impl AppModel {
 
     /// Forwards playback requests that arrived over the AMLL WebSocket.
     fn drain_media_commands(&mut self) {
-        let Some(receiver) = self.remote_commands.as_mut() else {
+        let Some(receiver) = self.output.remote_commands.as_mut() else {
             return;
         };
         while let Ok(command) = receiver.try_recv() {
@@ -384,7 +465,7 @@ impl AppModel {
         }
         self.save_revision = self.save_revision.wrapping_add(1);
         let revision = self.save_revision;
-        self.apply_config(config.clone());
+        self.apply_config(config.clone(), &sender);
         self.control_center.set_config_state(&config, false, None);
         self.font_picker.set_config_state(&config, false, None);
         self.config_saver.save(config, move |result| {
@@ -412,9 +493,10 @@ impl AppModel {
         }
     }
 
-    fn apply_config(&mut self, next_config: AppConfig) {
+    fn apply_config(&mut self, next_config: AppConfig, sender: &relm4::Sender<AppMsg>) {
         let reload_lyrics = should_reload_lyrics(&self.config, &next_config);
-        if let Some(overlay) = &self.overlay {
+        let output_change = output_change(&self.config, &next_config);
+        if let Some(overlay) = &self.output.overlay {
             overlay.apply_config(&next_config);
         }
         self.i18n.set_language(next_config.general.language);
@@ -424,6 +506,23 @@ impl AppModel {
         self.controller
             .update_config(LyricsRuntimeConfig::from(&next_config));
         self.config = next_config;
+        if output_change != OutputChange::None {
+            self.amll_reconnect_generation = self.amll_reconnect_generation.wrapping_add(1);
+        }
+        match output_change {
+            OutputChange::None => {}
+            OutputChange::Mode => self.switch_output(sender),
+            OutputChange::AmllAddress => {
+                let generation = self.amll_reconnect_generation;
+                let sender = sender.clone();
+                gtk::glib::timeout_add_local_once(
+                    Duration::from_millis(AMLL_RECONNECT_DELAY_MS),
+                    move || {
+                        let _ = sender.send(AppMsg::ReconnectAmll { generation });
+                    },
+                );
+            }
+        }
         self.control_center.bootstrap(&self.config);
         self.font_picker.bootstrap(&self.config);
         self.manual_search_window.bootstrap(&self.config);
@@ -434,9 +533,42 @@ impl AppModel {
         }
     }
 
+    /// Moves the lyrics output to the mode and address in the current config.
+    fn switch_output(&mut self, sender: &relm4::Sender<AppMsg>) {
+        // Whatever the overlay last showed is stale by now; the controller
+        // restates the current track to the view it is handed.
+        self.lyrics_document = None;
+        self.lyrics = LyricsPresentation::Status(floatlyrics_core::i18n::Text::OpenPlayer);
+        let view = self
+            .output
+            .activate(&self.config, &self.i18n, &self.backend, sender);
+        self.controller.set_view(view);
+        self.output.present();
+    }
+
     fn render_search_state(&self) {
         self.manual_search_window
             .set_search_state(&self.manual_search.snapshot(self.i18n.language()));
+    }
+}
+
+/// How the lyrics output changes between two configurations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputChange {
+    None,
+    /// Another run mode is selected.
+    Mode,
+    /// The AMLL sender stays the output but connects elsewhere.
+    AmllAddress,
+}
+
+fn output_change(current: &AppConfig, next: &AppConfig) -> OutputChange {
+    if current.general.mode != next.general.mode {
+        OutputChange::Mode
+    } else if next.general.mode == AppMode::Amll && current.amll.address != next.amll.address {
+        OutputChange::AmllAddress
+    } else {
+        OutputChange::None
     }
 }
 
@@ -466,6 +598,9 @@ pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
         .application_id("io.github.chouchiu.floatlyrics")
         .flags(gtk::gio::ApplicationFlags::HANDLES_COMMAND_LINE)
         .build();
+    // The overlay is shown by the model rather than by Relm4, because the run
+    // mode can change after startup and only the floating output is a window.
+    app.connect_activate(|_| APP_BROKER.send(AppMsg::Activated));
     app.connect_command_line(|app, command_line| {
         app.activate();
         let arguments = command_line.arguments();
@@ -476,7 +611,7 @@ pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
     });
 
     RelmApp::from_app(app)
-        .visible_on_activate(config.general.mode == AppMode::Floating)
+        .visible_on_activate(false)
         .with_broker(&APP_BROKER)
         .run::<AppModel>(AppInit {
             config,
