@@ -4,6 +4,7 @@
 import { LyricPlayer } from "@applemusic-like-lyrics/react";
 import { type CSSProperties, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { currentAmllLines, documentToAmllLines } from "./amll";
+import { SlotFader } from "./fade";
 import { karaokeFill } from "./karaoke";
 import { type LyricsViewState, lyricsStore, type SlotSnapshot } from "./store";
 import type { LyricsStyle } from "./types";
@@ -47,37 +48,27 @@ interface LyricSlotProps {
 function useSlotTransition(state: LyricsViewState) {
   const slotRefs = useRef<Array<HTMLElement | null>>([null, null]);
   const initialized = useRef(false);
+  const fader = useRef<SlotFader | null>(null);
   const transitionMs = useRef(0);
   transitionMs.current = Math.max(0, Number(state.style?.transition_ms) || 0);
+
+  useLayoutEffect(() => () => fader.current?.cancel(), []);
 
   useLayoutEffect(() => {
     if (state.currentKey === null) return;
     const incoming = slotRefs.current[state.activeSlot];
     const outgoing = slotRefs.current[1 - state.activeSlot];
     if (!incoming || !outgoing) return;
+    fader.current ??= new SlotFader();
 
+    incoming.classList.add("active");
+    outgoing.classList.remove("active");
     if (!initialized.current) {
-      incoming.classList.add("active");
-      outgoing.classList.remove("active");
+      fader.current.show(incoming, outgoing);
       initialized.current = true;
       return;
     }
-
-    const incomingOpacity = Number.parseFloat(getComputedStyle(incoming).opacity) || 0;
-    const outgoingOpacity = Number.parseFloat(getComputedStyle(outgoing).opacity) || 0;
-    for (const slot of slotRefs.current) {
-      for (const animation of slot?.getAnimations() ?? []) animation.cancel();
-    }
-    incoming.classList.add("active");
-    outgoing.classList.remove("active");
-    incoming.animate([{ opacity: incomingOpacity }, { opacity: 1 }], {
-      duration: transitionMs.current,
-      easing: "ease",
-    });
-    outgoing.animate([{ opacity: outgoingOpacity }, { opacity: 0 }], {
-      duration: transitionMs.current,
-      easing: "ease",
-    });
+    fader.current.crossFade(incoming, outgoing, transitionMs.current);
   }, [state.activeSlot, state.currentKey]);
 
   return slotRefs;

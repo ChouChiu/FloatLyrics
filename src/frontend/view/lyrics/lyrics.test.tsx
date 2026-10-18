@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { currentAmllLines, documentToAmllLines, resolvedLineEnd } from "./amll";
 import { installLyricsBridge } from "./bridge";
 import { AppIcon, Icon, Slider } from "./components/ui";
+import { type FadeTarget, type FrameScheduler, SlotFader } from "./fade";
 import { findSyllableRanges, syllableProgress } from "./karaoke";
 import { advanceLyricsViewState, initialLyricsViewState } from "./store";
 import type {
@@ -92,6 +93,96 @@ describe("lyrics view state", () => {
     expect(updated.activeSlot).toBe(1);
     expect(updated.transitionRevision).toBe(1);
     expect(updated.slots.map((slot) => slot?.content.text)).toEqual(["first", "second"]);
+  });
+});
+
+class ManualFrames implements FrameScheduler {
+  time = 0;
+  private callbacks = new Map<number, (now: number) => void>();
+  private nextHandle = 1;
+
+  request(callback: (now: number) => void): number {
+    const handle = this.nextHandle++;
+    this.callbacks.set(handle, callback);
+    return handle;
+  }
+
+  cancel(handle: number): void {
+    this.callbacks.delete(handle);
+  }
+
+  now(): number {
+    return this.time;
+  }
+
+  advance(ms: number): void {
+    this.time += ms;
+    const pending = [...this.callbacks.values()];
+    this.callbacks.clear();
+    for (const callback of pending) callback(this.time);
+  }
+
+  get scheduled(): number {
+    return this.callbacks.size;
+  }
+}
+
+function fadeTarget(opacity = ""): FadeTarget {
+  return { style: { opacity } };
+}
+
+describe("slot cross-fade", () => {
+  // WebKitGTK stopped presenting frames while a compositor opacity animation
+  // ran, so the fade has to write opacity itself on every frame.
+  test("writes the opacity of both slots on every frame of the fade", () => {
+    const frames = new ManualFrames();
+    const fader = new SlotFader(frames);
+    const incoming = fadeTarget("0");
+    const outgoing = fadeTarget("1");
+
+    fader.crossFade(incoming, outgoing, 180);
+    expect(incoming.style.opacity).toBe("0");
+    expect(outgoing.style.opacity).toBe("1");
+
+    frames.advance(90);
+    expect(Number(incoming.style.opacity)).toBeCloseTo(0.5);
+    expect(Number(outgoing.style.opacity)).toBeCloseTo(0.5);
+
+    frames.advance(90);
+    expect(incoming.style.opacity).toBe("1");
+    expect(outgoing.style.opacity).toBe("0");
+    expect(frames.scheduled).toBe(0);
+  });
+
+  test("continues an interrupted fade from the current opacity", () => {
+    const frames = new ManualFrames();
+    const fader = new SlotFader(frames);
+    const first = fadeTarget("0");
+    const second = fadeTarget("1");
+    fader.crossFade(first, second, 180);
+    frames.advance(90);
+
+    fader.crossFade(second, first, 180);
+
+    expect(Number(second.style.opacity)).toBeCloseTo(0.5);
+    expect(Number(first.style.opacity)).toBeCloseTo(0.5);
+    expect(frames.scheduled).toBe(1);
+    frames.advance(180);
+    expect(second.style.opacity).toBe("1");
+    expect(first.style.opacity).toBe("0");
+  });
+
+  test("switches immediately without a transition duration", () => {
+    const frames = new ManualFrames();
+    const fader = new SlotFader(frames);
+    const incoming = fadeTarget();
+    const outgoing = fadeTarget();
+
+    fader.crossFade(incoming, outgoing, 0);
+
+    expect(incoming.style.opacity).toBe("1");
+    expect(outgoing.style.opacity).toBe("0");
+    expect(frames.scheduled).toBe(0);
   });
 });
 
