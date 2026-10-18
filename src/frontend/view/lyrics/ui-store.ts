@@ -3,6 +3,7 @@
 
 import type {
   AppConfig,
+  ConfigLimits,
   ControlPage,
   LicenseData,
   LyricsCommand,
@@ -14,6 +15,8 @@ import type {
 export interface UiState {
   surface: "overlay" | "control-center" | "manual-search" | "font-picker" | null;
   config: AppConfig | null;
+  defaults: AppConfig | null;
+  limits: ConfigLimits;
   strings: Record<string, string>;
   version: string;
   about: LicenseData;
@@ -31,6 +34,8 @@ export interface UiState {
 const initialState: UiState = {
   surface: null,
   config: null,
+  defaults: null,
+  limits: {},
   strings: {},
   version: "",
   about: { dependencies: [], licenses: [] },
@@ -52,6 +57,8 @@ export function advanceUiState(state: UiState, command: LyricsCommand): UiState 
         ...state,
         surface: command.surface,
         config: command.config,
+        defaults: command.defaults,
+        limits: command.limits,
         strings: command.strings,
         version: command.version,
         about: command.about,

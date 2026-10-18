@@ -6,6 +6,7 @@ import {
   RiAddLine,
   RiArrowDownLine,
   RiArrowDownSLine,
+  RiArrowGoBackLine,
   RiArrowUpLine,
   RiCheckLine,
   RiCloseLine,
@@ -295,6 +296,7 @@ export function Slider({
   step = 1,
   unit,
   label,
+  className,
   onValueChange,
 }: {
   value: number;
@@ -303,6 +305,7 @@ export function Slider({
   step?: number;
   unit?: string;
   label: string;
+  className?: string;
   onValueChange(value: number): void;
 }) {
   const [numberValue, setNumberValue] = useState(String(value));
@@ -321,7 +324,7 @@ export function Slider({
   };
 
   return (
-    <div className="slider-row">
+    <div className={classes("slider-row", className)}>
       <input
         aria-label={label}
         className="slider"
@@ -359,17 +362,19 @@ export function Slider({
 export function SettingRow({
   title,
   description,
+  disabled,
   children,
 }: {
   title: string;
-  description: string;
+  description?: string;
+  disabled?: boolean;
   children: ReactNode;
 }) {
   return (
-    <div className="setting-row">
+    <div className="setting-row" data-disabled={disabled || undefined}>
       <div className="setting-copy">
         <div className="setting-title">{title}</div>
-        <div className="setting-description">{description}</div>
+        {description && <div className="setting-description">{description}</div>}
       </div>
       <div className="setting-control">{children}</div>
     </div>
@@ -388,7 +393,8 @@ type IconName =
   | "down"
   | "remove"
   | "x"
-  | "info";
+  | "info"
+  | "reset";
 
 const icons: Record<IconName, RemixiconComponentType> = {
   minus: RiSubtractLine,
@@ -403,6 +409,7 @@ const icons: Record<IconName, RemixiconComponentType> = {
   remove: RiDeleteBin6Line,
   x: RiCloseLine,
   info: RiInformationLine,
+  reset: RiArrowGoBackLine,
 };
 
 export function Icon({ name }: { name: IconName }) {

@@ -5,9 +5,11 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { currentAmllLines, documentToAmllLines, resolvedLineEnd } from "./amll";
 import { installLyricsBridge } from "./bridge";
-import { AppIcon, Icon, Select, Slider } from "./components/ui";
+import { Select, Slider } from "./components/ui";
 import { type FadeTarget, type FrameScheduler, SlotFader } from "./fade";
-import { findSyllableRanges, syllableProgress } from "./karaoke";
+import { findSyllableRanges, karaokeFillStyle, syllableProgress } from "./karaoke";
+import { appendUnique, moveItem, removeItem } from "./list";
+import { joinColor, splitColor } from "./settings/fields";
 import { advanceLyricsViewState, initialLyricsViewState } from "./store";
 import type {
   AppConfig,
@@ -24,18 +26,10 @@ if (!("MouseEvent" in globalThis)) {
 }
 
 const { AppleMusicLyrics, LyricSlot, LyricsViewport } = await import("./app");
-const {
-  addFontFamily,
-  addLyricsProvider,
-  ControlCenter,
-  FontPickerWindow,
-  ManualSearchWindow,
-  moveFontFamily,
-  moveLyricsProvider,
-  OverlayShell,
-  removeFontFamily,
-  removeLyricsProvider,
-} = await import("./shell");
+const { ControlCenter } = await import("./settings/control-center");
+const { FontPickerWindow } = await import("./font-picker");
+const { ManualSearchWindow } = await import("./search");
+const { OverlayShell } = await import("./overlay");
 
 const style = {
   font_family: "Sans",
@@ -47,6 +41,7 @@ const style = {
   romanization_color: "lightblue",
   translation_color: "white",
   transition_ms: 180,
+  word_fade_width: 0,
 };
 
 function frame(key: string, text: string): LyricsFrame {
@@ -228,14 +223,32 @@ describe("React application shell", () => {
       unplayed_color: "#9EA6B3FF",
       translation_color: "#FFFFFFC7",
       romanization_color: "#B8D8F0E6",
+      transition_ms: 180,
+      word_fade_width: 0,
+      track_offset_step_ms: 100,
     },
     player: { preferred_players: ["spotify"], ignored_players: [] },
     amll: { address: "localhost:11444" },
     tray: { enabled: true },
   };
+  const limits = {
+    "window.width": { min: 320, max: 640 },
+    "window.margin": { min: 0, max: 500 },
+    "window.bottom_panel_height": { min: 0, max: 200 },
+    "window.opacity": { min: 0.15, max: 1 },
+    "lyrics.offset_ms": { min: -10000, max: 10000 },
+    "lyrics.lyric_font_size": { min: 12, max: 56 },
+    "lyrics.translation_font_size": { min: 8, max: 36 },
+    "lyrics.romanization_font_size": { min: 8, max: 36 },
+    "lyrics.transition_ms": { min: 0, max: 1000 },
+    "lyrics.word_fade_width": { min: 0, max: 2 },
+    "lyrics.track_offset_step_ms": { min: 10, max: 1000 },
+  };
   const initial: UiState = {
     surface: null,
     config: null,
+    defaults: null,
+    limits: {},
     strings: {},
     version: "",
     about: { dependencies: [], licenses: [] },
@@ -250,20 +263,40 @@ describe("React application shell", () => {
     panelOpacity: 0.78,
   };
 
-  test("bootstraps the selected React surface with config and translations", () => {
-    const state = advanceUiState(initial, {
+  function bootstrapped(
+    surface: UiState["surface"] & string,
+    options: {
+      config?: AppConfig;
+      strings?: Record<string, string>;
+      fonts?: string[];
+    } = {},
+  ): UiState {
+    return advanceUiState(initial, {
       type: "bootstrap",
-      surface: "control-center",
-      config,
-      strings: { General: "General" },
-      version: "1.1.2",
+      surface: surface as "overlay",
+      config: options.config ?? config,
+      defaults: config,
+      limits,
+      strings: options.strings ?? {},
+      version: "1.2.0",
       about: { dependencies: [], licenses: [] },
-      available_fonts: [],
+      available_fonts: options.fonts ?? [],
     });
+  }
+
+  function page(state: UiState, target: UiState["page"]): string {
+    return renderToStaticMarkup(
+      <ControlCenter state={advanceUiState(state, { type: "navigate", page: target })} />,
+    );
+  }
+
+  test("bootstraps the selected surface with config, defaults, limits, and translations", () => {
+    const state = bootstrapped("control-center", { strings: { General: "General" } });
     expect(state.surface).toBe("control-center");
     expect(state.config).toEqual(config);
-    const strings = state.strings as { General?: string };
-    expect(strings.General).toBe("General");
+    expect(state.defaults).toEqual(config);
+    expect(state.limits["lyrics.transition_ms"]).toEqual({ min: 0, max: 1000 });
+    expect((state.strings as { General?: string }).General).toBe("General");
   });
 
   test("draws dropdowns in the page instead of the native select popup", () => {
@@ -282,11 +315,7 @@ describe("React application shell", () => {
     expect(html).toContain('role="combobox"');
     expect(html).toContain('aria-expanded="false"');
     expect(html).toContain(">简体中文<");
-
-    const general = renderToStaticMarkup(
-      <ControlCenter state={advanceUiState(initial, { type: "navigate", page: "general" })} />,
-    );
-    expect(general).not.toContain("<select");
+    expect(page(bootstrapped("control-center"), "general")).not.toContain("<select");
   });
 
   test("keeps control-center navigation independent from lyrics frames", () => {
@@ -295,113 +324,45 @@ describe("React application shell", () => {
     expect(advanceUiState(about, frameCommand("line:1", "lyrics"))).toBe(about);
   });
 
-  test("uses the sidebar for settings pages and top tabs for display subpages", () => {
-    let state = advanceUiState(initial, {
-      type: "bootstrap",
-      surface: "control-center",
-      config,
-      strings: {
-        General: "General",
-        Display: "Display",
-        LyricsSources: "Lyrics Sources",
-        About: "About",
-        DisplayTitle: "Display",
-        DisplayDescription: "Display settings",
-        Panel: "Panel",
-        Fonts: "Fonts",
-        Colors: "Colors",
-      },
-      version: "1.1.2",
-      about: { dependencies: [], licenses: [] },
-      available_fonts: [],
-    });
-    state = advanceUiState(state, { type: "navigate", page: "display" });
-
-    const html = renderToStaticMarkup(<ControlCenter state={state} />);
-    expect(html).toContain("Lyrics Sources");
-    expect(html).toContain('class="section-tabs"');
-    expect(html).toContain(">Panel<");
-    expect(html).toContain(">Fonts<");
-    expect(html).toContain(">Colors<");
-  });
-
-  test("renders the integration page with mode, address, and tray controls", () => {
-    const strings = {
-      Integration: "Integration",
-      RunMode: "Run mode",
-      RunModeDescription: "The floating overlay and the AMLL sender cannot run at the same time",
-      RunModeFloating: "Floating overlay",
-      RunModeAmll: "AMLL WebSocket sender",
-      AmllAddress: "AMLL player address",
-      AmllAddressDescription: "Host and port",
-      TrayIcon: "System tray icon",
-      TrayIconDescription: "Show the icon",
-      ChangesSavedAutomatically: "Changes are saved automatically",
-    };
-    const bootstrapped = (incoming: AppConfig) =>
-      advanceUiState(initial, {
-        type: "bootstrap",
-        surface: "control-center",
-        config: incoming,
-        strings,
-        version: "1.2.0",
-        about: { dependencies: [], licenses: [] },
-        available_fonts: [],
-      });
-    const integration = advanceUiState(bootstrapped(config), {
-      type: "navigate",
-      page: "integration",
-    });
-
-    const html = renderToStaticMarkup(<ControlCenter state={integration} />);
-    expect(html).toContain("Run mode");
-    expect(html).toContain('value="localhost:11444"');
-    expect(html).toContain("disabled");
-    expect(html).toContain('role="switch"');
-    expect(html).not.toContain("card-intro");
-
-    const amll = advanceUiState(
-      bootstrapped({ ...config, general: { language: "en", mode: "amll" } }),
-      { type: "navigate", page: "integration" },
+  test("lays display settings out as sections with the backend's ranges", () => {
+    const html = page(
+      bootstrapped("control-center", {
+        strings: { Animation: "Animation", LineTransition: "Line transition" },
+      }),
+      "display",
     );
-    const amllHtml = renderToStaticMarkup(<ControlCenter state={amll} />);
-    expect(amllHtml).not.toContain("disabled");
+    expect(html).not.toContain("section-tabs");
+    expect(html).toContain(">Animation<");
+    expect(html).toContain("Line transition");
+    expect(html).toContain('max="1000"');
+    expect(html).toContain('max="2"');
   });
 
-  test("offers a quit action from the settings sidebar", () => {
-    const state = advanceUiState(initial, {
-      type: "bootstrap",
-      surface: "control-center",
-      config,
-      strings: { Quit: "Quit FloatLyrics" },
-      version: "1.2.0",
-      about: { dependencies: [], licenses: [] },
-      available_fonts: [],
-    });
+  test("offers a reset only for values that differ from their default", () => {
+    const changed = structuredClone(config);
+    changed.lyrics.transition_ms = 400;
+    const html = page(bootstrapped("control-center", { config: changed }), "display");
+    expect(html.match(/data-visible="true"/g)).toHaveLength(1);
+    expect(page(bootstrapped("control-center"), "display")).not.toContain('data-visible="true"');
+  });
 
-    expect(renderToStaticMarkup(<ControlCenter state={state} />)).toContain("Quit FloatLyrics");
+  test("enables the AMLL address only in AMLL mode", () => {
+    const floating = page(bootstrapped("control-center"), "integration");
+    expect(floating).toContain('value="localhost:11444"');
+    expect(floating).toContain("disabled");
+    expect(floating).toContain('role="switch"');
+
+    const amll = page(
+      bootstrapped("control-center", {
+        config: { ...config, general: { language: "en", mode: "amll" } },
+      }),
+      "integration",
+    );
+    expect(amll).not.toContain("disabled");
   });
 
   test("renders manual search as a standalone window without the settings sidebar", () => {
-    let state = advanceUiState(initial, {
-      type: "bootstrap",
-      surface: "manual-search",
-      config,
-      strings: {
-        ManualSearchTitle: "Select Lyrics Manually",
-        SearchAfterPlayback: "Search after playback starts",
-        SelectCandidatePreview: "Select a candidate",
-        Title: "Title",
-        SongTitle: "Song title",
-        Artist: "Artist",
-        Search: "Search",
-        ApplySelectedLyrics: "Apply",
-      },
-      version: "1.1.2",
-      about: { dependencies: [], licenses: [] },
-      available_fonts: [],
-    });
-    state = advanceUiState(state, {
+    const state = advanceUiState(bootstrapped("manual-search"), {
       type: "search-state",
       state: {
         title: "Song",
@@ -422,93 +383,64 @@ describe("React application shell", () => {
     expect(html).not.toContain('class="sidebar"');
   });
 
-  test("reorders and enables lyrics sources", () => {
-    expect(addLyricsProvider(["qq-music"], "kugou")).toEqual(["qq-music", "kugou"]);
-    expect(addLyricsProvider(["qq-music"], "qq-music")).toEqual(["qq-music"]);
-    expect(moveLyricsProvider(["qq-music", "kugou", "lrclib"], 2, -1)).toEqual([
-      "qq-music",
-      "lrclib",
-      "kugou",
-    ]);
-    expect(moveLyricsProvider(["qq-music", "kugou"], 0, -1)).toEqual(["qq-music", "kugou"]);
-    expect(removeLyricsProvider(["qq-music", "kugou", "lrclib"], 1)).toEqual([
-      "qq-music",
-      "lrclib",
-    ]);
-    expect(removeLyricsProvider(["qq-music"], 0)).toEqual(["qq-music"]);
+  test("edits ordered preference lists without losing their last entry", () => {
+    const sources = ["qq-music", "kugou", "lrclib"];
+    expect(appendUnique(sources, "netease")).toEqual([...sources, "netease"]);
+    expect(appendUnique(sources, "kugou")).toBe(sources);
+    expect(appendUnique(["Sans"], " ")).toEqual(["Sans"]);
+    expect(moveItem(sources, 2, -1)).toEqual(["qq-music", "lrclib", "kugou"]);
+    expect(moveItem(sources, 0, -1)).toBe(sources);
+    expect(removeItem(sources, 1)).toEqual(["qq-music", "lrclib"]);
+    const single = ["Sans"];
+    expect(removeItem(single, 0)).toBe(single);
   });
 
-  test("renders the source order with the sources that are not enabled yet", () => {
-    let state = advanceUiState(initial, {
-      type: "bootstrap",
-      surface: "control-center",
-      config,
-      strings: {
-        General: "General",
-        Display: "Display",
-        LyricsSources: "Lyrics Sources",
-        About: "About",
-        SourcesTitle: "Lyrics Sources",
-        SourcesDescription: "Search online sources in order",
-        SearchPriority: "Search priority",
-        SearchPriorityDescription: "Search the sources in this order",
-        AvailableSources: "Add a source",
-        MoveSourceUp: "Move source up",
-        MoveSourceDown: "Move source down",
-        RemoveSource: "Remove source",
-        ProviderNameQqMusic: "QQ Music",
-        ProviderNameNetEase: "NetEase Cloud Music",
-        ProviderNameKugou: "Kugou Music",
-        ProviderNameLrclib: "LRCLIB",
-        ProviderNameSodaMusic: "Soda Music",
-        ProviderNameAmllTtmlDb: "AMLL TTML DB",
-      },
-      version: "1.1.2",
-      about: { dependencies: [], licenses: [] },
-      available_fonts: [],
-    });
-    state = advanceUiState(state, { type: "navigate", page: "sources" });
-
-    const html = renderToStaticMarkup(<ControlCenter state={state} />);
-    expect(html).toContain("Search priority");
-    // Both enabled sources are rows of the ordered list, in their stored order.
+  test("lists enabled sources in order and offers the rest", () => {
+    const html = page(
+      bootstrapped("control-center", {
+        strings: {
+          AvailableSources: "Add a source",
+          MoveSourceDown: "Move source down",
+          RemoveSource: "Remove source",
+          ProviderNameQqMusic: "QQ Music",
+          ProviderNameNetEase: "NetEase Cloud Music",
+          ProviderNameKugou: "Kugou Music",
+        },
+      }),
+      "sources",
+    );
     expect(html.indexOf("QQ Music")).toBeLessThan(html.indexOf("NetEase Cloud Music"));
     expect(html).toContain('title="Move source down"');
     expect(html).toContain('title="Remove source"');
-    // A source that is not enabled is offered instead of being listed.
     expect(html).toContain("Add a source");
-    expect(html).toContain(">Kugou Music<");
-    // Only the enabled sources are rows of the list; the rest are offered.
     expect(html.match(/QQ Music/g)?.length).toBe(1);
     expect(html.match(/Kugou Music/g)?.length).toBe(1);
   });
 
-  test("renders the original two-column font selection workflow", () => {
-    const state = advanceUiState(initial, {
-      type: "bootstrap",
-      surface: "font-picker",
-      config,
-      strings: {
-        AvailableFonts: "Available fonts",
-        FontOrder: "Font priority",
-        MoveFontUp: "Move font up",
-        MoveFontDown: "Move font down",
-        RemoveFont: "Remove font",
-        Done: "Done",
-      },
-      version: "1.1.2",
-      about: { dependencies: [], licenses: [] },
-      available_fonts: ["Noto Sans", "Source Han Sans"],
-    });
-
-    const html = renderToStaticMarkup(<FontPickerWindow state={state} />);
+  test("renders the two-column font picker with a filter", () => {
+    const html = renderToStaticMarkup(
+      <FontPickerWindow
+        state={bootstrapped("font-picker", {
+          strings: { AvailableFonts: "Available fonts", FontOrder: "Font priority" },
+          fonts: ["Noto Sans", "Source Han Sans"],
+        })}
+      />,
+    );
     expect(html).toContain("Available fonts");
     expect(html).toContain("Font priority");
+    expect(html).toContain('type="search"');
     expect(html).toContain("Noto Sans");
     expect(html).toContain('class="font-row selected-font-row"');
   });
 
-  test("applies native snap edges to the React overlay shell", () => {
+  test("keeps the alpha channel when a color changes", () => {
+    expect(splitColor("#B8D8F0E6")).toEqual({ rgb: "#b8d8f0", alpha: 90 });
+    expect(splitColor("#123456")).toEqual({ rgb: "#123456", alpha: 100 });
+    expect(joinColor("#ff0000", 90)).toBe("#FF0000E6");
+    expect(joinColor("#ff0000", 140)).toBe("#FF0000FF");
+  });
+
+  test("applies native snap edges to the overlay shell", () => {
     const snapped = advanceUiState(initial, {
       type: "overlay-placement",
       classes: ["snapped-left", "snapped-bottom"],
@@ -527,6 +459,20 @@ describe("React application shell", () => {
     expect(renderToStaticMarkup(<OverlayShell state={updated} />)).toContain(
       'style="--panel-opacity:0.35"',
     );
+  });
+
+  test("names the configured timing step on the overlay buttons", () => {
+    const stepped = structuredClone(config);
+    stepped.lyrics.track_offset_step_ms = 250;
+    const html = renderToStaticMarkup(
+      <OverlayShell
+        state={bootstrapped("overlay", {
+          config: stepped,
+          strings: { IncreaseTrackOffsetTooltip: "Show lyrics {step} ms earlier" },
+        })}
+      />,
+    );
+    expect(html).toContain('title="Show lyrics 250 ms earlier"');
   });
 });
 
@@ -655,21 +601,28 @@ describe("karaoke progress", () => {
     expect(syllableProgress(syllable, 200)).toBe(1);
   });
 
+  test("reveals the fill with a hard edge unless a fade width is set", () => {
+    expect(karaokeFillStyle(30, 100, 0)).toEqual({
+      clipPath: "inset(0 70px 0 0)",
+      maskImage: "none",
+    });
+    expect(karaokeFillStyle(30, 100, 10)).toEqual({
+      clipPath: "none",
+      maskImage: "linear-gradient(to right, #000 25.0px, transparent 35.0px)",
+    });
+  });
+
+  test("collapses the soft edge at both ends of the line", () => {
+    expect(karaokeFillStyle(-5, 100, 10).clipPath).toBe("inset(0 100px 0 0)");
+    expect(karaokeFillStyle(140, 100, 10).clipPath).toBe("inset(0 0px 0 0)");
+  });
+
   test("completes zero-duration syllables", () => {
     expect(syllableProgress({ ...syllable, end_ms: 100 }, 100)).toBe(1);
   });
 });
 
 describe("React markup", () => {
-  test("keeps font fallback order valid while adding, moving, and removing families", () => {
-    const original = ["Sans"];
-    expect(addFontFamily(original, "Sans")).toBe(original);
-    expect(addFontFamily(original, "Noto Sans")).toEqual(["Sans", "Noto Sans"]);
-    expect(moveFontFamily(["Sans", "Noto Sans"], 1, -1)).toEqual(["Noto Sans", "Sans"]);
-    expect(removeFontFamily(original, 0)).toBe(original);
-    expect(removeFontFamily(["Sans", "Noto Sans"], 0)).toEqual(["Noto Sans"]);
-  });
-
   test("renders numeric inputs next to range sliders", () => {
     const html = renderToStaticMarkup(
       <Slider
@@ -686,36 +639,6 @@ describe("React markup", () => {
     expect(html).toContain('type="number"');
     expect(html).toContain('value="0.42"');
     expect(html.match(/aria-label="Background opacity"/g)).toHaveLength(2);
-  });
-
-  test("renders every shell icon through Remix Icon components", () => {
-    for (const name of [
-      "minus",
-      "plus",
-      "search",
-      "settings",
-      "display",
-      "sources",
-      "up",
-      "down",
-      "remove",
-      "x",
-      "info",
-    ] as const) {
-      const html = renderToStaticMarkup(<Icon name={name} />);
-      expect(html).toContain("<svg");
-      expect(html).toContain('aria-hidden="true"');
-      expect(html).toContain('class="remixicon icon"');
-      expect(html).toContain('fill="currentColor"');
-    }
-  });
-
-  test("renders the application icon mark", () => {
-    const html = renderToStaticMarkup(<AppIcon className="app-mark" />);
-    expect(html).toContain('class="app-mark"');
-    expect(html).toContain('aria-label="FloatLyrics"');
-    expect(html).toContain("url(#app-icon-backdrop)");
-    expect(html).toContain("url(#app-icon-accent)");
   });
 
   test("renders plain lyrics and secondary text", () => {

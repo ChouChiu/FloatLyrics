@@ -31,7 +31,10 @@ export interface LyricsStyle {
   unplayed_color: string;
   romanization_color: string;
   translation_color: string;
+  /** Cross-fade between consecutive lines. */
   transition_ms: number;
+  /** Soft edge of the karaoke fill in em; `0` draws a hard edge. */
+  word_fade_width: number;
 }
 
 export interface PresentedLyricLine {
@@ -109,11 +112,23 @@ export interface AppConfig {
     unplayed_color: string;
     translation_color: string;
     romanization_color: string;
+    transition_ms: number;
+    word_fade_width: number;
+    track_offset_step_ms: number;
   };
   player: { preferred_players: string[]; ignored_players: string[] };
   amll: { address: string };
   tray: { enabled: boolean };
 }
+
+/** Inclusive bounds of a numeric preference, as the backend validates them. */
+export interface NumericRange {
+  min: number;
+  max: number;
+}
+
+/** Numeric ranges keyed by dotted TOML path, for example `window.width`. */
+export type ConfigLimits = Record<string, NumericRange>;
 
 export interface LicenseData {
   dependencies: Array<{ name: string; version: string; license: string }>;
@@ -152,6 +167,8 @@ export type LyricsCommand =
       type: "bootstrap";
       surface: "overlay" | "control-center" | "manual-search" | "font-picker";
       config: AppConfig;
+      defaults: AppConfig;
+      limits: ConfigLimits;
       strings: Record<string, string>;
       version: string;
       about: LicenseData;

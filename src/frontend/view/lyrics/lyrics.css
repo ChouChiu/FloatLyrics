@@ -410,15 +410,17 @@ button {
   overflow-y: auto;
 }
 .manual-search-window {
+  display: flex;
   width: 100%;
   height: 100%;
-  overflow-y: auto;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--background);
 }
 .page-stack {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 22px;
   max-width: 920px;
   margin: 0 auto;
   padding: 34px 38px 48px;
@@ -452,17 +454,6 @@ button {
 .save-state.error {
   color: #fca5a5;
 }
-.section-tabs {
-  display: flex;
-  width: fit-content;
-  gap: 3px;
-  padding: 3px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-}
-.section-tabs .button {
-  min-height: 32px;
-}
 .setting-row {
   display: grid;
   grid-template-columns: minmax(240px, 1fr) minmax(220px, 310px);
@@ -487,6 +478,81 @@ button {
 .setting-control {
   display: flex;
   justify-content: flex-end;
+}
+
+.setting-row[data-disabled] .setting-copy {
+  opacity: 0.5;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-section-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 0 4px;
+}
+
+.settings-section-heading h2 {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 620;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settings-section-heading p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.number-setting {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.reset-button {
+  color: var(--muted-foreground);
+}
+
+.reset-button[data-visible="false"] {
+  visibility: hidden;
+}
+
+.slider-row.compact {
+  grid-template-columns: 120px 72px;
+  gap: 8px;
+}
+
+.source-rank {
+  width: 18px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.font-column-hint {
+  margin: -2px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.button:focus-visible,
+.switch:focus-visible,
+.slider:focus-visible,
+.candidate:focus-visible,
+.available-font-row:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.45);
+  outline-offset: 2px;
 }
 .font-picker-control {
   display: flex;
@@ -576,13 +642,9 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.font-row-actions {
+.row-actions {
   display: flex;
   gap: 2px;
-}
-.font-row-actions .button-icon {
-  width: 28px;
-  min-height: 28px;
 }
 .font-picker-footer {
   display: flex;
@@ -591,11 +653,15 @@ button {
 .source-control {
   display: flex;
   width: 100%;
+  padding: 16px 20px;
   min-width: 0;
   flex-direction: column;
   gap: 12px;
 }
 .source-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--card);
@@ -611,7 +677,7 @@ button {
 .source-row:last-child {
   border-bottom: 0;
 }
-.source-row > span {
+.source-row > .source-name {
   min-width: 0;
   flex: 1;
   overflow: hidden;
@@ -619,11 +685,7 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.source-row-actions {
-  display: flex;
-  gap: 2px;
-}
-.source-row-actions .button-icon {
+.row-actions .button-icon {
   width: 26px;
   min-height: 26px;
 }
@@ -646,7 +708,7 @@ button {
   align-items: center;
   gap: 10px;
 }
-.color-control input {
+.color-control input[type="color"] {
   width: 38px;
   height: 30px;
   padding: 2px;
@@ -666,9 +728,18 @@ button {
   font-size: 16px;
 }
 
+.search-page {
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  padding-bottom: 24px;
+}
+/* The card fills the window and the two panes scroll inside it, so a long
+   preview never stretches the page. */
 .search-card {
-  min-height: 480px;
   display: flex;
+  min-height: 320px;
+  flex: 1;
   flex-direction: column;
 }
 .search-form {
@@ -688,10 +759,12 @@ button {
 .search-workspace {
   display: grid;
   grid-template-columns: minmax(260px, 0.9fr) minmax(320px, 1.25fr);
-  min-height: 340px;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
   flex: 1;
 }
 .candidate-list {
+  min-height: 0;
   overflow-y: auto;
   border-right: 1px solid var(--border);
 }
@@ -721,6 +794,7 @@ button {
   color: var(--muted-foreground);
 }
 .lyrics-preview {
+  min-height: 0;
   margin: 0;
   padding: 18px 20px;
   overflow: auto;

@@ -5,13 +5,11 @@ import { LyricPlayer } from "@applemusic-like-lyrics/react";
 import { type CSSProperties, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { currentAmllLines, documentToAmllLines } from "./amll";
 import { SlotFader } from "./fade";
-import { karaokeFill } from "./karaoke";
+import { karaokeFill, karaokeFillStyle } from "./karaoke";
 import { type LyricsViewState, lyricsStore, type SlotSnapshot } from "./store";
 import type { LyricsStyle } from "./types";
 
 type LyricsCssProperties = CSSProperties & Record<`--${string}`, string>;
-
-export const AMLL_WORD_FADE_WIDTH = 0;
 
 function cssVariables(style: LyricsStyle | null): LyricsCssProperties | undefined {
   if (!style) return undefined;
@@ -42,7 +40,13 @@ function appleMusicCssVariables(style: LyricsStyle | null): LyricsCssProperties 
 
 interface LyricSlotProps {
   snapshot: SlotSnapshot | null;
+  /** Width of the soft karaoke edge in pixels; `0` draws a hard edge. */
+  fadePx?: number;
   setSlotRef?(element: HTMLElement | null): void;
+}
+
+function wordFadeWidth(style: LyricsStyle | null): number {
+  return Math.max(0, Number(style?.word_fade_width) || 0);
 }
 
 function useSlotTransition(state: LyricsViewState) {
@@ -74,7 +78,7 @@ function useSlotTransition(state: LyricsViewState) {
   return slotRefs;
 }
 
-export function LyricSlot({ snapshot, setSlotRef }: LyricSlotProps) {
+export function LyricSlot({ snapshot, fadePx = 0, setSlotRef }: LyricSlotProps) {
   const primaryRef = useRef<HTMLDivElement>(null);
   const content = snapshot?.content;
   const karaoke = content?.karaoke;
@@ -84,13 +88,13 @@ export function LyricSlot({ snapshot, setSlotRef }: LyricSlotProps) {
     const primary = primaryRef.current;
     const played = primary?.querySelector<HTMLElement>(".played");
     if (!primary || !played) return;
-    if (!karaoke) {
-      played.style.clipPath = "inset(0 100% 0 0)";
-      return;
-    }
-    const fill = Math.min(primary.clientWidth, Math.max(0, karaokeFill(primary, karaoke)));
-    played.style.clipPath = `inset(0 ${Math.max(0, primary.clientWidth - fill)}px 0 0)`;
-  }, [karaoke]);
+    const width = primary.clientWidth;
+    const fill = karaoke ? karaokeFill(primary, karaoke) : 0;
+    const { clipPath, maskImage } = karaokeFillStyle(fill, width, fadePx);
+    played.style.clipPath = clipPath;
+    played.style.setProperty("-webkit-mask-image", maskImage);
+    played.style.setProperty("mask-image", maskImage);
+  }, [karaoke, fadePx]);
 
   return (
     <section className="slot" ref={setSlotRef} data-lyric-key={snapshot?.key}>
@@ -106,6 +110,7 @@ export function LyricSlot({ snapshot, setSlotRef }: LyricSlotProps) {
 
 interface AppleMusicSlotProps {
   snapshot: SlotSnapshot | null;
+  fadeWidth: number;
   documentLines: ReturnType<typeof documentToAmllLines>;
   frame: LyricsViewState["frame"];
   active: boolean;
@@ -114,6 +119,7 @@ interface AppleMusicSlotProps {
 
 function AppleMusicSlot({
   snapshot,
+  fadeWidth,
   documentLines,
   frame,
   active,
@@ -144,7 +150,7 @@ function AppleMusicSlot({
           enableBlur={false}
           enableScale={false}
           hidePassedLines={false}
-          wordFadeWidth={AMLL_WORD_FADE_WIDTH}
+          wordFadeWidth={fadeWidth}
         />
       ) : null}
     </section>
@@ -155,17 +161,20 @@ export function LyricsViewport({ state }: { state: LyricsViewState }) {
   const slotRefs = useSlotTransition(state);
   // Rebuilt only with the style: the viewport re-renders on every frame.
   const style = useMemo(() => cssVariables(state.style), [state.style]);
+  const fadePx = wordFadeWidth(state.style) * (state.style?.lyric_font_px ?? 0);
 
   return (
     <main id="viewport" aria-live="off" style={style}>
       <LyricSlot
         snapshot={state.slots[0]}
+        fadePx={fadePx}
         setSlotRef={(element) => {
           slotRefs.current[0] = element;
         }}
       />
       <LyricSlot
         snapshot={state.slots[1]}
+        fadePx={fadePx}
         setSlotRef={(element) => {
           slotRefs.current[1] = element;
         }}
@@ -183,6 +192,7 @@ export function AppleMusicLyrics({ state }: { state: LyricsViewState }) {
   );
   const slotRefs = useSlotTransition(state);
   const style = useMemo(() => appleMusicCssVariables(state.style), [state.style]);
+  const fadeWidth = wordFadeWidth(state.style);
   if (!frame || frame.position_ms === null || !hasCurrentLine) {
     return <LyricsViewport state={state} />;
   }
@@ -190,6 +200,7 @@ export function AppleMusicLyrics({ state }: { state: LyricsViewState }) {
     <main id="viewport" className="apple-music-viewport" style={style}>
       <AppleMusicSlot
         snapshot={state.slots[0]}
+        fadeWidth={fadeWidth}
         documentLines={documentLines}
         frame={frame}
         active={state.activeSlot === 0}
@@ -199,6 +210,7 @@ export function AppleMusicLyrics({ state }: { state: LyricsViewState }) {
       />
       <AppleMusicSlot
         snapshot={state.slots[1]}
+        fadeWidth={fadeWidth}
         documentLines={documentLines}
         frame={frame}
         active={state.activeSlot === 1}

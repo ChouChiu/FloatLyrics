@@ -72,3 +72,30 @@ export function karaokeFill(primary: HTMLElement, karaoke: KaraokeContent): numb
   }
   return lineRect.width;
 }
+
+/** Styles that reveal the played layer of a karaoke line up to its fill. */
+export interface KaraokeFillStyle {
+  clipPath: string;
+  maskImage: string;
+}
+
+/**
+ * Reveals `fill` pixels of a line `width` pixels wide.
+ *
+ * With `fadePx` above zero the edge of the fill is a gradient that wide,
+ * centred on the fill, instead of a hard cut; it collapses at both ends of the
+ * line so an unplayed line shows nothing and a finished one shows everything.
+ */
+export function karaokeFillStyle(fill: number, width: number, fadePx: number): KaraokeFillStyle {
+  const bounded = Math.min(width, Math.max(0, fill));
+  if (fadePx <= 0 || bounded <= 0 || bounded >= width) {
+    return { clipPath: `inset(0 ${Math.max(0, width - bounded)}px 0 0)`, maskImage: "none" };
+  }
+  const half = fadePx / 2;
+  const solid = (bounded - half).toFixed(1);
+  const clear = (bounded + half).toFixed(1);
+  return {
+    clipPath: "none",
+    maskImage: `linear-gradient(to right, #000 ${solid}px, transparent ${clear}px)`,
+  };
+}
