@@ -5,7 +5,10 @@
 
 use gtk::prelude::*;
 use gtk4_layer_shell::{Edge, LayerShell};
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
 use crate::shared::config::WindowPosition;
 
@@ -13,9 +16,9 @@ mod geometry;
 
 pub(super) use geometry::WindowPlacement;
 use geometry::{
-    DragOrigin, FloatingGeometry, bottom_margin_from_y, centered_position, dragged_placement,
-    effective_surface_size, fallback_geometry, horizontal_position, placement_at, snap_css_classes,
-    vertical_position, y_from_bottom_margin,
+    DragOrigin, FloatingGeometry, bottom_margin_from_y, centered_position, drag_started,
+    dragged_placement, effective_surface_size, fallback_geometry, horizontal_position,
+    placement_at, snap_css_classes, vertical_position, y_from_bottom_margin,
 };
 
 #[derive(Clone)]
@@ -152,23 +155,31 @@ pub(super) fn attach_floating_drag(
     on_placement_changed(initial_placement);
     let gesture = gtk::GestureDrag::new();
     drag_handle.set_cursor_from_name(Some("grab"));
+    // Whether the current press landed on the handle, and whether it has since
+    // travelled far enough to be a drag.
+    let armed = Rc::new(Cell::new(false));
+    let dragging = Rc::new(Cell::new(false));
 
     {
         let window = window.downgrade();
-        let stage = stage.downgrade();
         let content = content.downgrade();
         let drag_handle = drag_handle.downgrade();
         let drag_origin = Rc::clone(&drag_origin);
         let placement = placement.clone();
-        gesture.connect_drag_begin(move |_, _, _| {
-            let (Some(window), Some(stage), Some(content), Some(drag_handle)) = (
-                window.upgrade(),
-                stage.upgrade(),
-                content.upgrade(),
-                drag_handle.upgrade(),
-            ) else {
+        let armed = Rc::clone(&armed);
+        let dragging = Rc::clone(&dragging);
+        gesture.connect_drag_begin(move |gesture, start_x, start_y| {
+            armed.set(false);
+            dragging.set(false);
+            let (Some(window), Some(content), Some(drag_handle)) =
+                (window.upgrade(), content.upgrade(), drag_handle.upgrade())
+            else {
                 return;
             };
+            if !press_on_handle(gesture, &drag_handle, start_x, start_y) {
+                return;
+            }
+            armed.set(true);
             drag_handle.set_cursor_from_name(Some("grabbing"));
             let geometry =
                 floating_geometry(&window, &content, mode, fallback_width, fallback_height)
@@ -187,9 +198,8 @@ pub(super) fn attach_floating_drag(
             };
             let origin = DragOrigin { x, y, geometry };
             if mode.is_internal() {
-                if placement.position() != (x, y) {
-                    stage.move_(&content, x as f64, y as f64);
-                }
+                // The panel is moved by the first drag update rather than here,
+                // so a click on the handle never shifts it.
                 placement.set(placement.current(), x, y);
             } else {
                 placement.set(placement_at(x, y, geometry), x, y);
@@ -205,7 +215,17 @@ pub(super) fn attach_floating_drag(
         let drag_origin = Rc::clone(&drag_origin);
         let placement = placement.clone();
         let on_placement_changed = Rc::new(on_placement_changed);
+        let dragging = Rc::clone(&dragging);
         gesture.connect_drag_update(move |_, offset_x, offset_y| {
+            if !armed.get() {
+                return;
+            }
+            if !dragging.get() {
+                if !drag_started(offset_x, offset_y) {
+                    return;
+                }
+                dragging.set(true);
+            }
             let (Some(window), Some(stage), Some(content)) =
                 (window.upgrade(), stage.upgrade(), content.upgrade())
             else {
@@ -233,7 +253,10 @@ pub(super) fn attach_floating_drag(
     {
         let placement = placement.clone();
         gesture.connect_drag_end(move |_, _, _| {
-            on_drag_end(placement.current().position());
+            // A click on the handle moved nothing, so there is nothing to save.
+            if dragging.replace(false) {
+                on_drag_end(placement.current().position());
+            }
         });
     }
     restore_grab_cursor(&gesture, drag_handle);
@@ -262,10 +285,31 @@ fn attach_toplevel_move(
     on_placement_changed(placement);
     let gesture = gtk::GestureDrag::new();
     drag_handle.set_cursor_from_name(Some("grab"));
+    // Whether the current press landed on the handle and has not been handed
+    // to the compositor yet.
+    let armed = Rc::new(Cell::new(false));
+    {
+        let drag_handle = drag_handle.downgrade();
+        let armed = Rc::clone(&armed);
+        gesture.connect_drag_begin(move |gesture, start_x, start_y| {
+            armed.set(
+                drag_handle
+                    .upgrade()
+                    .is_some_and(|handle| press_on_handle(gesture, &handle, start_x, start_y)),
+            );
+        });
+    }
     {
         let window = window.downgrade();
         let drag_handle = drag_handle.downgrade();
-        gesture.connect_drag_begin(move |gesture, _, _| {
+        // The compositor takes the pointer once the move starts, so the move is
+        // handed over only after the press has become a drag.
+        gesture.connect_drag_update(move |gesture, offset_x, offset_y| {
+            if !armed.get() || !drag_started(offset_x, offset_y) {
+                return;
+            }
+            armed.set(false);
+            gesture.set_state(gtk::EventSequenceState::Claimed);
             let (Some(window), Some(drag_handle)) = (window.upgrade(), drag_handle.upgrade())
             else {
                 return;
@@ -295,6 +339,23 @@ fn attach_toplevel_move(
     restore_grab_cursor(&gesture, drag_handle);
     content.add_controller(gesture);
     PlacementState::new(placement, 0, 0, DragMode::ToplevelWindow)
+}
+
+/// Claims a press for dragging only when it lands on the drag handle.
+///
+/// The gesture sits on a widget covering the whole panel, so a press on a
+/// toolbar button or on the lyrics reaches it too; those are denied here and
+/// left to the web view.
+fn press_on_handle(gesture: &gtk::GestureDrag, drag_handle: &gtk::Box, x: f64, y: f64) -> bool {
+    let on_handle = gesture.widget().is_some_and(|widget| {
+        widget
+            .compute_point(drag_handle, &gtk::graphene::Point::new(x as f32, y as f32))
+            .is_some_and(|point| drag_handle.contains(point.x().into(), point.y().into()))
+    });
+    if !on_handle {
+        gesture.set_state(gtk::EventSequenceState::Denied);
+    }
+    on_handle
 }
 
 /// Puts the open-hand cursor back on the drag handle when a drag ends or the

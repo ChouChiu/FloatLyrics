@@ -132,3 +132,11 @@ fn invalid_saved_position_falls_back_to_center() {
     assert_eq!(anchor_from_factor(-0.5), AxisAnchor::Start);
     assert_eq!(anchor_from_factor(1.5), AxisAnchor::End);
 }
+
+#[test]
+fn a_click_on_the_handle_is_not_a_drag() {
+    assert!(!drag_started(0.0, 0.0));
+    assert!(!drag_started(3.0, -3.0));
+    assert!(drag_started(6.0, 0.0));
+    assert!(drag_started(-4.0, 5.0));
+}

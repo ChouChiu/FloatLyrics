@@ -8,6 +8,11 @@ use crate::shared::config::WindowPosition;
 const EDGE_SNAP_THRESHOLD_PX: i32 = 12;
 const CENTER_SNAP_THRESHOLD_PX: i32 = 28;
 const SNAP_RELEASE_THRESHOLD_PX: i32 = 44;
+/// Pointer travel that turns a press on the drag handle into a drag.
+///
+/// Below it the press is a click: the panel must not move, snap, or save its
+/// position, or the click lands on a panel that has just jumped under it.
+const DRAG_START_THRESHOLD_PX: f64 = 6.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum AxisAnchor {
@@ -61,6 +66,11 @@ pub(super) struct FloatingGeometry {
     pub(super) viewport_height: i32,
     pub(super) surface_width: i32,
     pub(super) surface_height: i32,
+}
+
+/// Whether the pointer has travelled far enough from the press to start a drag.
+pub(super) fn drag_started(offset_x: f64, offset_y: f64) -> bool {
+    offset_x.hypot(offset_y) >= DRAG_START_THRESHOLD_PX
 }
 
 pub(super) fn dragged_placement(
