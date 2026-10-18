@@ -475,6 +475,7 @@ impl OverlayView {
             lyric_font_px,
             metrics.romanization_font_size,
             metrics.translation_font_size,
+            metrics.apple_music_style,
         )
         .saturating_add(lyrics_horizontal_padding(
             metrics.apple_music_style,
