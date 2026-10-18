@@ -9,7 +9,9 @@ use floatlyrics_core::{
     i18n::{Language, Message, Text},
     track::TrackMetadata,
 };
-use floatlyrics_lyrics::lyrics::{TimedLine, active_line_index, line_index_at_or_before};
+use floatlyrics_lyrics::lyrics::{
+    TimedLine, TimedSyllable, active_line_index, line_index_at_or_before,
+};
 
 use crate::shared::{
     presentation::{
@@ -164,7 +166,7 @@ pub(super) fn lyrics_document(
                     start_ms: line.start_ms,
                     end_ms: line.end_ms,
                     text: line.text.trim().to_string(),
-                    syllables: line.syllables.clone(),
+                    syllables: presented_syllables(&line.syllables, config),
                     romanization: visible.romanization,
                     translation: visible.translation,
                     background: background
@@ -181,7 +183,7 @@ pub(super) fn lyrics_document(
                     background_start_ms: background.map_or(line.start_ms, |sung| sung.start_ms),
                     background_end_ms: background.and_then(|sung| sung.end_ms),
                     background_syllables: background
-                        .map(|sung| sung.syllables.clone())
+                        .map(|sung| presented_syllables(&sung.syllables, config))
                         .unwrap_or_default(),
                     voice: line.voice,
                 }
@@ -243,11 +245,30 @@ fn current_line_text(
     if !line.syllables.is_empty() {
         value.karaoke = Some(KaraokeRenderState {
             text: line.text.clone(),
-            syllables: line.syllables.clone(),
+            syllables: presented_syllables(&line.syllables, config),
             position_ms: adjusted_position_ms(position_ms, offset_ms),
         });
     }
     value
+}
+
+/// The words of a line as the views may show them.
+///
+/// The per-word romanization and furigana are generated only while
+/// romanization is shown, and stay on the loaded lines once it is hidden, so
+/// they are dropped here rather than left for each view to ignore.
+fn presented_syllables(
+    syllables: &[TimedSyllable],
+    config: &LyricsRuntimeConfig,
+) -> Vec<TimedSyllable> {
+    let mut syllables = syllables.to_vec();
+    if !config.show_romanization {
+        for syllable in &mut syllables {
+            syllable.romanization.clear();
+            syllable.furigana.clear();
+        }
+    }
+    syllables
 }
 
 fn adjusted_position_ms(position_ms: u64, offset_ms: i64) -> u64 {

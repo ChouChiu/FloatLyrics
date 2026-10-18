@@ -316,6 +316,56 @@ fn player_state_with_status(
     }
 }
 
+#[test]
+fn hiding_romanization_drops_the_readings_already_on_the_words() {
+    // Readings were generated while romanization was shown and stay on the
+    // loaded line after it is hidden.
+    let read = |text: &str, romanization: &str, furigana: &str| TimedSyllable {
+        start_ms: 1_000,
+        end_ms: 1_500,
+        text: text.to_string(),
+        romanization: romanization.to_string(),
+        furigana: furigana.to_string(),
+    };
+    let mut line = test_line();
+    line.text = "空 echo".to_string();
+    line.syllables = vec![read("空 ", "sora", "そら")];
+    line.background = Some(BackgroundVocal {
+        text: "echo".to_string(),
+        translation: None,
+        start_ms: 1_200,
+        end_ms: Some(1_500),
+        syllables: vec![read("echo", "e ko", "")],
+    });
+    let state = LyricsDisplayState {
+        lines: vec![line.clone()],
+        ..LyricsDisplayState::default()
+    };
+    let mut config = runtime_config();
+    config.show_romanization = false;
+
+    let document = lyrics_document(&state, &config, 1, None);
+    let words = &document.lines[0].syllables;
+    assert_eq!(words[0].text, "空 ", "the words themselves are kept");
+    assert!(words[0].romanization.is_empty());
+    assert!(words[0].furigana.is_empty());
+    assert!(
+        document.lines[0].background_syllables[0]
+            .romanization
+            .is_empty()
+    );
+
+    let frame = current_line_text(Some(&line), &config, 1_200, 0);
+    let karaoke = frame.karaoke.expect("the line is timed word by word");
+    assert!(karaoke.syllables[0].romanization.is_empty());
+    assert!(karaoke.syllables[0].furigana.is_empty());
+
+    config.show_romanization = true;
+    let shown = lyrics_document(&state, &config, 2, None);
+    assert_eq!(shown.lines[0].syllables[0].romanization, "sora");
+    assert_eq!(shown.lines[0].syllables[0].furigana, "そら");
+}
+
 fn runtime_config() -> LyricsRuntimeConfig {
     LyricsRuntimeConfig::from(&AppConfig::default())
 }
