@@ -5,7 +5,9 @@ import {
   type RemixiconComponentType,
   RiAddLine,
   RiArrowDownLine,
+  RiArrowDownSLine,
   RiArrowUpLine,
+  RiCheckLine,
   RiCloseLine,
   RiDatabase2Line,
   RiDeleteBin6Line,
@@ -19,11 +21,15 @@ import {
 import {
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
+  type KeyboardEvent,
   type ReactNode,
-  type SelectHTMLAttributes,
   useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 
 function classes(...values: Array<string | false | null | undefined>): string {
   return values.filter(Boolean).join(" ");
@@ -55,11 +61,203 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
   return <input className={classes("input", className)} {...props} />;
 }
 
-export function Select({ className, children, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
+export interface SelectOption<T extends string> {
+  value: T;
+  label: string;
+}
+
+interface SelectPosition {
+  left: number;
+  width: number;
+  top?: number;
+  bottom?: number;
+  maxHeight: number;
+}
+
+const SELECT_GAP = 6;
+const SELECT_MARGIN = 8;
+
+function selectPosition(trigger: HTMLElement): SelectPosition {
+  const rect = trigger.getBoundingClientRect();
+  const below = window.innerHeight - rect.bottom - SELECT_GAP - SELECT_MARGIN;
+  const above = rect.top - SELECT_GAP - SELECT_MARGIN;
+  const base = { left: rect.left, width: rect.width };
+  // Open downwards unless the space above is clearly the better fit.
+  return below >= 160 || below >= above
+    ? { ...base, top: rect.bottom + SELECT_GAP, maxHeight: below }
+    : { ...base, bottom: window.innerHeight - rect.top + SELECT_GAP, maxHeight: above };
+}
+
+/**
+ * A dropdown drawn by the page itself.
+ *
+ * WebKitGTK renders a native `<select>` popup as a GTK popover styled by the
+ * desktop theme, which does not match the rest of the control center.
+ */
+export function Select<T extends string>({
+  value,
+  options,
+  onValueChange,
+  disabled,
+  label,
+  className,
+}: {
+  value: T;
+  options: ReadonlyArray<SelectOption<T>>;
+  onValueChange(value: T): void;
+  disabled?: boolean;
+  label?: string;
+  className?: string;
+}) {
+  const listId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<SelectPosition | null>(null);
+  const selectedIndex = options.findIndex((option) => option.value === value);
+  const [highlighted, setHighlighted] = useState(selectedIndex);
+  const selected = options[selectedIndex];
+
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current) return;
+    setPosition(selectPosition(triggerRef.current));
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (triggerRef.current?.contains(target) || listRef.current?.contains(target)) return;
+      close();
+    };
+    const onScroll = (event: Event) => {
+      if (listRef.current?.contains(event.target as Node)) return;
+      close();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", close);
+    window.addEventListener("blur", close);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("blur", close);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (open)
+      document.getElementById(`${listId}-${highlighted}`)?.scrollIntoView({ block: "nearest" });
+  }, [open, highlighted, listId]);
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
+  const openList = () => {
+    setHighlighted(Math.max(selectedIndex, 0));
+    setOpen(true);
+  };
+
+  const choose = (index: number) => {
+    const option = options[index];
+    setOpen(false);
+    triggerRef.current?.focus();
+    if (option && option.value !== value) onValueChange(option.value);
+  };
+
+  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (disabled || options.length === 0) return;
+    const last = options.length - 1;
+    const move = (index: number) => {
+      event.preventDefault();
+      if (open) setHighlighted(index);
+      else if (options[index]) onValueChange(options[index].value);
+    };
+    switch (event.key) {
+      case "ArrowDown":
+        if (event.altKey && !open) {
+          event.preventDefault();
+          return openList();
+        }
+        return move(Math.min((open ? highlighted : selectedIndex) + 1, last));
+      case "ArrowUp":
+        return move(Math.max((open ? highlighted : selectedIndex) - 1, 0));
+      case "Home":
+        return move(0);
+      case "End":
+        return move(last);
+      case "Enter":
+      case " ":
+        event.preventDefault();
+        return open ? choose(highlighted) : openList();
+      case "Escape":
+      case "Tab":
+        if (open) {
+          if (event.key === "Escape") event.preventDefault();
+          setOpen(false);
+        }
+        return;
+    }
+  };
+
   return (
-    <select className={classes("select", className)} {...props}>
-      {children}
-    </select>
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        role="combobox"
+        aria-label={label}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        aria-activedescendant={open ? `${listId}-${highlighted}` : undefined}
+        disabled={disabled}
+        className={classes("select", className)}
+        data-state={open ? "open" : "closed"}
+        onClick={() => (open ? setOpen(false) : openList())}
+        onKeyDown={onKeyDown}
+      >
+        <span className="select-value">{selected?.label ?? ""}</span>
+        <RiArrowDownSLine aria-hidden="true" className="icon select-chevron" />
+      </button>
+      {open &&
+        position &&
+        createPortal(
+          <div
+            ref={listRef}
+            id={listId}
+            role="listbox"
+            aria-label={label}
+            className="select-content"
+            style={position}
+          >
+            {options.map((option, index) => (
+              // biome-ignore lint/a11y/useKeyWithClickEvents: the combobox trigger keeps focus and handles the keyboard
+              <div
+                key={option.value}
+                id={`${listId}-${index}`}
+                role="option"
+                tabIndex={-1}
+                aria-selected={option.value === value}
+                className="select-item"
+                data-highlighted={index === highlighted}
+                onPointerMove={() => setHighlighted(index)}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => choose(index)}
+              >
+                <span>{option.label}</span>
+                {option.value === value && (
+                  <RiCheckLine aria-hidden="true" className="icon select-check" />
+                )}
+              </div>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 

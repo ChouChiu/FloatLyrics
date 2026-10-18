@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { currentAmllLines, documentToAmllLines, resolvedLineEnd } from "./amll";
 import { installLyricsBridge } from "./bridge";
-import { AppIcon, Icon, Slider } from "./components/ui";
+import { AppIcon, Icon, Select, Slider } from "./components/ui";
 import { type FadeTarget, type FrameScheduler, SlotFader } from "./fade";
 import { findSyllableRanges, syllableProgress } from "./karaoke";
 import { advanceLyricsViewState, initialLyricsViewState } from "./store";
@@ -264,6 +264,29 @@ describe("React application shell", () => {
     expect(state.config).toEqual(config);
     const strings = state.strings as { General?: string };
     expect(strings.General).toBe("General");
+  });
+
+  test("draws dropdowns in the page instead of the native select popup", () => {
+    const html = renderToStaticMarkup(
+      <Select
+        label="Language"
+        value="zh-CN"
+        options={[
+          { value: "en", label: "English" },
+          { value: "zh-CN", label: "简体中文" },
+        ]}
+        onValueChange={() => {}}
+      />,
+    );
+    expect(html).not.toContain("<select");
+    expect(html).toContain('role="combobox"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain(">简体中文<");
+
+    const general = renderToStaticMarkup(
+      <ControlCenter state={advanceUiState(initial, { type: "navigate", page: "general" })} />,
+    );
+    expect(general).not.toContain("<select");
   });
 
   test("keeps control-center navigation independent from lyrics frames", () => {

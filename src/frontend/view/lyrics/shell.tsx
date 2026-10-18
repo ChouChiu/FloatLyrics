@@ -199,18 +199,19 @@ function SettingsPage({ state, page }: { state: UiState; page: SettingsPageName 
         <Card>
           <SettingRow title={t("Language")} description={t("LanguageDescription")}>
             <Select
+              label={t("Language")}
               value={draft.general.language}
-              onChange={(event) =>
+              options={[
+                { value: "en", label: "English" },
+                { value: "zh-CN", label: "简体中文" },
+                { value: "zh-TW", label: "繁體中文" },
+              ]}
+              onValueChange={(value) =>
                 update((next) => {
-                  next.general.language = event.currentTarget
-                    .value as AppConfig["general"]["language"];
+                  next.general.language = value;
                 })
               }
-            >
-              <option value="en">English</option>
-              <option value="zh-CN">简体中文</option>
-              <option value="zh-TW">繁體中文</option>
-            </Select>
+            />
           </SettingRow>
         </Card>
       )}
@@ -259,22 +260,24 @@ function SettingsPage({ state, page }: { state: UiState; page: SettingsPageName 
             description={t("ChineseRomanizationDescription")}
           >
             <Select
+              label={t("ChineseRomanization")}
               disabled={!draft.lyrics.show_romanization}
               value={draft.lyrics.chinese_romanization}
-              onChange={(event) =>
+              options={[
+                { value: "auto", label: t("RomanizationAutomatic") },
+                { value: "mandarin-pinyin", label: t("MandarinPinyin") },
+                { value: "cantonese-jyutping", label: t("CantoneseJyutping") },
+                {
+                  value: "cantonese-jyutping-no-tones",
+                  label: t("CantoneseJyutpingWithoutTones"),
+                },
+              ]}
+              onValueChange={(value) =>
                 update((next) => {
-                  next.lyrics.chinese_romanization = event.currentTarget
-                    .value as AppConfig["lyrics"]["chinese_romanization"];
+                  next.lyrics.chinese_romanization = value;
                 })
               }
-            >
-              <option value="auto">{t("RomanizationAutomatic")}</option>
-              <option value="mandarin-pinyin">{t("MandarinPinyin")}</option>
-              <option value="cantonese-jyutping">{t("CantoneseJyutping")}</option>
-              <option value="cantonese-jyutping-no-tones">
-                {t("CantoneseJyutpingWithoutTones")}
-              </option>
-            </Select>
+            />
           </SettingRow>
         </Card>
       )}
@@ -584,16 +587,18 @@ export function IntegrationPage({ state }: { state: UiState }) {
       <Card>
         <SettingRow title={t("RunMode")} description={t("RunModeDescription")}>
           <Select
+            label={t("RunMode")}
             value={draft.general.mode}
-            onChange={(event) =>
+            options={[
+              { value: "floating", label: t("RunModeFloating") },
+              { value: "amll", label: t("RunModeAmll") },
+            ]}
+            onValueChange={(value) =>
               update((next) => {
-                next.general.mode = event.currentTarget.value as AppConfig["general"]["mode"];
+                next.general.mode = value;
               })
             }
-          >
-            <option value="floating">{t("RunModeFloating")}</option>
-            <option value="amll">{t("RunModeAmll")}</option>
-          </Select>
+          />
         </SettingRow>
         <SettingRow title={t("AmllAddress")} description={t("AmllAddressDescription")}>
           <Input

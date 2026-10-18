@@ -144,7 +144,73 @@ button {
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
 }
 .select {
+  display: inline-flex;
   min-width: 190px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-right: 8px;
+  text-align: left;
+  cursor: default;
+}
+.select:disabled {
+  opacity: 0.5;
+}
+.select[data-state="open"] {
+  border-color: rgba(255, 255, 255, 0.34);
+}
+.select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.select-chevron {
+  color: var(--muted-foreground);
+  transition: transform 140ms ease;
+}
+.select[data-state="open"] .select-chevron {
+  transform: rotate(180deg);
+}
+.select-content {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--card) 92%, white 8%);
+  color: var(--card-foreground);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.45),
+    0 2px 6px rgba(0, 0, 0, 0.3);
+  animation: select-in 110ms ease-out;
+}
+.select-item {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 8px 0 10px;
+  border-radius: 6px;
+  cursor: default;
+  user-select: none;
+}
+.select-item[data-highlighted="true"] {
+  background: var(--accent);
+}
+.select-check {
+  width: 15px;
+  height: 15px;
+}
+@keyframes select-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
 }
 
 .switch {
