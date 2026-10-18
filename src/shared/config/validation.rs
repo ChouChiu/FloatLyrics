@@ -3,7 +3,10 @@
 
 //! Domain validation for persisted application preferences.
 
+use std::collections::BTreeMap;
+
 use anyhow::{Result, bail};
+use serde::Serialize;
 
 use super::AppConfig;
 
@@ -25,61 +28,191 @@ impl ConfigLimits {
     pub(crate) const LYRIC_FONT_SIZE_MAX: i32 = 56;
     pub(crate) const SECONDARY_FONT_SIZE_MIN: i32 = 8;
     pub(crate) const SECONDARY_FONT_SIZE_MAX: i32 = 36;
+    pub(crate) const TRANSITION_MS_MIN: u32 = 0;
+    pub(crate) const TRANSITION_MS_MAX: u32 = 1000;
+    pub(crate) const WORD_FADE_WIDTH_MIN: f64 = 0.0;
+    pub(crate) const WORD_FADE_WIDTH_MAX: f64 = 2.0;
+    pub(crate) const TRACK_OFFSET_STEP_MS_MIN: u32 = 10;
+    pub(crate) const TRACK_OFFSET_STEP_MS_MAX: u32 = 1000;
+
+    /// Inclusive range of every numeric preference, keyed by its dotted TOML path.
+    ///
+    /// The settings page reads the same table, so a limit is declared once.
+    pub(crate) fn ranges() -> BTreeMap<&'static str, NumericRange> {
+        NUMERIC_FIELDS
+            .iter()
+            .map(|field| (field.name, field.range))
+            .collect()
+    }
+
+    /// Whether `value` lies inside the range declared for the field `name`.
+    ///
+    /// An unknown field name is a programming error and is never in range.
+    pub(crate) fn contains(name: &str, value: impl Numeric) -> bool {
+        NUMERIC_FIELDS
+            .iter()
+            .find(|field| field.name == name)
+            .is_some_and(|field| field.range.contains(value.as_f64()))
+    }
 }
 
-pub(super) fn validate(config: &AppConfig) -> Result<()> {
-    validate_i32(
-        "window.width",
-        config.window.width,
-        ConfigLimits::WINDOW_WIDTH_MIN,
-        ConfigLimits::WINDOW_WIDTH_MAX,
-    )?;
-    validate_i32(
-        "window.margin",
-        config.window.margin,
-        ConfigLimits::WINDOW_MARGIN_MIN,
-        ConfigLimits::WINDOW_MARGIN_MAX,
-    )?;
-    validate_i32(
-        "window.bottom_panel_height",
-        config.window.bottom_panel_height,
-        ConfigLimits::BOTTOM_PANEL_HEIGHT_MIN,
-        ConfigLimits::BOTTOM_PANEL_HEIGHT_MAX,
-    )?;
-    validate_f64(
-        "window.opacity",
-        config.window.opacity,
-        ConfigLimits::OPACITY_MIN,
-        ConfigLimits::OPACITY_MAX,
-    )?;
-    if let Some(position) = config.window.position {
-        validate_f64("window.position.horizontal", position.horizontal, 0.0, 1.0)?;
-        validate_f64("window.position.vertical", position.vertical, 0.0, 1.0)?;
+/// Inclusive bounds of a numeric preference.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub(crate) struct NumericRange {
+    pub(crate) min: f64,
+    pub(crate) max: f64,
+}
+
+impl NumericRange {
+    fn contains(self, value: f64) -> bool {
+        value.is_finite() && (self.min..=self.max).contains(&value)
     }
-    validate_i64(
-        "lyrics.offset_ms",
-        config.lyrics.offset_ms,
-        ConfigLimits::OFFSET_MS_MIN,
-        ConfigLimits::OFFSET_MS_MAX,
-    )?;
-    validate_i32(
-        "lyrics.lyric_font_size",
-        config.lyrics.lyric_font_size,
-        ConfigLimits::LYRIC_FONT_SIZE_MIN,
-        ConfigLimits::LYRIC_FONT_SIZE_MAX,
-    )?;
-    validate_i32(
-        "lyrics.translation_font_size",
-        config.lyrics.translation_font_size,
-        ConfigLimits::SECONDARY_FONT_SIZE_MIN,
-        ConfigLimits::SECONDARY_FONT_SIZE_MAX,
-    )?;
-    validate_i32(
-        "lyrics.romanization_font_size",
-        config.lyrics.romanization_font_size,
-        ConfigLimits::SECONDARY_FONT_SIZE_MIN,
-        ConfigLimits::SECONDARY_FONT_SIZE_MAX,
-    )?;
+}
+
+/// Numeric types persisted in the configuration.
+pub(crate) trait Numeric: Copy {
+    /// Converts the value without loss for every range declared here.
+    fn as_f64(self) -> f64;
+}
+
+impl Numeric for i32 {
+    fn as_f64(self) -> f64 {
+        self.into()
+    }
+}
+
+impl Numeric for u32 {
+    fn as_f64(self) -> f64 {
+        self.into()
+    }
+}
+
+impl Numeric for i64 {
+    fn as_f64(self) -> f64 {
+        // Every declared range lies well inside the 53-bit integer range of `f64`.
+        self as f64
+    }
+}
+
+impl Numeric for f64 {
+    fn as_f64(self) -> f64 {
+        self
+    }
+}
+
+struct NumericField {
+    name: &'static str,
+    range: NumericRange,
+    read: fn(&AppConfig) -> f64,
+}
+
+const fn range(min: f64, max: f64) -> NumericRange {
+    NumericRange { min, max }
+}
+
+const NUMERIC_FIELDS: &[NumericField] = &[
+    NumericField {
+        name: "window.width",
+        range: range(
+            ConfigLimits::WINDOW_WIDTH_MIN as f64,
+            ConfigLimits::WINDOW_WIDTH_MAX as f64,
+        ),
+        read: |config| config.window.width.as_f64(),
+    },
+    NumericField {
+        name: "window.margin",
+        range: range(
+            ConfigLimits::WINDOW_MARGIN_MIN as f64,
+            ConfigLimits::WINDOW_MARGIN_MAX as f64,
+        ),
+        read: |config| config.window.margin.as_f64(),
+    },
+    NumericField {
+        name: "window.bottom_panel_height",
+        range: range(
+            ConfigLimits::BOTTOM_PANEL_HEIGHT_MIN as f64,
+            ConfigLimits::BOTTOM_PANEL_HEIGHT_MAX as f64,
+        ),
+        read: |config| config.window.bottom_panel_height.as_f64(),
+    },
+    NumericField {
+        name: "window.opacity",
+        range: range(ConfigLimits::OPACITY_MIN, ConfigLimits::OPACITY_MAX),
+        read: |config| config.window.opacity,
+    },
+    NumericField {
+        name: "lyrics.offset_ms",
+        range: range(
+            ConfigLimits::OFFSET_MS_MIN as f64,
+            ConfigLimits::OFFSET_MS_MAX as f64,
+        ),
+        read: |config| config.lyrics.offset_ms.as_f64(),
+    },
+    NumericField {
+        name: "lyrics.lyric_font_size",
+        range: range(
+            ConfigLimits::LYRIC_FONT_SIZE_MIN as f64,
+            ConfigLimits::LYRIC_FONT_SIZE_MAX as f64,
+        ),
+        read: |config| config.lyrics.lyric_font_size.as_f64(),
+    },
+    NumericField {
+        name: "lyrics.translation_font_size",
+        range: range(
+            ConfigLimits::SECONDARY_FONT_SIZE_MIN as f64,
+            ConfigLimits::SECONDARY_FONT_SIZE_MAX as f64,
+        ),
+        read: |config| config.lyrics.translation_font_size.as_f64(),
+    },
+    NumericField {
+        name: "lyrics.romanization_font_size",
+        range: range(
+            ConfigLimits::SECONDARY_FONT_SIZE_MIN as f64,
+            ConfigLimits::SECONDARY_FONT_SIZE_MAX as f64,
+        ),
+        read: |config| config.lyrics.romanization_font_size.as_f64(),
+    },
+    NumericField {
+        name: "lyrics.transition_ms",
+        range: range(
+            ConfigLimits::TRANSITION_MS_MIN as f64,
+            ConfigLimits::TRANSITION_MS_MAX as f64,
+        ),
+        read: |config| config.lyrics.transition_ms.as_f64(),
+    },
+    NumericField {
+        name: "lyrics.word_fade_width",
+        range: range(
+            ConfigLimits::WORD_FADE_WIDTH_MIN,
+            ConfigLimits::WORD_FADE_WIDTH_MAX,
+        ),
+        read: |config| config.lyrics.word_fade_width,
+    },
+    NumericField {
+        name: "lyrics.track_offset_step_ms",
+        range: range(
+            ConfigLimits::TRACK_OFFSET_STEP_MS_MIN as f64,
+            ConfigLimits::TRACK_OFFSET_STEP_MS_MAX as f64,
+        ),
+        read: |config| config.lyrics.track_offset_step_ms.as_f64(),
+    },
+];
+
+pub(super) fn validate(config: &AppConfig) -> Result<()> {
+    for field in NUMERIC_FIELDS {
+        let value = (field.read)(config);
+        if !field.range.contains(value) {
+            let NumericRange { min, max } = field.range;
+            bail!(
+                "{} must be between {min} and {max}, got {value}",
+                field.name
+            );
+        }
+    }
+    if let Some(position) = config.window.position {
+        validate_fraction("window.position.horizontal", position.horizontal)?;
+        validate_fraction("window.position.vertical", position.vertical)?;
+    }
     if config.lyrics.font_order.is_empty()
         || config
             .lyrics
@@ -135,23 +268,9 @@ pub(super) fn validate_listener_address(name: &str, value: &str) -> Result<()> {
     }
 }
 
-fn validate_i32(name: &str, value: i32, minimum: i32, maximum: i32) -> Result<()> {
-    if !(minimum..=maximum).contains(&value) {
-        bail!("{name} must be between {minimum} and {maximum}, got {value}");
-    }
-    Ok(())
-}
-
-fn validate_i64(name: &str, value: i64, minimum: i64, maximum: i64) -> Result<()> {
-    if !(minimum..=maximum).contains(&value) {
-        bail!("{name} must be between {minimum} and {maximum}, got {value}");
-    }
-    Ok(())
-}
-
-fn validate_f64(name: &str, value: f64, minimum: f64, maximum: f64) -> Result<()> {
-    if !value.is_finite() || !(minimum..=maximum).contains(&value) {
-        bail!("{name} must be between {minimum} and {maximum}, got {value}");
+fn validate_fraction(name: &str, value: f64) -> Result<()> {
+    if !range(0.0, 1.0).contains(value) {
+        bail!("{name} must be between 0 and 1, got {value}");
     }
     Ok(())
 }

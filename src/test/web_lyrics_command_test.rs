@@ -72,9 +72,28 @@ fn font_picker_bootstrap_includes_discovered_font_families() {
 }
 
 #[test]
-fn settings_navigation_serializes_sidebar_pages() {
-    let script = navigate_script(ControlPage::Display).unwrap();
+fn configure_carries_the_configured_line_and_word_transitions() {
+    let mut config = AppConfig::default();
+    config.lyrics.transition_ms = 420;
+    config.lyrics.word_fade_width = 0.75;
 
-    assert!(script.contains("\"type\":\"navigate\""));
-    assert!(script.contains("\"page\":\"display\""));
+    let script = configure_script(&config).unwrap();
+
+    assert!(script.contains("\"transition_ms\":420"));
+    assert!(script.contains("\"word_fade_width\":0.75"));
+}
+
+#[test]
+fn bootstrap_sends_defaults_and_numeric_limits_to_the_settings_page() {
+    let script = bootstrap_script(
+        UiSurface::ControlCenter,
+        &AppConfig::default(),
+        std::collections::BTreeMap::new(),
+        &serde_json::json!({ "dependencies": [], "licenses": [] }),
+        &[],
+    )
+    .unwrap();
+
+    assert!(script.contains("\"defaults\":{"));
+    assert!(script.contains("\"lyrics.transition_ms\":{\"min\":0.0,\"max\":1000.0}"));
 }

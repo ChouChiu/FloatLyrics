@@ -12,7 +12,7 @@ use std::{
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
 
-use super::{AppConfig, ConfigLimits, WindowPosition, normalized_hex_color};
+use super::{AppConfig, ConfigLimits, WindowPosition, normalized_hex_color, validation::Numeric};
 
 pub(super) fn recover_fields(content: &str) -> AppConfig {
     let value = match toml::from_str::<toml::Value>(content) {
@@ -56,39 +56,14 @@ pub(super) fn recover_fields(content: &str) -> AppConfig {
         &mut config.window.position,
         valid_position,
     );
-    apply(
-        &value,
-        "window",
-        "margin",
-        &mut config.window.margin,
-        |value| (ConfigLimits::WINDOW_MARGIN_MIN..=ConfigLimits::WINDOW_MARGIN_MAX).contains(value),
-    );
-    apply(
-        &value,
-        "window",
-        "width",
-        &mut config.window.width,
-        |value| (ConfigLimits::WINDOW_WIDTH_MIN..=ConfigLimits::WINDOW_WIDTH_MAX).contains(value),
-    );
-    apply(
-        &value,
-        "window",
-        "opacity",
-        &mut config.window.opacity,
-        |value| {
-            value.is_finite()
-                && (ConfigLimits::OPACITY_MIN..=ConfigLimits::OPACITY_MAX).contains(value)
-        },
-    );
-    apply(
+    apply_ranged(&value, "window", "margin", &mut config.window.margin);
+    apply_ranged(&value, "window", "width", &mut config.window.width);
+    apply_ranged(&value, "window", "opacity", &mut config.window.opacity);
+    apply_ranged(
         &value,
         "window",
         "bottom_panel_height",
         &mut config.window.bottom_panel_height,
-        |value| {
-            (ConfigLimits::BOTTOM_PANEL_HEIGHT_MIN..=ConfigLimits::BOTTOM_PANEL_HEIGHT_MAX)
-                .contains(value)
-        },
     );
 
     apply(
@@ -98,13 +73,7 @@ pub(super) fn recover_fields(content: &str) -> AppConfig {
         &mut config.lyrics.apple_music_style,
         |_| true,
     );
-    apply(
-        &value,
-        "lyrics",
-        "offset_ms",
-        &mut config.lyrics.offset_ms,
-        |value| (ConfigLimits::OFFSET_MS_MIN..=ConfigLimits::OFFSET_MS_MAX).contains(value),
-    );
+    apply_ranged(&value, "lyrics", "offset_ms", &mut config.lyrics.offset_ms);
     apply(
         &value,
         "lyrics",
@@ -140,34 +109,41 @@ pub(super) fn recover_fields(content: &str) -> AppConfig {
         &mut config.lyrics.font_order,
         |fonts| !fonts.is_empty() && fonts.iter().all(|font| !font.trim().is_empty()),
     );
-    apply(
+    apply_ranged(
         &value,
         "lyrics",
         "lyric_font_size",
         &mut config.lyrics.lyric_font_size,
-        |value| {
-            (ConfigLimits::LYRIC_FONT_SIZE_MIN..=ConfigLimits::LYRIC_FONT_SIZE_MAX).contains(value)
-        },
     );
-    apply(
+    apply_ranged(
         &value,
         "lyrics",
         "translation_font_size",
         &mut config.lyrics.translation_font_size,
-        |value| {
-            (ConfigLimits::SECONDARY_FONT_SIZE_MIN..=ConfigLimits::SECONDARY_FONT_SIZE_MAX)
-                .contains(value)
-        },
     );
-    apply(
+    apply_ranged(
         &value,
         "lyrics",
         "romanization_font_size",
         &mut config.lyrics.romanization_font_size,
-        |value| {
-            (ConfigLimits::SECONDARY_FONT_SIZE_MIN..=ConfigLimits::SECONDARY_FONT_SIZE_MAX)
-                .contains(value)
-        },
+    );
+    apply_ranged(
+        &value,
+        "lyrics",
+        "transition_ms",
+        &mut config.lyrics.transition_ms,
+    );
+    apply_ranged(
+        &value,
+        "lyrics",
+        "word_fade_width",
+        &mut config.lyrics.word_fade_width,
+    );
+    apply_ranged(
+        &value,
+        "lyrics",
+        "track_offset_step_ms",
+        &mut config.lyrics.track_offset_step_ms,
     );
     apply_color(&value, "played_color", &mut config.lyrics.played_color);
     apply_color(&value, "unplayed_color", &mut config.lyrics.unplayed_color);
@@ -281,6 +257,16 @@ fn apply<T>(
             tracing::warn!(%field, %error, "incompatible config field fell back to its default")
         }
     }
+}
+
+fn apply_ranged<T>(root: &toml::Value, section: &str, name: &str, target: &mut T)
+where
+    T: DeserializeOwned + Numeric,
+{
+    let field = format!("{section}.{name}");
+    apply(root, section, name, target, |value| {
+        ConfigLimits::contains(&field, *value)
+    });
 }
 
 fn apply_color(root: &toml::Value, name: &str, target: &mut String) {

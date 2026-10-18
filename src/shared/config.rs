@@ -12,7 +12,7 @@ mod persistence;
 mod recovery;
 mod validation;
 
-pub(crate) use validation::ConfigLimits;
+pub(crate) use validation::{ConfigLimits, NumericRange};
 
 /// Complete application configuration persisted as TOML.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -178,6 +178,12 @@ pub struct LyricsConfig {
     pub translation_color: String,
     /// Color for romanized text, as `#RRGGBBAA` hex.
     pub romanization_color: String,
+    /// Cross-fade between consecutive lines, in the inclusive range `0..=1000` milliseconds.
+    pub transition_ms: u32,
+    /// Soft edge of the karaoke fill, in the inclusive range `0.0..=2.0` em; `0` draws a hard edge.
+    pub word_fade_width: f64,
+    /// Step of the per-song timing buttons, in the inclusive range `10..=1000` milliseconds.
+    pub track_offset_step_ms: u32,
 }
 
 impl Default for LyricsConfig {
@@ -197,6 +203,9 @@ impl Default for LyricsConfig {
             unplayed_color: default_unplayed_color(),
             translation_color: default_translation_color(),
             romanization_color: default_romanization_color(),
+            transition_ms: 180,
+            word_fade_width: 0.0,
+            track_offset_step_ms: 100,
         }
     }
 }

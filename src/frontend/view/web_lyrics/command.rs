@@ -8,11 +8,9 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 use crate::shared::{
-    config::{AppConfig, parse_hex_color},
+    config::{AppConfig, ConfigLimits, NumericRange, parse_hex_color},
     presentation::{LyricsDocument, LyricsFrame},
 };
-
-const TRANSITION_DURATION_MS: u32 = 180;
 
 #[derive(Debug, Clone, Serialize)]
 struct LyricsStyle {
@@ -25,6 +23,7 @@ struct LyricsStyle {
     romanization_color: String,
     translation_color: String,
     transition_ms: u32,
+    word_fade_width: f64,
 }
 
 impl LyricsStyle {
@@ -38,7 +37,8 @@ impl LyricsStyle {
             unplayed_color: css_color(&config.lyrics.unplayed_color),
             romanization_color: css_color(&config.lyrics.romanization_color),
             translation_color: css_color(&config.lyrics.translation_color),
-            transition_ms: TRANSITION_DURATION_MS,
+            transition_ms: config.lyrics.transition_ms,
+            word_fade_width: config.lyrics.word_fade_width,
         }
     }
 }
@@ -83,6 +83,8 @@ enum UiCommand<'a> {
     Bootstrap {
         surface: UiSurface,
         config: &'a AppConfig,
+        defaults: &'a AppConfig,
+        limits: BTreeMap<&'static str, NumericRange>,
         strings: BTreeMap<&'static str, &'static str>,
         version: &'static str,
         about: &'a Value,
@@ -133,9 +135,12 @@ pub(super) fn bootstrap_script(
     about: &Value,
     available_fonts: &[String],
 ) -> serde_json::Result<String> {
+    let defaults = AppConfig::default();
     render_script(&UiCommand::Bootstrap {
         surface,
         config,
+        defaults: &defaults,
+        limits: ConfigLimits::ranges(),
         strings,
         version: env!("CARGO_PKG_VERSION"),
         about,
@@ -179,7 +184,7 @@ pub(super) fn overlay_placement_script(classes: &[&str]) -> serde_json::Result<S
 
 pub(super) fn overlay_appearance_script(opacity: f64) -> serde_json::Result<String> {
     render_script(&UiCommand::OverlayAppearance {
-        opacity: opacity.clamp(0.15, 1.0),
+        opacity: opacity.clamp(ConfigLimits::OPACITY_MIN, ConfigLimits::OPACITY_MAX),
     })
 }
 

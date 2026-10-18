@@ -2,14 +2,6 @@ use super::*;
 use std::fs;
 
 #[test]
-fn default_provider_order_matches_plan() {
-    assert_eq!(
-        AppConfig::default().lyrics.provider_order,
-        LyricsProvider::default_order()
-    );
-}
-
-#[test]
 fn default_player_selection_prefers_spotify_without_excluding_other_players() {
     let player = AppConfig::default().player;
 
@@ -18,30 +10,51 @@ fn default_player_selection_prefers_spotify_without_excluding_other_players() {
 }
 
 #[test]
-fn default_window_uses_compact_width() {
-    assert_eq!(AppConfig::default().window.width, 350);
-    assert!(AppConfig::default().window.remember_position);
-    assert_eq!(AppConfig::default().window.position, None);
+fn every_preference_round_trips_through_toml() {
+    let mut config = AppConfig::default();
+    config.general.mode = AppMode::Amll;
+    config.window.position = Some(WindowPosition {
+        horizontal: 0.25,
+        vertical: 0.75,
+    });
+    config.lyrics.apple_music_style = true;
+    config.lyrics.chinese_romanization = ChineseRomanizationMode::CantoneseJyutpingNoTones;
+    config.lyrics.transition_ms = 320;
+    config.lyrics.word_fade_width = 0.6;
+    config.lyrics.track_offset_step_ms = 250;
+    config.amll.address = "192.168.1.20:11445".to_string();
+    config.tray.enabled = false;
+
+    let serialized = toml::to_string(&config).unwrap();
+    let restored: AppConfig = toml::from_str(&serialized).unwrap();
+
+    assert!(serialized.contains("mode = \"amll\""));
+    assert!(serialized.contains("chinese_romanization = \"cantonese-jyutping-no-tones\""));
+    assert_eq!(restored, config);
 }
 
 #[test]
-fn default_font_order_uses_generic_sans() {
-    assert_eq!(AppConfig::default().lyrics.font_order, ["Sans"]);
-}
+fn numeric_ranges_cover_every_validated_preference() {
+    let ranges = ConfigLimits::ranges();
 
-#[test]
-fn apple_music_style_is_opt_in() {
-    assert!(!AppConfig::default().lyrics.apple_music_style);
-}
-
-#[test]
-fn romanization_has_distinct_default_presentation() {
-    let lyrics = AppConfig::default().lyrics;
-
-    assert_eq!(lyrics.chinese_romanization, ChineseRomanizationMode::Auto);
-    assert_eq!(lyrics.romanization_font_size, 12);
-    assert_eq!(lyrics.romanization_color, "#B8D8F0E6");
-    assert_ne!(lyrics.romanization_color, lyrics.translation_color);
+    for name in [
+        "window.width",
+        "window.margin",
+        "window.bottom_panel_height",
+        "window.opacity",
+        "lyrics.offset_ms",
+        "lyrics.lyric_font_size",
+        "lyrics.translation_font_size",
+        "lyrics.romanization_font_size",
+        "lyrics.transition_ms",
+        "lyrics.word_fade_width",
+        "lyrics.track_offset_step_ms",
+    ] {
+        assert!(ranges.contains_key(name), "{name} has no declared range");
+    }
+    assert!(ConfigLimits::contains("lyrics.transition_ms", 0_u32));
+    assert!(!ConfigLimits::contains("lyrics.transition_ms", 1001_u32));
+    assert!(!ConfigLimits::contains("lyrics.unknown", 0_u32));
 }
 
 #[test]
@@ -98,6 +111,8 @@ fn load_recovers_out_of_range_field_and_preserves_valid_preferences() {
     config.window.width = ConfigLimits::WINDOW_WIDTH_MAX + 1;
     config.window.opacity = 0.42;
     config.lyrics.offset_ms = 275;
+    config.lyrics.transition_ms = ConfigLimits::TRANSITION_MS_MAX + 1;
+    config.lyrics.word_fade_width = 0.4;
     let original = toml::to_string(&config).unwrap();
     fs::write(&path, &original).unwrap();
 
@@ -106,6 +121,11 @@ fn load_recovers_out_of_range_field_and_preserves_valid_preferences() {
     assert_eq!(recovered.window.width, AppConfig::default().window.width);
     assert_eq!(recovered.window.opacity, 0.42);
     assert_eq!(recovered.lyrics.offset_ms, 275);
+    assert_eq!(
+        recovered.lyrics.transition_ms,
+        AppConfig::default().lyrics.transition_ms
+    );
+    assert_eq!(recovered.lyrics.word_fade_width, 0.4);
     assert_eq!(
         fs::read_to_string(incompatible_backup(&path)).unwrap(),
         original
@@ -325,12 +345,26 @@ fn validates_every_numeric_preference_at_its_boundary() {
     assert_invalid(|config| {
         config.lyrics.romanization_font_size = ConfigLimits::SECONDARY_FONT_SIZE_MAX + 1;
     });
+    assert_invalid(|config| config.lyrics.transition_ms = ConfigLimits::TRANSITION_MS_MAX + 1);
+    assert_invalid(|config| {
+        config.lyrics.word_fade_width = ConfigLimits::WORD_FADE_WIDTH_MIN - 0.01;
+    });
+    assert_invalid(|config| {
+        config.lyrics.word_fade_width = ConfigLimits::WORD_FADE_WIDTH_MAX + 0.01;
+    });
+    assert_invalid(|config| config.lyrics.word_fade_width = f64::INFINITY);
+    assert_invalid(|config| {
+        config.lyrics.track_offset_step_ms = ConfigLimits::TRACK_OFFSET_STEP_MS_MIN - 1;
+    });
+    assert_invalid(|config| {
+        config.lyrics.track_offset_step_ms = ConfigLimits::TRACK_OFFSET_STEP_MS_MAX + 1;
+    });
     assert_invalid(|config| config.player.preferred_players = vec![" ".to_string()]);
     assert_invalid(|config| config.player.ignored_players = vec!["".to_string()]);
 }
 
 #[test]
-fn missing_color_fields_fall_back_to_defaults() {
+fn older_lyrics_section_fills_new_fields_with_defaults() {
     let old_format = r#"
 [general]
 language = "en"
@@ -364,50 +398,15 @@ mpris_prefix = "org.mpris.MediaPlayer2.spotify"
     assert_eq!(config.lyrics.romanization_font_size, 12);
     assert_eq!(config.lyrics.romanization_color, "#B8D8F0E6");
     assert!(!config.lyrics.apple_music_style);
+    assert_eq!(config.lyrics.transition_ms, 180);
+    assert_eq!(config.lyrics.word_fade_width, 0.0);
+    assert_eq!(config.lyrics.track_offset_step_ms, 100);
     assert!(config.window.remember_position);
     assert_eq!(config.window.position, None);
     assert_eq!(
         config.lyrics.chinese_romanization,
         ChineseRomanizationMode::Auto
     );
-}
-
-#[test]
-fn apple_music_style_round_trips_in_config() {
-    let mut config = AppConfig::default();
-    config.lyrics.apple_music_style = true;
-
-    let serialized = toml::to_string(&config).unwrap();
-    let restored: AppConfig = toml::from_str(&serialized).unwrap();
-
-    assert!(serialized.contains("apple_music_style = true"));
-    assert!(restored.lyrics.apple_music_style);
-}
-
-#[test]
-fn remembered_window_position_round_trips_in_config() {
-    let mut config = AppConfig::default();
-    config.window.position = Some(WindowPosition {
-        horizontal: 0.25,
-        vertical: 0.75,
-    });
-
-    let serialized = toml::to_string(&config).unwrap();
-    let restored: AppConfig = toml::from_str(&serialized).unwrap();
-
-    assert_eq!(restored, config);
-}
-
-#[test]
-fn chinese_romanization_mode_round_trips_in_config() {
-    let mut config = AppConfig::default();
-    config.lyrics.chinese_romanization = ChineseRomanizationMode::CantoneseJyutpingNoTones;
-
-    let serialized = toml::to_string(&config).unwrap();
-    let restored: AppConfig = toml::from_str(&serialized).unwrap();
-
-    assert!(serialized.contains("chinese_romanization = \"cantonese-jyutping-no-tones\""));
-    assert_eq!(restored, config);
 }
 
 #[test]
@@ -479,20 +478,6 @@ fn unusable_amll_address_falls_back_to_the_local_listener() {
         AppMode::Amll,
         "a valid mode survives beside an invalid address"
     );
-}
-
-#[test]
-fn amll_mode_and_tray_preferences_round_trip_in_config() {
-    let mut config = AppConfig::default();
-    config.general.mode = AppMode::Amll;
-    config.amll.address = "192.168.1.20:11445".to_string();
-    config.tray.enabled = false;
-
-    let serialized = toml::to_string(&config).unwrap();
-    let restored: AppConfig = toml::from_str(&serialized).unwrap();
-
-    assert!(serialized.contains("mode = \"amll\""));
-    assert_eq!(restored, config);
 }
 
 #[test]

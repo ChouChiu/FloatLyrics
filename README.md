@@ -125,7 +125,7 @@ FloatLyrics 按 `Playing`、`Paused`、`Stopped` 的顺序选择播放器。状�
 
 - 将鼠标移到浮窗上，显示歌词搜索、时间校准、设置和关闭按钮。浮窗不提供播放控制。
 - 拖动浮窗可改变位置；靠近屏幕边缘或中央时会自动吸附。
-- 点击 `−` 让本曲歌词延后 100 毫秒，点击 `+` 让歌词提前 100 毫秒。
+- 点击 `−` 让本曲歌词延后、点击 `+` 让歌词提前，默认每次 100 毫秒，可在设置中通过 `lyrics.track_offset_step_ms` 调整
 - 点击中间的偏移值可重置本曲校准。该值按歌曲保存，并与全局偏移 `lyrics.offset_ms` 叠加。
 
 ### 播放器兼容性
@@ -245,6 +245,9 @@ played_color = "#FFFFFFFF"
 unplayed_color = "#9EA6B3FF"
 translation_color = "#FFFFFFC7"
 romanization_color = "#B8D8F0E6"
+transition_ms = 180                              # 换行淡入淡出时长，0-1000，0 为立即切换
+word_fade_width = 0.0                            # 逐字填充边缘的柔化宽度，单位 em，0.0-2.0，0 为硬边
+track_offset_step_ms = 100                       # 浮窗 − / + 按钮的单次调整量，10-1000
 
 [player]
 preferred_players = ["spotify"]
