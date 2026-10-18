@@ -10,8 +10,12 @@ use crate::{
         presentation::{LyricsDocument, LyricsFrame, PlayerControl},
     },
 };
+use floatlyrics_core::track::TrackMetadata;
 use floatlyrics_lyrics::lyrics::{LyricsLookupHint, LyricsProvider, TimedLine, Voice};
-use std::time::Duration;
+use std::{
+    cell::RefCell,
+    time::{Duration, Instant},
+};
 
 #[test]
 fn reload_state_invalidates_only_the_lyrics_identity() {

@@ -12,6 +12,8 @@ mod control_center;
 mod font_picker_window;
 mod manual_search;
 mod manual_search_window;
+mod messages;
+mod output;
 mod settings;
 mod style;
 mod tray;
@@ -20,29 +22,27 @@ mod view;
 use anyhow::Result;
 use gtk::prelude::*;
 use relm4::{ComponentParts, ComponentSender, MessageBroker, RelmApp, SimpleComponent};
-use serde::Deserialize;
 use std::{
-    ffi::OsStr,
     rc::Rc,
     sync::{Arc, mpsc},
     time::Duration,
 };
 
 use crate::{
-    backend::{
-        self,
-        mpris::{MediaCommand, MediaControlHandle},
-    },
+    backend::{self, mpris::MediaControlHandle},
     shared::{
-        config::{AppConfig, AppMode, WindowPosition},
-        presentation::{LyricsDocument, LyricsFrame},
+        config::{AppConfig, AppMode},
+        presentation::LyricsDocument,
         runtime::LyricsRuntimeConfig,
     },
 };
 use floatlyrics_core::{i18n::I18n, paths::AppPaths};
+use messages::{LyricsPresentation, requested_commands};
+use output::{LyricsOutput, OutputChange, output_change, should_reload_lyrics};
 
-/// Controller pump interval used when no overlay frame clock drives the app.
-const TICK_INTERVAL_MS: u64 = 100;
+#[cfg(test)]
+use messages::AppCommand;
+use messages::{AppMsg, UiAction};
 
 /// Delay before a new AMLL address reconnects, so typing it does not reconnect
 /// on every keystroke.
@@ -54,104 +54,6 @@ struct AppInit {
     config: AppConfig,
     backend: backend::Backend,
     config_saver: settings::ConfigSaveService,
-}
-
-/// The lyrics output selected by `general.mode`, switchable at runtime.
-///
-/// The overlay is built the first time floating mode is selected and is only
-/// hidden afterwards, because a layer-shell surface has to be configured before
-/// its window is first shown. The AMLL sender is dropped when another output is
-/// selected, which closes its connection.
-struct LyricsOutput {
-    root: gtk::ApplicationWindow,
-    mode: AppMode,
-    overlay: Option<view::OverlayView>,
-    /// Controller pump installed while the overlay frame clock is not running.
-    pump: Option<gtk::glib::SourceId>,
-    /// Playback requests sent by the AMLL listener, drained on every tick.
-    remote_commands: Option<tokio::sync::mpsc::UnboundedReceiver<MediaCommand>>,
-}
-
-impl LyricsOutput {
-    fn new(root: gtk::ApplicationWindow, mode: AppMode) -> Self {
-        Self {
-            root,
-            mode,
-            overlay: None,
-            pump: None,
-            remote_commands: None,
-        }
-    }
-
-    /// Selects `config.general.mode` and returns the view the controller
-    /// should publish to.
-    fn activate(
-        &mut self,
-        config: &AppConfig,
-        i18n: &I18n,
-        backend: &backend::Backend,
-        sender: &relm4::Sender<AppMsg>,
-    ) -> Rc<dyn backend::LyricsView> {
-        self.mode = config.general.mode;
-        match self.mode {
-            AppMode::Floating => {
-                self.remote_commands = None;
-                if self.overlay.is_none() {
-                    let overlay = view::build(
-                        &self.root,
-                        config,
-                        i18n.clone(),
-                        Rc::new(serde_json::json!({ "dependencies": [], "licenses": [] })),
-                        sender.clone(),
-                    );
-                    // The frame clock only runs while the overlay is mapped, so
-                    // it stops by itself while another output is selected.
-                    let input = sender.clone();
-                    overlay.tick_widget().add_tick_callback(move |_, _| {
-                        let _ = input.send(AppMsg::Tick);
-                        gtk::glib::ControlFlow::Continue
-                    });
-                    self.overlay = Some(overlay);
-                }
-                if let Some(pump) = self.pump.take() {
-                    pump.remove();
-                }
-                Rc::new(view::OverlaySender::new(sender.clone()))
-            }
-            AppMode::Amll => {
-                self.root.set_visible(false);
-                let amll_sender = backend.amll_sender(&config.amll);
-                self.remote_commands = amll_sender.take_media_commands();
-                if self.pump.is_none() {
-                    // The overlay provides the frame clock; without it the sender
-                    // mode needs its own pump for MPRIS events and progress.
-                    let input = sender.clone();
-                    self.pump = Some(gtk::glib::timeout_add_local(
-                        Duration::from_millis(TICK_INTERVAL_MS),
-                        move || {
-                            let _ = input.send(AppMsg::Tick);
-                            gtk::glib::ControlFlow::Continue
-                        },
-                    ));
-                }
-                amll_sender
-            }
-        }
-    }
-
-    /// Shows the overlay when it is the selected output.
-    fn present(&self) {
-        if self.mode == AppMode::Floating {
-            self.root.present();
-        }
-    }
-
-    /// The overlay, while it is the selected output.
-    fn overlay(&self) -> Option<&view::OverlayView> {
-        self.overlay
-            .as_ref()
-            .filter(|_| self.mode == AppMode::Floating)
-    }
 }
 
 struct AppModel {
@@ -175,79 +77,6 @@ struct AppModel {
     /// change superseded is ignored.
     amll_reconnect_generation: u64,
     backend: backend::Backend,
-}
-
-#[derive(Debug, Clone)]
-enum LyricsPresentation {
-    Content(Arc<LyricsFrame>),
-    Status(floatlyrics_core::i18n::Text),
-}
-
-#[derive(Debug)]
-enum AppMsg {
-    Tick,
-    /// The application was activated, by a launch or another instance.
-    Activated,
-    /// The AMLL address settled after an edit.
-    ReconnectAmll {
-        generation: u64,
-    },
-    SetSongInfo(String),
-    SetTrackOffset(i64),
-    SetLyricsDocument(LyricsDocument),
-    ShowLyrics(Arc<LyricsFrame>),
-    ShowStatus(floatlyrics_core::i18n::Text),
-    OpenSettings,
-    OpenManualSearch,
-    UiAction(UiAction),
-    SearchEvent(manual_search::SearchEvent),
-    ConfigSaveFinished {
-        revision: u64,
-        result: settings::ConfigSaveResult,
-    },
-    WindowMoved(WindowPosition),
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "kebab-case")]
-enum UiAction {
-    OpenSettings,
-    OpenSearch,
-    OpenSettingsPage { page: view::web_lyrics::ControlPage },
-    OpenFontPicker,
-    CloseFontPicker,
-    Quit,
-    AdjustTrackOffset { delta_ms: i64 },
-    ResetTrackOffset,
-    ReloadLyrics,
-    SaveConfig { config: Box<AppConfig> },
-    SearchLyrics { title: String, artist: String },
-    PreviewLyrics { index: usize },
-    ApplyLyrics,
-    OpenUrl { url: String },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AppCommand {
-    OpenSettings,
-    OpenManualSearch,
-}
-
-impl AppCommand {
-    fn from_argument(argument: &OsStr) -> Option<Self> {
-        match argument.to_str()? {
-            "--settings" => Some(Self::OpenSettings),
-            "--select-lyrics" => Some(Self::OpenManualSearch),
-            _ => None,
-        }
-    }
-
-    fn message(self) -> AppMsg {
-        match self {
-            Self::OpenSettings => AppMsg::OpenSettings,
-            Self::OpenManualSearch => AppMsg::OpenManualSearch,
-        }
-    }
 }
 
 #[relm4::component]
@@ -552,34 +381,6 @@ impl AppModel {
     }
 }
 
-/// How the lyrics output changes between two configurations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OutputChange {
-    None,
-    /// Another run mode is selected.
-    Mode,
-    /// The AMLL sender stays the output but connects elsewhere.
-    AmllAddress,
-}
-
-fn output_change(current: &AppConfig, next: &AppConfig) -> OutputChange {
-    if current.general.mode != next.general.mode {
-        OutputChange::Mode
-    } else if next.general.mode == AppMode::Amll && current.amll.address != next.amll.address {
-        OutputChange::AmllAddress
-    } else {
-        OutputChange::None
-    }
-}
-
-fn should_reload_lyrics(current: &AppConfig, next: &AppConfig) -> bool {
-    current.lyrics.provider_order != next.lyrics.provider_order
-        || (!current.lyrics.show_translation && next.lyrics.show_translation)
-        || (!current.lyrics.show_romanization && next.lyrics.show_romanization)
-        || (next.lyrics.show_romanization
-            && current.lyrics.chinese_romanization != next.lyrics.chinese_romanization)
-}
-
 /// Starts the GTK application with resolved `paths` and loaded `config`.
 ///
 /// The function blocks until the application exits.
@@ -619,12 +420,6 @@ pub fn run(paths: AppPaths, config: AppConfig) -> Result<()> {
             config_saver,
         });
     Ok(())
-}
-
-fn requested_commands(arguments: &[std::ffi::OsString]) -> impl Iterator<Item = AppCommand> + '_ {
-    arguments
-        .iter()
-        .filter_map(|argument| AppCommand::from_argument(argument))
 }
 
 #[cfg(test)]

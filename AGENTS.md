@@ -345,6 +345,12 @@ cannot expand the public playback-state API or apply after a track change.
 The `Controller` in `src/backend/controller.rs` is the central orchestrator
 between MPRIS events, lyrics fetching, caching, and presentation:
 
+- Its submodules split the work: `handle` (the `ControllerHandle` given to the
+  UI), `player` (watcher events and track restatements), `track` (per-track
+  loading, the lyrics document, and the per-track offset), `loading` (async
+  lyrics/cache/romanization results), and `presentation` (the `LyricsView`
+  trait and frame publishing). `controller.rs` keeps the state and `tick()`.
+
 - MPRIS events arrive via `mpsc::Receiver<PlayerWatcherEvent>` and are
   processed in `tick()`, which the GTK main loop calls repeatedly.
 - Exact provider hints inferred from known MPRIS metadata arrive on a separate
