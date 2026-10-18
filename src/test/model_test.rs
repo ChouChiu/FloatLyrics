@@ -32,6 +32,103 @@ fn authoritative_sample_reanchors_matching_track() {
 }
 
 #[test]
+fn slightly_early_sample_does_not_rewind_playing_clock() {
+    // The player reports a position 100 ms behind the local clock, just after
+    // the line at 11 000 ms began: the lyrics must not fall back to the line
+    // before it and then return.
+    let start = Instant::now();
+    let mut snapshot = PlaybackSnapshot {
+        state: player_state_with_status("Song", 10_000, PlaybackStatus::Playing),
+        received_at: start,
+        position_floor_ms: None,
+    };
+    let identity = snapshot.state.track.as_ref().unwrap().playback_identity();
+    let sampled_at = start + Duration::from_millis(1_050);
+
+    assert!(apply_position_sample(
+        &mut snapshot,
+        Some(&identity),
+        10_950,
+        sampled_at,
+    ));
+
+    assert_eq!(position_at_ms(&snapshot, sampled_at), Some(11_050));
+    let state = LyricsDisplayState {
+        lines: vec![line_between(1_000, None), line_between(11_000, None)],
+        ..LyricsDisplayState::default()
+    };
+    let frame = lyrics_frame(
+        &state,
+        &runtime_config(),
+        position_at_ms(&snapshot, sampled_at),
+        true,
+        false,
+        Language::English,
+        0,
+    );
+    assert_eq!(frame.key, "line:1");
+    assert_eq!(
+        position_at_ms(&snapshot, sampled_at + Duration::from_millis(50)),
+        Some(11_050)
+    );
+    // Once the player's clock passes the held position it leads again.
+    assert_eq!(
+        position_at_ms(&snapshot, sampled_at + Duration::from_millis(250)),
+        Some(11_200)
+    );
+}
+
+#[test]
+fn player_update_trailing_the_clock_continues_from_it() {
+    let start = Instant::now();
+    let previous = PlaybackSnapshot {
+        state: player_state_with_status("Song", 10_000, PlaybackStatus::Playing),
+        received_at: start,
+        position_floor_ms: None,
+    };
+    let received_at = start + Duration::from_millis(1_000);
+
+    let next = PlaybackSnapshot::following(
+        Some(&previous),
+        player_state_with_status("Song", 10_900, PlaybackStatus::Playing),
+        received_at,
+    );
+
+    assert_eq!(position_at_ms(&next, received_at), Some(11_000));
+}
+
+#[test]
+fn clock_follows_samples_that_are_not_drift() {
+    let start = Instant::now();
+    let playing = PlaybackSnapshot {
+        state: player_state_with_status("Song", 10_000, PlaybackStatus::Playing),
+        received_at: start,
+        position_floor_ms: None,
+    };
+    let later = start + Duration::from_millis(1_000);
+
+    let paused = PlaybackSnapshot::following(
+        Some(&playing),
+        player_state_with_status("Song", 10_900, PlaybackStatus::Paused),
+        later,
+    );
+    let seeked_back = PlaybackSnapshot::following(
+        Some(&playing),
+        player_state_with_status("Song", 9_000, PlaybackStatus::Playing),
+        later,
+    );
+    let other_track = PlaybackSnapshot::following(
+        Some(&playing),
+        player_state_with_status("Another Song", 10_900, PlaybackStatus::Playing),
+        later,
+    );
+
+    assert_eq!(position_at_ms(&paused, later), Some(10_900));
+    assert_eq!(position_at_ms(&seeked_back, later), Some(9_000));
+    assert_eq!(position_at_ms(&other_track, later), Some(10_900));
+}
+
+#[test]
 fn sample_from_another_track_is_ignored() {
     let mut snapshot = snapshot(PlaybackStatus::Playing, Duration::ZERO);
     let received_at = snapshot.received_at;
@@ -190,6 +287,7 @@ fn snapshot(status: PlaybackStatus, elapsed: Duration) -> PlaybackSnapshot {
     PlaybackSnapshot {
         state: player_state_with_status("Song", 10_000, status),
         received_at: Instant::now() - elapsed,
+        position_floor_ms: None,
     }
 }
 
@@ -220,6 +318,14 @@ fn player_state_with_status(
 
 fn runtime_config() -> LyricsRuntimeConfig {
     LyricsRuntimeConfig::from(&AppConfig::default())
+}
+
+fn line_between(start_ms: u64, end_ms: Option<u64>) -> TimedLine {
+    TimedLine {
+        start_ms,
+        end_ms,
+        ..test_line()
+    }
 }
 
 fn test_line() -> TimedLine {

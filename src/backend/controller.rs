@@ -21,8 +21,8 @@ use crate::shared::{presentation::PlayerControl, runtime::LyricsRuntimeConfig};
 use super::{
     cache::CacheService,
     model::{
-        LyricsDisplayState, PlaybackSnapshot, apply_position_sample, effective_position_ms,
-        lyrics_document, playback_jump_detected,
+        LyricsDisplayState, PLAYBACK_JUMP_THRESHOLD_MS, PlaybackSnapshot, apply_position_sample,
+        effective_position_ms, lyrics_document, playback_jump_detected,
     },
     mpris::{PlaybackStatus, PlayerLyricsHintEvent, PlayerState, PlayerWatcherEvent},
 };
@@ -378,10 +378,11 @@ fn handle_player_event(
             if jump_detected {
                 controller_state.seek_pending = true;
             }
-            controller_state.latest = Some(Arc::new(PlaybackSnapshot {
-                state: state.clone(),
-                received_at: Instant::now(),
-            }));
+            controller_state.latest = Some(Arc::new(PlaybackSnapshot::following(
+                controller_state.latest.as_deref(),
+                state.clone(),
+                Instant::now(),
+            )));
             playback.set_current_track(state.track.clone());
             publish_player_control(Some(state.control), ctx, controller_state);
             update_player_state(state, ctx, controller_state);
@@ -399,7 +400,8 @@ fn handle_player_event(
                     track_identity.as_deref(),
                     *position_ms,
                     *sampled_at,
-                ) && predicted.is_some_and(|value| value.abs_diff(*position_ms) > 750)
+                ) && predicted
+                    .is_some_and(|value| value.abs_diff(*position_ms) > PLAYBACK_JUMP_THRESHOLD_MS)
                 {
                     controller_state.seek_pending = true;
                 }
@@ -495,11 +497,17 @@ fn update_player_state(
     // The song info only changes with the track, so it is published here and not
     // from the per-frame presentation refresh.
     publish_song_info(state, ctx.floating);
+    // The snapshot's clock, not the raw sample, so drift held by the snapshot
+    // does not rewind this frame either.
+    let position_ms = controller_state
+        .latest
+        .as_deref()
+        .and_then(effective_position_ms);
     update_track_display(
         ctx.floating,
         ctx.config,
         &controller_state.lyrics,
-        state.position_ms,
+        position_ms,
         state.playback_status == PlaybackStatus::Playing,
         controller_state.seek_pending,
         controller_state.track_offset_ms,

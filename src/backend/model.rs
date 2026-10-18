@@ -33,10 +33,76 @@ pub(super) struct LyricsDisplayState {
     pub(super) credited_artists: Vec<String>,
 }
 
+/// A difference between the local clock and a player sample larger than this
+/// is a seek rather than drift.
+pub(super) const PLAYBACK_JUMP_THRESHOLD_MS: u64 = 750;
+
 #[derive(Clone)]
 pub(super) struct PlaybackSnapshot {
     pub(super) state: PlayerState,
     pub(super) received_at: Instant,
+    /// Position the local clock had already reached when the player sampled a
+    /// slightly earlier one.
+    ///
+    /// Players sample `Position` coarsely and late, so a sample can trail the
+    /// local clock by a few frames. Rewinding to it would draw the line before a
+    /// boundary again for a moment, so the clock holds here until the sample
+    /// catches up. Only set while playing and for drift below
+    /// [`PLAYBACK_JUMP_THRESHOLD_MS`].
+    pub(super) position_floor_ms: Option<u64>,
+}
+
+impl PlaybackSnapshot {
+    /// Anchors the clock of `state` at `received_at`, continuing from
+    /// `previous` without rewinding when the new position only trails it by
+    /// sampling drift.
+    pub(super) fn following(
+        previous: Option<&PlaybackSnapshot>,
+        state: PlayerState,
+        received_at: Instant,
+    ) -> Self {
+        let position_floor_ms = previous.and_then(|previous| {
+            let same_track = previous
+                .state
+                .track
+                .as_ref()
+                .map(TrackMetadata::playback_identity)
+                == state.track.as_ref().map(TrackMetadata::playback_identity);
+            same_track
+                .then(|| {
+                    drift_floor_ms(
+                        previous,
+                        state.playback_status,
+                        state.position_ms,
+                        received_at,
+                    )
+                })
+                .flatten()
+        });
+        Self {
+            state,
+            received_at,
+            position_floor_ms,
+        }
+    }
+}
+
+/// Returns the position `previous` predicts at `sampled_at` when the sampled
+/// position trails it by sampling drift during uninterrupted playback.
+fn drift_floor_ms(
+    previous: &PlaybackSnapshot,
+    status: PlaybackStatus,
+    sampled_ms: Option<u64>,
+    sampled_at: Instant,
+) -> Option<u64> {
+    if previous.state.playback_status != PlaybackStatus::Playing
+        || status != PlaybackStatus::Playing
+    {
+        return None;
+    }
+    let predicted = position_at_ms(previous, sampled_at)?;
+    let sampled = sampled_ms?;
+    (sampled < predicted && predicted - sampled <= PLAYBACK_JUMP_THRESHOLD_MS).then_some(predicted)
 }
 
 pub(super) fn lyrics_frame(
@@ -197,13 +263,22 @@ fn is_placeholder_text(value: &str) -> bool {
 }
 
 pub(super) fn effective_position_ms(snapshot: &PlaybackSnapshot) -> Option<u64> {
+    position_at_ms(snapshot, Instant::now())
+}
+
+/// Returns the position `snapshot` predicts for the instant `now`.
+pub(super) fn position_at_ms(snapshot: &PlaybackSnapshot, now: Instant) -> Option<u64> {
     let base = snapshot.state.position_ms?;
     let position = match snapshot.state.playback_status {
         PlaybackStatus::Playing => {
-            base.saturating_add(snapshot.received_at.elapsed().as_millis() as u64)
+            let elapsed = now.saturating_duration_since(snapshot.received_at);
+            base.saturating_add(u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX))
         }
         _ => base,
     };
+    let position = snapshot
+        .position_floor_ms
+        .map_or(position, |floor| position.max(floor));
     Some(
         snapshot
             .state
@@ -233,7 +308,7 @@ pub(super) fn playback_jump_detected(
     }
     effective_position_ms(previous)
         .zip(next_position_ms)
-        .is_some_and(|(old, new)| old.abs_diff(new) > 750)
+        .is_some_and(|(old, new)| old.abs_diff(new) > PLAYBACK_JUMP_THRESHOLD_MS)
 }
 
 pub(super) fn apply_position_sample(
@@ -250,6 +325,12 @@ pub(super) fn apply_position_sample(
     if current_identity.as_deref() != track_identity {
         return false;
     }
+    snapshot.position_floor_ms = drift_floor_ms(
+        snapshot,
+        snapshot.state.playback_status,
+        Some(position_ms),
+        sampled_at,
+    );
     snapshot.state.position_ms = Some(position_ms);
     snapshot.received_at = sampled_at;
     true

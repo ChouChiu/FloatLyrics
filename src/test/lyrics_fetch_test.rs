@@ -51,6 +51,7 @@ fn background_cache_write_failure_preserves_loaded_lyrics() {
     let snapshot = PlaybackSnapshot {
         state: player_state("Song", 10_000),
         received_at: Instant::now(),
+        position_floor_ms: None,
     };
     let fingerprint = snapshot.state.track.as_ref().unwrap().fingerprint();
     let mut state = loaded_state();
@@ -75,6 +76,7 @@ fn initial_cache_write_failure_replaces_searching_status() {
     let snapshot = PlaybackSnapshot {
         state: player_state("Song", 10_000),
         received_at: Instant::now(),
+        position_floor_ms: None,
     };
     let fingerprint = snapshot.state.track.as_ref().unwrap().fingerprint();
     let mut state = searching_state(&fingerprint);
@@ -103,6 +105,7 @@ fn obsolete_same_track_fetch_generation_is_ignored() {
     let snapshot = PlaybackSnapshot {
         state: player_state("Song", 10_000),
         received_at: Instant::now(),
+        position_floor_ms: None,
     };
     let fingerprint = snapshot.state.track.as_ref().unwrap().fingerprint();
     let state = searching_state(&fingerprint);
@@ -121,6 +124,7 @@ fn obsolete_same_track_cache_generation_is_ignored() {
     let snapshot = PlaybackSnapshot {
         state: player_state("Song", 10_000),
         received_at: Instant::now(),
+        position_floor_ms: None,
     };
     let fingerprint = snapshot.state.track.as_ref().unwrap().fingerprint();
     let mut state = searching_state(&fingerprint);
@@ -169,6 +173,7 @@ fn accepted_fetch_is_persisted_and_reloaded_as_display_state() {
     let snapshot = PlaybackSnapshot {
         state: player,
         received_at: Instant::now(),
+        position_floor_ms: None,
     };
     let mut state = searching_state(&fingerprint);
     let config = LyricsRuntimeConfig::from(&AppConfig::default());
@@ -240,6 +245,7 @@ fn track_cache_load_applies_remembered_offset_without_cached_lyrics() {
     let snapshot = PlaybackSnapshot {
         state: player_state("Song", 10_000),
         received_at: Instant::now(),
+        position_floor_ms: None,
     };
     let fingerprint = snapshot.state.track.as_ref().unwrap().fingerprint();
     let mut state = searching_state(&fingerprint);
@@ -286,6 +292,7 @@ fn stale_offset_load_does_not_overwrite_a_new_user_adjustment() {
     let snapshot = PlaybackSnapshot {
         state: player_state("Song", 10_000),
         received_at: Instant::now(),
+        position_floor_ms: None,
     };
     let fingerprint = snapshot.state.track.as_ref().unwrap().fingerprint();
     let mut state = searching_state(&fingerprint);

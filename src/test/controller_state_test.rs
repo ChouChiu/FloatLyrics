@@ -290,6 +290,7 @@ fn snapshot(title: &str) -> PlaybackSnapshot {
             }),
         },
         received_at: Instant::now(),
+        position_floor_ms: None,
     }
 }
 
