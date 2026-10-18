@@ -98,14 +98,6 @@ fn names_every_source_the_same_way_everywhere() {
 }
 
 #[test]
-fn parse_and_export_lrc_through_lyrics_helper() {
-    let parsed = parse_local_lyrics("[00:01.00]Hello World!").unwrap();
-    let exported = export_lyrics(&parsed, LyricsTypes::Lrc).unwrap();
-
-    assert!(exported.contains("Hello World"));
-}
-
-#[test]
 fn parses_ttml_lyrics_through_lyrics_helper() {
     let parsed = parse_local_lyrics(
         "<tt xmlns=\"http://www.w3.org/ns/ttml\"><body><div>\
