@@ -47,6 +47,11 @@
   </screenshots>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="1.4.0" date="2026-11-21">
+      <description>
+        <p>Starts faster and loads cached lyrics in the background. Adds direct QQ Music lookup and a clearer preview and selection flow. The redesigned settings let you switch between the floating overlay and the AMLL sender without restarting.</p>
+      </description>
+    </release>
     <release version="1.3.1" date="2026-09-24">
       <description>
         <p>Adds the AMLL TTML DB lyric source, searched first for its hand-timed word-by-word transcriptions. Keeps QQ Music rows that carry no word timing instead of dropping them, reads TTML lyrics again, no longer depends on OpenSSL, and updates the lyrics renderer to AMLL 0.6.</p>
