@@ -25,7 +25,7 @@ mod state;
 pub(super) mod web_lyrics;
 
 use super::AppMsg;
-pub(super) use adapter::OverlaySender;
+pub(super) use adapter::{OverlaySender, OverlayUpdate};
 use layout::{
     MAX_EXPANDED_PANEL_WIDTH, PANEL_RESIZE_DURATION_US, animated_panel_width, compact_panel_width,
     effective_bottom_margin, expanded_panel_width, fallback_panel_height,
@@ -331,7 +331,7 @@ fn set_status_lyrics(floating: &OverlayView, message: &str, key: Text) {
 }
 
 impl OverlayView {
-    pub(super) fn set_song_info(&self, value: &str) {
+    fn set_song_info(&self, value: &str) {
         if self.song_info.borrow().as_str() == value {
             return;
         }
@@ -339,7 +339,7 @@ impl OverlayView {
         self.render_overlay_state(self.i18n.language());
     }
 
-    pub(super) fn set_track_offset(&self, offset_ms: i64) {
+    fn set_track_offset(&self, offset_ms: i64) {
         // The frame clock calls this every frame, so the returned state is only
         // rebuilt when the offset it renders actually changes.
         if self.track_offset_ms.get() == Some(offset_ms) {
@@ -358,16 +358,16 @@ impl OverlayView {
             .set_overlay_state(&self.song_info.borrow(), &label);
     }
 
-    pub(super) fn set_lyrics_document(&self, document: &LyricsDocument) {
+    fn set_lyrics_document(&self, document: &LyricsDocument) {
         self.web_lyrics.set_document(document);
     }
 
-    pub(super) fn show_lyrics(&self, frame: Arc<LyricsFrame>) {
+    fn show_lyrics(&self, frame: Arc<LyricsFrame>) {
         self.state.show_content();
         self.render_lyrics(frame);
     }
 
-    pub(super) fn show_status(&self, key: Text) {
+    fn show_status(&self, key: Text) {
         self.state.show_status(key);
         set_status_lyrics(self, self.i18n.text(key), key);
     }
@@ -425,6 +425,9 @@ impl OverlayView {
         self.web_lyrics
             .set_overlay_appearance(config.window.opacity);
         self.sync_snap_state();
+        if let Some(key) = self.state.static_status() {
+            self.show_status(key);
+        }
 
         let window = self.window.clone();
         let stage = self.stage.clone();

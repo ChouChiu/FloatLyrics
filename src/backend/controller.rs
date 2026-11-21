@@ -79,6 +79,7 @@ impl ControllerState {
 }
 
 struct ControllerContext<'a> {
+    runtime: &'a tokio::runtime::Handle,
     floating: &'a dyn LyricsView,
     cache: &'a CacheService,
     config: &'a LyricsRuntimeConfig,
@@ -92,6 +93,7 @@ pub(crate) struct Controller {
     hint_receiver: mpsc::Receiver<PlayerLyricsHintEvent>,
     cache_receiver: mpsc::Receiver<LyricsCacheEvent>,
     lyrics_receiver: mpsc::Receiver<LyricsFetchEvent>,
+    pending_fetch: Option<tokio::task::JoinHandle<()>>,
     romanization_receiver: mpsc::Receiver<RomanizationEvent>,
     command_receiver: mpsc::Receiver<ControllerCommand>,
     command_sender: mpsc::Sender<ControllerCommand>,
@@ -115,6 +117,7 @@ struct Services {
 impl Services {
     fn context(&self) -> ControllerContext<'_> {
         ControllerContext {
+            runtime: &self.runtime,
             floating: self.floating.as_ref(),
             cache: &self.cache,
             config: &self.config,
@@ -146,6 +149,7 @@ impl Controller {
             hint_receiver,
             cache_receiver,
             lyrics_receiver,
+            pending_fetch: None,
             romanization_receiver,
             command_receiver,
             command_sender,
@@ -170,6 +174,10 @@ impl Controller {
             commands: self.command_sender.clone(),
             playback: self.playback.clone(),
         }
+    }
+
+    pub(crate) fn current_fingerprint(&self) -> Option<&str> {
+        self.state.current_fingerprint.as_deref()
     }
 
     /// Replaces the runtime preferences used by subsequent controller ticks.
@@ -222,6 +230,12 @@ impl Controller {
     pub(crate) fn tick(&mut self) {
         self.apply_commands();
         self.apply_player_events();
+        if (self.state.current_fingerprint.is_none()
+            || self.state.current_fingerprint != self.state.lyrics.track_fingerprint)
+            && let Some(request) = self.pending_fetch.take()
+        {
+            request.abort();
+        }
         self.apply_cache_results();
         self.apply_fetch_results();
         self.apply_romanization_results();
@@ -277,6 +291,7 @@ impl Controller {
                     config: &self.services.config,
                     runtime: &self.services.runtime,
                     lyrics_sender: &self.services.lyrics_sender,
+                    pending_fetch: &mut self.pending_fetch,
                     romanization_sender: &self.services.romanization_sender,
                 },
             );
@@ -298,6 +313,7 @@ impl Controller {
                     current_generation: self.state.lyrics_generation,
                     snapshot: &snapshot,
                     state: &mut self.state.lyrics,
+                    runtime: &self.services.runtime,
                     cache: &self.services.cache,
                     config: &self.services.config,
                     cache_sender: &self.services.cache_sender,

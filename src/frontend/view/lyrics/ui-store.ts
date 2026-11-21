@@ -23,6 +23,7 @@ export interface UiState {
   availableFonts: string[];
   page: ControlPage;
   saved: boolean;
+  saving: boolean;
   saveError: string | null;
   search: SearchState | null;
   songInfo: string;
@@ -42,6 +43,7 @@ const initialState: UiState = {
   availableFonts: [],
   page: "general",
   saved: false,
+  saving: false,
   saveError: null,
   search: null,
   songInfo: "FloatLyrics",
@@ -70,6 +72,7 @@ export function advanceUiState(state: UiState, command: LyricsCommand): UiState 
         ...state,
         config: command.config,
         saved: command.saved,
+        saving: !command.saved && command.error === null,
         saveError: command.error,
       };
     case "search-state":

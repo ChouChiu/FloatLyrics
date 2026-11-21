@@ -1,7 +1,5 @@
 # 为 FloatLyrics 做贡献
 
-感谢你愿意改进 FloatLyrics。代码、测试、文档、翻译、问题报告与设计建议都很有价值。本指南说明如何搭建环境、确定改动归属、验证结果并提交便于审阅的 Pull Request。
-
 ## 开始之前
 
 请先搜索现有 [Issues](https://github.com/ChouChiu/FloatLyrics/issues) 和 [Pull Requests](https://github.com/ChouChiu/FloatLyrics/pulls)，确认没有重复工作。
@@ -14,7 +12,7 @@
 
 项目使用 Rust 2024 edition，最低支持 Rust 1.93；React 歌词前端使用 Bun 1.4.2、TypeScript 和 Biome。`rust-toolchain.toml` 会选择 stable，并安装 `rustfmt`、Clippy、Rust 源码与 rust-analyzer。Bun 请按[官方安装说明](https://bun.com/docs/installation)安装。
 
-运行完整应用需要 Linux Wayland、支持 layer-shell 的合成器、会话 D-Bus、GTK 4.12+、gtk4-layer-shell 和 WebKitGTK 6.0。运行单元测试则不需要桌面会话。
+运行应用需要 Linux Wayland、会话 D-Bus、GTK 4.12+、gtk4-layer-shell 和 WebKitGTK 6.0。合成器需要支持 layer-shell 才能使用桌面覆盖层；否则以普通窗口显示。单元测试可在无桌面会话时运行。
 
 Arch Linux 可直接安装所需依赖：
 
@@ -44,7 +42,7 @@ bun run check
 bun run typecheck
 bun test
 cargo build --locked
-cargo test --locked --all-targets --all-features
+cargo test --locked --workspace --all-targets --all-features
 ```
 
 在支持 layer-shell 的 Wayland 会话中启动开发版本：
@@ -93,16 +91,14 @@ floatlyrics (src/)              CLI 与应用层
 | `data/locale/` | 三种语言的 JSON 文案目录 |
 | `packaging/` | 打包安装脚本、AUR 元数据与发布自动化 |
 
-### React 歌词前端架构
+### 按功能定位代码
 
-前端位于 `src/frontend/view/lyrics/`，渲染引擎基于 `@applemusic-like-lyrics/react`（AMLL）和 PixiJS：
+- 手动选择歌词的窗口、会话状态和 Rust 测试在 `src/frontend/manual_search/`。React 页面、样式和测试在 `src/frontend/view/lyrics/search/`。窗口调用 `src/backend/manual_search.rs`，由它发起查询、下载预览和写入选中的版本。
+- 设置窗口、字体选择和保存服务在 `src/frontend/settings/`，React 设置页面在 `src/frontend/view/lyrics/settings/`。配置校验和 TOML 持久化仍在 `src/shared/config/`。
+- 播放过程中，`src/backend/controller/loading/` 负责协调缓存、在线查询和读音生成。缓存命中后在阻塞线程解析并分词；控制器在确认曲目与加载代次后发布结果。歌词源优先级在 `floatlyrics-lyrics/src/lyrics/search.rs` 中执行。
+- WebKit 桥接层在 `src/frontend/view/web_lyrics/`，接收端在 `src/frontend/view/lyrics/bridge.ts`。修改桥接消息时同步更新 Rust 和 `types.ts`。普通歌词按行切换两个渲染槽位，Apple Music 样式通过 AMLL 的 `LyricPlayer` 渲染。
 
-- `bridge.ts`：在 `window.floatLyrics` 上挂载 JS bridge，接收 Rust 侧通过 WebKit `evaluate_script` 推送的 `LyricsCommand`。
-- `store.ts`：`LyricsViewState` 维护双槽位（slot 0/1）的 ping-pong 状态机。切歌时切换 slot 实现交叉淡入淡出。
-- `app.tsx`：React 组件，通过 `useSyncExternalStore` 订阅 store，将 `LyricsDocument` 转换为 AMLL lines 格式驱动 `LyricPlayer`。
-- `types.ts`：定义 Rust ↔ JS 共享的数据类型（`TimedSyllable`、`LyricsFrame`、`LyricsCommand` 等）。
-
-修改前端后务必运行 `bun run typecheck` 和 `bun test` 验证 TypeScript 类型和组件逻辑。
+修改 React 组件后，运行 `bun run check`、`bun run typecheck`、`bun test` 和 `bun run build:lyrics`。
 
 ## 实现约定
 
@@ -129,7 +125,7 @@ data/locale/zh-TW.json
 
 ## 编写测试
 
-测试模块使用 `#[cfg(test)]`，并通过 `#[path = "test/foo_test.rs"]` 将实现放在各 crate 的 `src/test/` 下。
+测试模块使用 `#[cfg(test)]`。新测试优先放在对应功能附近，已有测试也可在各 crate 的 `src/test/` 中找到。
 
 - 测试名称描述可观察行为，例如 `parses_enhanced_lrc`。
 - bug 修复应附带能够先复现问题的回归测试。
@@ -140,7 +136,7 @@ data/locale/zh-TW.json
 运行全部测试：
 
 ```bash
-cargo test --locked --all-targets --all-features
+cargo test --locked --workspace --all-targets --all-features
 ```
 
 开发时可按模块筛选，常用命令：
@@ -158,7 +154,7 @@ cargo test --locked -p floatlyrics config::             # 配置
 
 ## 提交前检查
 
-每条 Cargo 命令都应使用 `--locked`。提交 PR 前依次运行：
+解析依赖的 Cargo 命令使用 `--locked`。提交 PR 前依次运行：
 
 ```bash
 bun install --frozen-lockfile
@@ -167,8 +163,8 @@ bun run typecheck
 bun test
 bun run build:lyrics
 cargo fmt --all -- --check
-cargo clippy --locked --all-targets --all-features -- -D warnings
-cargo test --locked --all-targets --all-features
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --locked --workspace --all-targets --all-features
 cargo build --locked --release
 cargo docs
 ```

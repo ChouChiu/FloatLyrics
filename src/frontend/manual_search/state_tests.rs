@@ -22,11 +22,12 @@ fn preview_result_must_match_generation_and_selected_index() {
     let mut state = ManualSearchState::default();
     let generation = state.begin_search(track("Song")).unwrap();
     assert!(state.accept_candidates(generation, Ok(vec![candidate("candidate")])));
-    assert!(state.begin_preview(0).is_some());
+    let (old_preview, _) = state.begin_preview(0).unwrap();
+    let (current_preview, _) = state.begin_preview(0).unwrap();
 
-    assert!(!state.accept_preview(generation.wrapping_add(1), 0, Ok(Some(fetched("stale"))),));
-    assert!(!state.accept_preview(generation, 1, Ok(Some(fetched("wrong row")))));
-    assert!(state.accept_preview(generation, 0, Ok(Some(fetched("current")))));
+    assert!(!state.accept_preview(old_preview, 0, Ok(Some(fetched("stale")))));
+    assert!(!state.accept_preview(current_preview, 1, Ok(Some(fetched("wrong row")))));
+    assert!(state.accept_preview(current_preview, 0, Ok(Some(fetched("current")))));
     assert_eq!(state.selection().unwrap().1.raw_lyrics, "current");
 }
 
@@ -69,7 +70,11 @@ fn lifecycle_state_drives_busy_preview_and_apply_presentation() {
     assert!(!state.is_searching());
     assert!(state.status_text(Language::English).contains('1'));
 
-    assert!(state.begin_preview(0).is_some());
+    assert_eq!(
+        state.preview_text(Language::English),
+        Language::English.text(Text::SelectCandidatePreview)
+    );
+    let (generation, _) = state.begin_preview(0).unwrap();
     assert!(!state.can_apply());
     assert!(state.accept_preview(generation, 0, Ok(Some(fetched("lyrics")))));
     assert!(state.can_apply());
@@ -108,7 +113,7 @@ fn in_flight_apply_blocks_search_and_preview_changes_until_completion() {
     let mut state = ManualSearchState::default();
     let generation = state.begin_search(track("First")).unwrap();
     assert!(state.accept_candidates(generation, Ok(vec![candidate("candidate")])));
-    assert!(state.begin_preview(0).is_some());
+    let (generation, _) = state.begin_preview(0).unwrap();
     assert!(state.accept_preview(generation, 0, Ok(Some(fetched("lyrics")))));
     let (apply_generation, _, _) = state.begin_apply().unwrap();
     assert!(!state.can_apply());
@@ -129,7 +134,7 @@ fn successful_apply_consumes_the_selection_while_failure_allows_retry() {
     let mut state = ManualSearchState::default();
     let generation = state.begin_search(track("Song")).unwrap();
     assert!(state.accept_candidates(generation, Ok(vec![candidate("candidate")])));
-    assert!(state.begin_preview(0).is_some());
+    let (generation, _) = state.begin_preview(0).unwrap();
     assert!(state.accept_preview(generation, 0, Ok(Some(fetched("lyrics")))));
 
     let (apply_generation, _, _) = state.begin_apply().unwrap();
@@ -140,6 +145,24 @@ fn successful_apply_consumes_the_selection_while_failure_allows_retry() {
     assert!(state.finish_apply(apply_generation, Ok(())));
     assert!(!state.can_apply());
     assert!(state.selection().is_none());
+}
+
+#[test]
+fn switching_tracks_discards_the_preview_and_ignores_its_completion() {
+    let mut state = ManualSearchState::default();
+    let generation = state.begin_search(track("First")).unwrap();
+    assert!(state.accept_candidates(generation, Ok(vec![candidate("candidate")])));
+    let (preview, _) = state.begin_preview(0).unwrap();
+
+    state.mark_track_changed();
+
+    assert!(state.presentation_snapshot().0.is_empty());
+    assert!(!state.accept_preview(preview, 0, Ok(Some(fetched("old track")))));
+    assert!(!state.can_apply());
+    assert_eq!(
+        state.status_text(Language::English),
+        Language::English.text(Text::TrackChanged)
+    );
 }
 
 fn track(title: &str) -> TrackMetadata {

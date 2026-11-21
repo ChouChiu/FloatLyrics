@@ -21,7 +21,10 @@ use crate::{
     shared::runtime::LyricsRuntimeConfig,
 };
 
-use super::{LyricsCacheEvent, cache::active_provider_order};
+use super::{
+    LyricsCacheEvent,
+    cache::{PreparedLyrics, active_provider_order},
+};
 
 #[derive(Debug)]
 pub(in crate::backend::controller) struct LyricsFetchEvent {
@@ -41,6 +44,7 @@ pub(in crate::backend::controller) struct LyricsFetchApplyContext<'a> {
     pub(in crate::backend::controller) current_generation: u64,
     pub(in crate::backend::controller) snapshot: &'a PlaybackSnapshot,
     pub(in crate::backend::controller) state: &'a mut LyricsDisplayState,
+    pub(in crate::backend::controller) runtime: &'a tokio::runtime::Handle,
     pub(in crate::backend::controller) cache: &'a CacheService,
     pub(in crate::backend::controller) config: &'a LyricsRuntimeConfig,
     pub(in crate::backend::controller) cache_sender: &'a mpsc::Sender<LyricsCacheEvent>,
@@ -75,16 +79,29 @@ pub(in crate::backend::controller) fn apply_lyrics_fetch_event(
             let track_fingerprint = event.track_fingerprint;
             let event_fingerprint = track_fingerprint.clone();
             let generation = event.generation;
+            let runtime = ctx.runtime.clone();
             ctx.cache.store_provider_and_load(
                 track_fingerprint,
                 fetched,
                 active_provider_order(ctx.config),
                 move |result| {
-                    let _ = sender.send(LyricsCacheEvent::ProviderStored {
-                        track_fingerprint: event_fingerprint,
-                        generation,
-                        result,
-                    });
+                    let fingerprint = event_fingerprint.clone();
+                    let complete = move |result| {
+                        let _ = sender.send(LyricsCacheEvent::ProviderStored {
+                            track_fingerprint: event_fingerprint,
+                            generation,
+                            result,
+                        });
+                    };
+                    match result {
+                        Ok(Some(cached)) => {
+                            runtime.spawn_blocking(move || {
+                                complete(Ok(Some(PreparedLyrics::parse(fingerprint, cached))));
+                            });
+                        }
+                        Ok(None) => complete(Ok(None)),
+                        Err(error) => complete(Err(error)),
+                    }
                 },
             );
             false
@@ -122,7 +139,7 @@ pub(super) fn spawn_lyrics_fetch(
     provider_order: Vec<LyricsProvider>,
     track_fingerprint: String,
     generation: u64,
-) {
+) -> tokio::task::JoinHandle<()> {
     runtime.spawn(async move {
         let result =
             match search_best_lyrics_with_hint(&track, &provider_order, hint.as_ref()).await {
@@ -136,9 +153,9 @@ pub(super) fn spawn_lyrics_fetch(
             generation,
             result,
         });
-    });
+    })
 }
 
 #[cfg(test)]
-#[path = "../../../test/lyrics_fetch_test.rs"]
+#[path = "fetch_tests.rs"]
 mod tests;

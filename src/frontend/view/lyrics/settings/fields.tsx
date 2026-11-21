@@ -27,8 +27,8 @@ function SaveStatus({ state, t }: { state: UiState; t: Translate }) {
     );
   }
   return (
-    <div className="save-state" aria-live="polite">
-      {state.saved ? t("Saved") : t("ChangesSavedAutomatically")}
+    <div className="save-state" role="status">
+      {t(state.saving ? "SavingSettings" : state.saved ? "Saved" : "ChangesSavedAutomatically")}
     </div>
   );
 }

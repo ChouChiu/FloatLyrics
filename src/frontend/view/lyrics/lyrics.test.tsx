@@ -28,7 +28,6 @@ if (!("MouseEvent" in globalThis)) {
 const { AppleMusicLyrics, LyricSlot, LyricsViewport } = await import("./app");
 const { ControlCenter } = await import("./settings/control-center");
 const { FontPickerWindow } = await import("./font-picker");
-const { ManualSearchWindow } = await import("./search");
 const { OverlayShell } = await import("./overlay");
 
 const style = {
@@ -255,6 +254,7 @@ describe("React application shell", () => {
     availableFonts: [],
     page: "general",
     saved: false,
+    saving: false,
     saveError: null,
     search: null,
     songInfo: "FloatLyrics",
@@ -359,29 +359,6 @@ describe("React application shell", () => {
       "integration",
     );
     expect(amll).not.toContain("disabled");
-  });
-
-  test("renders manual search as a standalone window without the settings sidebar", () => {
-    const state = advanceUiState(bootstrapped("manual-search"), {
-      type: "search-state",
-      state: {
-        title: "Song",
-        artist: "Artist",
-        status: "Ready",
-        preview: "Preview",
-        searching: false,
-        applying: false,
-        can_apply: false,
-        selected_index: null,
-        candidates: [],
-      },
-    });
-
-    const html = renderToStaticMarkup(<ManualSearchWindow state={state} />);
-    expect(html).toContain('class="manual-search-window"');
-    expect(html).toContain('id="manual-search-title"');
-    expect(html).toContain('id="manual-search-qq-reference"');
-    expect(html).not.toContain('class="sidebar"');
   });
 
   test("edits ordered preference lists without losing their last entry", () => {

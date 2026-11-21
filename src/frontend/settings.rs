@@ -3,6 +3,8 @@
 
 //! Configuration persistence used by the React settings frontend.
 
+pub(super) mod font_picker;
 mod persistence;
+pub(super) mod window;
 
 pub(in crate::frontend) use persistence::{ConfigSaveResult, ConfigSaveService};

@@ -136,6 +136,7 @@ export interface LicenseData {
 }
 
 export interface SearchCandidate {
+  provider_track_id: string;
   provider: LyricsProvider;
   title: string;
   artists: string[];
@@ -145,6 +146,8 @@ export interface SearchCandidate {
 }
 
 export interface SearchState {
+  track: string | null;
+  query_revision: number;
   title: string;
   artist: string;
   status: string;

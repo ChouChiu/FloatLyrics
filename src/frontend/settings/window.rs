@@ -9,13 +9,13 @@ use std::{cell::Cell, rc::Rc};
 use crate::shared::config::AppConfig;
 use floatlyrics_core::i18n::{Language, Text};
 
-use super::{
+use crate::frontend::{
     AppMsg,
     view::web_lyrics::{ControlPage, UiSurface, WebLyricsView},
 };
 
 #[derive(Clone)]
-pub(super) struct ControlCenterView {
+pub(in crate::frontend) struct ControlCenterView {
     window: gtk::ApplicationWindow,
     web_ui: WebLyricsView,
     language: Rc<Cell<Language>>,
@@ -23,7 +23,7 @@ pub(super) struct ControlCenterView {
 }
 
 impl ControlCenterView {
-    pub(super) fn new(
+    pub(in crate::frontend) fn new(
         config: &AppConfig,
         about: Rc<serde_json::Value>,
         sender: relm4::Sender<AppMsg>,
@@ -58,20 +58,25 @@ impl ControlCenterView {
         }
     }
 
-    pub(super) fn show(&self, page: ControlPage) {
+    pub(in crate::frontend) fn show(&self, page: ControlPage) {
         self.page.set(page);
         self.update_title();
         self.web_ui.navigate(page);
         self.window.present();
     }
 
-    pub(super) fn bootstrap(&self, config: &AppConfig) {
+    pub(in crate::frontend) fn bootstrap(&self, config: &AppConfig) {
         self.language.set(config.general.language);
         self.update_title();
         self.web_ui.refresh_bootstrap(config);
     }
 
-    pub(super) fn set_config_state(&self, config: &AppConfig, saved: bool, error: Option<&str>) {
+    pub(in crate::frontend) fn set_config_state(
+        &self,
+        config: &AppConfig,
+        saved: bool,
+        error: Option<&str>,
+    ) {
         self.web_ui.set_config_state(config, saved, error);
     }
 

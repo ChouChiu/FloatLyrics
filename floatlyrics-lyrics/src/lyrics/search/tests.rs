@@ -178,3 +178,49 @@ fn a_source_that_holds_the_track_still_answers_it() {
         )
     ));
 }
+
+#[test]
+fn provider_requests_overlap_without_reordering_results_or_starting_the_whole_list() {
+    use std::{cell::RefCell, task::Poll};
+
+    use futures::{FutureExt, channel::oneshot, executor::block_on, poll};
+
+    let providers = [
+        LyricsProvider::QqMusic,
+        LyricsProvider::NetEase,
+        LyricsProvider::Kugou,
+        LyricsProvider::Lrclib,
+    ];
+    let mut completed = providers.map(|_| {
+        let (send, receive) = oneshot::channel::<bool>();
+        (Some(send), Some(receive))
+    });
+    let receivers = RefCell::new(completed.each_mut().map(|(_, receive)| receive.take()));
+    let started = RefCell::new(Vec::new());
+    let mut requests = provider_requests(&providers, |provider| {
+        let index = providers.iter().position(|item| *item == provider).unwrap();
+        let receive = receivers.borrow_mut()[index].take().unwrap();
+        let started = &started;
+        async move {
+            started.borrow_mut().push(provider);
+            receive.await.unwrap()
+        }
+    });
+
+    block_on(async {
+        assert_eq!(poll!(requests.next()), Poll::Pending);
+        assert_eq!(*started.borrow(), providers[..2]);
+        completed[1].0.take().unwrap().send(true).unwrap();
+        assert_eq!(poll!(requests.next()), Poll::Pending);
+        completed[0].0.take().unwrap().send(false).unwrap();
+        assert_eq!(
+            requests.next().now_or_never(),
+            Some(Some((LyricsProvider::QqMusic, false)))
+        );
+        assert_eq!(
+            requests.next().now_or_never(),
+            Some(Some((LyricsProvider::NetEase, true)))
+        );
+        assert!(!started.borrow().contains(&LyricsProvider::Lrclib));
+    });
+}

@@ -199,6 +199,7 @@ fn accepted_fetch_is_persisted_and_reloaded_as_display_state() {
             current_generation: 7,
             snapshot: &snapshot,
             state: &mut state,
+            runtime: runtime.handle(),
             cache: &cache,
             config: &config,
             cache_sender: &cache_sender,
@@ -218,6 +219,7 @@ fn accepted_fetch_is_persisted_and_reloaded_as_display_state() {
             config: &config,
             runtime: runtime.handle(),
             lyrics_sender: &lyrics_sender,
+            pending_fetch: &mut None,
             romanization_sender: &romanization_sender,
         },
     ));
@@ -262,10 +264,7 @@ fn track_cache_load_applies_remembered_offset_without_cached_lyrics() {
             track_fingerprint: fingerprint,
             generation: 4,
             offset_generation: 6,
-            result: Ok(CachedTrack {
-                lyrics: None,
-                offset_ms: -450,
-            }),
+            result: Ok((None, -450)),
         },
         &mut LyricsCacheApplyContext {
             current_generation: 4,
@@ -276,6 +275,7 @@ fn track_cache_load_applies_remembered_offset_without_cached_lyrics() {
             config: &config,
             runtime: runtime.handle(),
             lyrics_sender: &lyrics_sender,
+            pending_fetch: &mut None,
             romanization_sender: &romanization_sender,
         },
     );
@@ -309,10 +309,7 @@ fn stale_offset_load_does_not_overwrite_a_new_user_adjustment() {
             track_fingerprint: fingerprint,
             generation: 4,
             offset_generation: 6,
-            result: Ok(CachedTrack {
-                lyrics: None,
-                offset_ms: -450,
-            }),
+            result: Ok((None, -450)),
         },
         &mut LyricsCacheApplyContext {
             current_generation: 4,
@@ -323,6 +320,7 @@ fn stale_offset_load_does_not_overwrite_a_new_user_adjustment() {
             config: &config,
             runtime: runtime.handle(),
             lyrics_sender: &lyrics_sender,
+            pending_fetch: &mut None,
             romanization_sender: &romanization_sender,
         },
     );
@@ -337,15 +335,18 @@ fn exact_player_hint_refreshes_only_automatic_cache_from_an_enabled_provider() {
         provider: LyricsProvider::NetEase,
         provider_track_id: "123".to_string(),
     };
-    let mut cached = CachedLyrics {
-        manually_selected: false,
-        id: 1,
-        provider: LyricsProvider::NetEase,
-        provider_track_id: Some("old".to_string()),
-        title: "Song".to_string(),
-        artists: vec!["Artist".to_string()],
-        raw_lyrics: "[00:01.00]Hello".to_string(),
-    };
+    let mut cached = PreparedLyrics::parse(
+        "track".to_string(),
+        CachedLyrics {
+            manually_selected: false,
+            id: 1,
+            provider: LyricsProvider::NetEase,
+            provider_track_id: Some("old".to_string()),
+            title: "Song".to_string(),
+            artists: vec!["Artist".to_string()],
+            raw_lyrics: "[00:01.00]Hello".to_string(),
+        },
+    );
 
     assert!(super::super::hint_requires_refresh(
         &cached,
@@ -369,7 +370,7 @@ fn exact_player_hint_refreshes_only_automatic_cache_from_an_enabled_provider() {
         &disabled
     ));
 
-    let earlier_provider_cache = CachedLyrics {
+    let earlier_provider_cache = PreparedLyrics {
         provider: LyricsProvider::QqMusic,
         ..cached
     };
@@ -404,6 +405,7 @@ fn apply_cache_event(
             config: &config,
             runtime: runtime.handle(),
             lyrics_sender: &lyrics_sender,
+            pending_fetch: &mut None,
             romanization_sender: &romanization_sender,
         },
     )

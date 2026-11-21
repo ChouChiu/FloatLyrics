@@ -41,6 +41,18 @@ pub(super) fn handle_player_event(
                 controller_state.lyrics_hint = None;
             }
             controller_state.current_fingerprint = next_fingerprint;
+            // The first cache load already records a new track. Record only
+            // changed metadata for an existing fingerprint on later events.
+            if previous_fingerprint == controller_state.current_fingerprint
+                && let Some(track) = &state.track
+                && controller_state
+                    .latest
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.state.track.as_ref())
+                    != Some(track)
+            {
+                ctx.cache.record_track(track.clone());
+            }
             let jump_detected = playback_jump_detected(
                 controller_state.latest.as_deref(),
                 state.position_ms,
@@ -165,7 +177,6 @@ pub(super) fn update_player_state(
         ctx.floating.show_status(Text::WaitingForMetadata);
         return;
     };
-    ctx.cache.record_track(track.clone());
     ctx.floating.set_track_metadata(Some(track));
     // The song info only changes with the track, so it is published here and not
     // from the per-frame presentation refresh.

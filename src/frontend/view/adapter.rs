@@ -12,7 +12,28 @@ use crate::{
     shared::presentation::{LyricsDocument, LyricsFrame},
 };
 
-use super::super::AppMsg;
+use super::{super::AppMsg, OverlayView};
+
+#[derive(Debug)]
+pub(in crate::frontend) enum OverlayUpdate {
+    SongInfo(String),
+    TrackOffset(i64),
+    Document(LyricsDocument),
+    Frame(Arc<LyricsFrame>),
+    Status(Text),
+}
+
+impl OverlayUpdate {
+    pub(in crate::frontend) fn apply(self, overlay: &OverlayView) {
+        match self {
+            Self::SongInfo(value) => overlay.set_song_info(&value),
+            Self::TrackOffset(value) => overlay.set_track_offset(value),
+            Self::Document(document) => overlay.set_lyrics_document(&document),
+            Self::Frame(frame) => overlay.show_lyrics(frame),
+            Self::Status(key) => overlay.show_status(key),
+        }
+    }
+}
 
 /// Message-only handle to the overlay component state.
 ///
@@ -31,13 +52,17 @@ impl OverlaySender {
 
 impl LyricsView for OverlaySender {
     fn set_song_info(&self, value: &str) {
-        let _ = self.sender.send(AppMsg::SetSongInfo(value.to_string()));
+        let _ = self
+            .sender
+            .send(AppMsg::Overlay(OverlayUpdate::SongInfo(value.to_string())));
     }
 
     fn set_track_metadata(&self, _track: Option<&floatlyrics_core::track::TrackMetadata>) {}
 
     fn set_track_offset(&self, offset_ms: i64) {
-        let _ = self.sender.send(AppMsg::SetTrackOffset(offset_ms));
+        let _ = self
+            .sender
+            .send(AppMsg::Overlay(OverlayUpdate::TrackOffset(offset_ms)));
     }
 
     /// The overlay reads the same state from the controller's playback
@@ -45,7 +70,9 @@ impl LyricsView for OverlaySender {
     fn set_player_control(&self, _control: Option<&crate::shared::presentation::PlayerControl>) {}
 
     fn set_lyrics_document(&self, document: LyricsDocument) {
-        let _ = self.sender.send(AppMsg::SetLyricsDocument(document));
+        let _ = self
+            .sender
+            .send(AppMsg::Overlay(OverlayUpdate::Document(document)));
     }
 
     /// The overlay renders lyrics from the frames it receives, so it needs no
@@ -53,10 +80,14 @@ impl LyricsView for OverlaySender {
     fn set_playback(&self, _position_ms: Option<u64>, _playing: bool) {}
 
     fn show_lyrics(&self, frame: Arc<LyricsFrame>) {
-        let _ = self.sender.send(AppMsg::ShowLyrics(frame));
+        let _ = self
+            .sender
+            .send(AppMsg::Overlay(OverlayUpdate::Frame(frame)));
     }
 
     fn show_status(&self, key: Text) {
-        let _ = self.sender.send(AppMsg::ShowStatus(key));
+        let _ = self
+            .sender
+            .send(AppMsg::Overlay(OverlayUpdate::Status(key)));
     }
 }

@@ -17,18 +17,19 @@ use floatlyrics_core::{
     i18n::{Message, Text},
     track::TrackMetadata,
 };
-use floatlyrics_lyrics::{cache::CachedLyrics, lyrics::LyricsLookupHint};
+use floatlyrics_lyrics::lyrics::LyricsLookupHint;
 
 use crate::{
     backend::{
-        cache::{CacheService, CachedTrack, ProviderStoreError},
+        cache::{CacheService, ProviderStoreError},
         model::{LyricsDisplayState, PlaybackSnapshot},
     },
     shared::runtime::LyricsRuntimeConfig,
 };
 
-use cache::{active_provider_order, lyrics_state_from_cached, should_refresh_translation};
+use cache::{PreparedLyrics, active_provider_order, should_refresh_translation};
 use fetch::spawn_lyrics_fetch;
+use romanization::spawn_local_romanization;
 
 pub(super) use fetch::{LyricsFetchApplyContext, LyricsFetchEvent, apply_lyrics_fetch_event};
 pub(super) use romanization::{RomanizationEvent, apply_romanization_event};
@@ -41,16 +42,17 @@ pub(super) enum LyricsCacheEvent {
         track_fingerprint: String,
         generation: u64,
         offset_generation: u64,
-        result: Result<CachedTrack, String>,
+        result: Result<(Option<PreparedLyrics>, i64), String>,
     },
     ProviderStored {
         track_fingerprint: String,
         generation: u64,
-        result: Result<Option<CachedLyrics>, ProviderStoreError>,
+        result: Result<Option<PreparedLyrics>, ProviderStoreError>,
     },
 }
 
 pub(super) struct LyricsLoadContext<'a> {
+    pub(super) runtime: &'a tokio::runtime::Handle,
     pub(super) cache: &'a CacheService,
     pub(super) config: &'a LyricsRuntimeConfig,
     pub(super) cache_sender: &'a mpsc::Sender<LyricsCacheEvent>,
@@ -69,18 +71,35 @@ pub(super) fn load_lyrics_for_track(
     let event_track = track.clone();
     let event_hint = ctx.hint.clone();
     let event_fingerprint = fingerprint.clone();
+    let lyrics_fingerprint = fingerprint.clone();
     let generation = ctx.generation;
     let offset_generation = ctx.offset_generation;
+    let runtime = ctx.runtime.clone();
     ctx.cache
         .load_track(track.clone(), provider_order, move |result| {
-            let _ = sender.send(LyricsCacheEvent::TrackLoaded {
-                track: event_track,
-                hint: event_hint,
-                track_fingerprint: event_fingerprint,
-                generation,
-                offset_generation,
-                result,
-            });
+            let complete = move |result| {
+                let _ = sender.send(LyricsCacheEvent::TrackLoaded {
+                    track: event_track,
+                    hint: event_hint,
+                    track_fingerprint: event_fingerprint,
+                    generation,
+                    offset_generation,
+                    result,
+                });
+            };
+            match result {
+                Ok(cached) => match cached.lyrics {
+                    Some(lyrics) => {
+                        let fingerprint = lyrics_fingerprint;
+                        runtime.spawn_blocking(move || {
+                            let lyrics = PreparedLyrics::parse(fingerprint, lyrics);
+                            complete(Ok((Some(lyrics), cached.offset_ms)));
+                        });
+                    }
+                    None => complete(Ok((None, cached.offset_ms))),
+                },
+                Err(error) => complete(Err(error)),
+            }
         });
 
     LyricsDisplayState {
@@ -99,6 +118,7 @@ pub(super) struct LyricsCacheApplyContext<'a> {
     pub(super) config: &'a LyricsRuntimeConfig,
     pub(super) runtime: &'a tokio::runtime::Handle,
     pub(super) lyrics_sender: &'a mpsc::Sender<LyricsFetchEvent>,
+    pub(super) pending_fetch: &'a mut Option<tokio::task::JoinHandle<()>>,
     pub(super) romanization_sender: &'a mpsc::Sender<RomanizationEvent>,
 }
 
@@ -152,14 +172,8 @@ pub(super) fn apply_lyrics_cache_event(
             result,
             ..
         } => match result {
-            Ok(Some(cached)) => {
-                *ctx.state = lyrics_state_from_cached(
-                    track_fingerprint,
-                    &cached,
-                    ctx.config,
-                    ctx.runtime,
-                    ctx.romanization_sender,
-                );
+            Ok(Some(lyrics)) => {
+                publish_prepared_lyrics(lyrics, ctx);
                 true
             }
             Ok(None) => {
@@ -199,28 +213,20 @@ fn apply_track_cache_result(
     fingerprint: String,
     generation: u64,
     offset_generation: u64,
-    result: Result<CachedTrack, String>,
+    result: Result<(Option<PreparedLyrics>, i64), String>,
     ctx: &mut LyricsCacheApplyContext<'_>,
 ) -> bool {
     match result {
-        Ok(CachedTrack {
-            lyrics: Some(cached),
-            offset_ms,
-        }) => {
+        Ok((lyrics, offset_ms)) => {
             if offset_generation == ctx.current_offset_generation {
                 *ctx.track_offset_ms = offset_ms;
             }
-            let state = lyrics_state_from_cached(
-                fingerprint.clone(),
-                &cached,
-                ctx.config,
-                ctx.runtime,
-                ctx.romanization_sender,
-            );
-            let should_refresh = should_refresh_translation(&cached, &state, ctx.config)
-                || hint_requires_refresh(&cached, hint.as_ref(), ctx.config);
-            if should_refresh {
-                spawn_lyrics_fetch(
+            let should_fetch = lyrics.as_ref().is_none_or(|lyrics| {
+                should_refresh_translation(lyrics, ctx.config)
+                    || hint_requires_refresh(lyrics, hint.as_ref(), ctx.config)
+            });
+            if should_fetch {
+                *ctx.pending_fetch = Some(spawn_lyrics_fetch(
                     ctx.runtime,
                     ctx.lyrics_sender.clone(),
                     track,
@@ -228,27 +234,12 @@ fn apply_track_cache_result(
                     active_provider_order(ctx.config),
                     fingerprint,
                     generation,
-                );
+                ));
             }
-            *ctx.state = state;
-            true
-        }
-        Ok(CachedTrack {
-            lyrics: None,
-            offset_ms,
-        }) => {
-            if offset_generation == ctx.current_offset_generation {
-                *ctx.track_offset_ms = offset_ms;
+            if let Some(lyrics) = lyrics {
+                publish_prepared_lyrics(lyrics, ctx);
+                return true;
             }
-            spawn_lyrics_fetch(
-                ctx.runtime,
-                ctx.lyrics_sender.clone(),
-                track,
-                hint,
-                active_provider_order(ctx.config),
-                fingerprint,
-                generation,
-            );
             false
         }
         Err(error) => {
@@ -262,8 +253,25 @@ fn apply_track_cache_result(
     }
 }
 
+fn publish_prepared_lyrics(lyrics: PreparedLyrics, ctx: &mut LyricsCacheApplyContext<'_>) {
+    let state = lyrics.state;
+    if ctx.config.show_romanization
+        && !state.lines.is_empty()
+        && let Some(fingerprint) = &state.track_fingerprint
+    {
+        spawn_local_romanization(
+            ctx.runtime,
+            ctx.romanization_sender.clone(),
+            fingerprint.clone(),
+            state.lines.clone(),
+            ctx.config.chinese_romanization,
+        );
+    }
+    *ctx.state = state;
+}
+
 fn hint_requires_refresh(
-    cached: &CachedLyrics,
+    cached: &PreparedLyrics,
     hint: Option<&LyricsLookupHint>,
     config: &LyricsRuntimeConfig,
 ) -> bool {

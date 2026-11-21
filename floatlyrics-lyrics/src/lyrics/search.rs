@@ -13,6 +13,7 @@ mod ranking;
 
 use anyhow::Result;
 use floatlyrics_core::track::TrackMetadata;
+use futures::{StreamExt, stream};
 use lyrics_helper::SearchError;
 
 use super::model::{FetchedLyrics, LyricsCandidate, LyricsLookupHint, LyricsProvider};
@@ -29,11 +30,11 @@ pub use ranking::SearchPlan;
 /// Searches configured providers and returns ranked, deduplicated candidates.
 ///
 /// At most twelve candidates are returned. A provider that reports a failure is
-/// skipped so the remaining ones still answer, and the failure is returned only
-/// when no provider produced a candidate.
+/// skipped so the remaining ones still answer. Requests overlap, and results
+/// are collected in provider order before ranking.
 ///
 /// # Errors
-/// Returns an error when every provider failed and none returned a candidate.
+/// Returns an error when no candidate was found and at least one provider failed.
 pub async fn search_lyrics_candidates(
     track: &TrackMetadata,
     provider_order: &[LyricsProvider],
@@ -41,8 +42,11 @@ pub async fn search_lyrics_candidates(
     let metadata = lyrics_helper_metadata(track);
     let mut candidates = Vec::new();
     let mut failure: Option<SearchError> = None;
-    for provider in provider_order {
-        match search_provider_candidates(*provider, &metadata).await {
+    let mut searches = provider_requests(provider_order, |provider| {
+        search_provider_candidates(provider, &metadata)
+    });
+    while let Some((provider, result)) = searches.next().await {
+        match result {
             Ok(results) => candidates.extend(results),
             Err(error) => {
                 tracing::warn!(provider = provider.as_str(), %error, "provider search failed");
@@ -93,10 +97,11 @@ pub async fn fetch_candidate_lyrics(candidate: &LyricsCandidate) -> Result<Optio
     }))
 }
 
-/// Searches providers in priority order and returns the first acceptable result.
+/// Returns the first acceptable result in provider order. Nearby requests
+/// overlap so a miss can fall through without waiting for a full second lookup.
 ///
 /// # Errors
-/// Returns an error when a provider reports a recoverable search failure.
+/// Returns an error when no provider returned lyrics and at least one failed.
 pub async fn search_best_lyrics(
     track: &TrackMetadata,
     provider_order: &[LyricsProvider],
@@ -121,14 +126,20 @@ pub async fn search_best_lyrics_with_hint(
     let metadata = lyrics_helper_metadata(track);
     let mut failure: Option<SearchError> = None;
 
-    for provider in provider_order {
-        if let Some(hint) = hint
-            && hint.provider == *provider
-            && let Some(fetched) = fetch_hint_lyrics(track, hint).await
-        {
-            return Ok(Some(fetched));
+    let mut searches = provider_requests(provider_order, |provider| {
+        let metadata = &metadata;
+        async move {
+            if let Some(hint) = hint.filter(|hint| hint.provider == provider)
+                && let Some(fetched) = fetch_hint_lyrics(track, hint).await
+            {
+                return Ok(Some(fetched));
+            }
+            search_provider_best(provider, metadata).await
         }
-        match search_provider_best(*provider, &metadata).await {
+    });
+
+    while let Some((provider, result)) = searches.next().await {
+        match result {
             Ok(Some(fetched)) => return Ok(Some(fetched)),
             Ok(None) => {}
             Err(error) => {
@@ -144,6 +155,27 @@ pub async fn search_best_lyrics_with_hint(
     }
 }
 
+// Limit speculative requests so a source that usually has lyrics only overlaps
+// with its immediate fallback. Ordered buffering preserves configured priority.
+const MAX_PROVIDER_REQUESTS: usize = 2;
+
+fn provider_requests<'a, F, Fut, T>(
+    order: &'a [LyricsProvider],
+    mut request: F,
+) -> impl futures::Stream<Item = (LyricsProvider, T)> + Unpin + 'a
+where
+    F: FnMut(LyricsProvider) -> Fut + Unpin + 'a,
+    Fut: Future<Output = T> + 'a,
+    T: 'a,
+{
+    stream::iter(order.iter().copied())
+        .map(move |provider| {
+            let result = request(provider);
+            async move { (provider, result.await) }
+        })
+        .buffered(MAX_PROVIDER_REQUESTS)
+}
+
 #[cfg(test)]
-#[path = "../test/search_test.rs"]
+#[path = "search/tests.rs"]
 mod tests;

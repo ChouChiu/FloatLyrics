@@ -26,7 +26,7 @@ fn manual_search_fields_convert_spotify_metadata_to_simplified_chinese() {
     };
 
     assert_eq!(
-        search_field_values(&track),
+        ManualSearchService::search_field_values(&track),
         ("喜欢你".to_string(), "G.E.M.邓紫棋".to_string())
     );
 }

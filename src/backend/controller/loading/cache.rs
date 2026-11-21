@@ -3,8 +3,6 @@
 
 //! Cached lyrics selection, parsing, and refresh policy.
 
-use std::sync::mpsc;
-
 use floatlyrics_core::i18n::{Message, Text};
 use floatlyrics_lyrics::{
     cache::CachedLyrics,
@@ -13,56 +11,54 @@ use floatlyrics_lyrics::{
 
 use crate::{backend::model::LyricsDisplayState, shared::runtime::LyricsRuntimeConfig};
 
-use super::romanization::{RomanizationEvent, spawn_local_romanization};
-
 pub(super) fn active_provider_order(config: &LyricsRuntimeConfig) -> Vec<LyricsProvider> {
     SearchPlan::new(config.provider_order.clone())
         .providers()
         .to_vec()
 }
 
-pub(super) fn lyrics_state_from_cached(
-    fingerprint: String,
-    cached: &CachedLyrics,
-    config: &LyricsRuntimeConfig,
-    runtime: &tokio::runtime::Handle,
-    romanization_sender: &mpsc::Sender<RomanizationEvent>,
-) -> LyricsDisplayState {
-    let mut lines = match timed_lines_from_raw(&cached.raw_lyrics, &cached.artists) {
-        Ok(lines) => lines,
-        Err(error) => {
-            return LyricsDisplayState {
-                track_fingerprint: Some(fingerprint),
-                status_message: Some(Message::Detail(Text::LyricsParseError, error.to_string())),
-                ..LyricsDisplayState::default()
-            };
+#[derive(Debug)]
+pub(in crate::backend::controller) struct PreparedLyrics {
+    pub(super) state: LyricsDisplayState,
+    pub(super) provider: LyricsProvider,
+    pub(super) provider_track_id: Option<String>,
+    pub(super) manually_selected: bool,
+}
+
+impl PreparedLyrics {
+    pub(super) fn parse(fingerprint: String, cached: CachedLyrics) -> Self {
+        let CachedLyrics {
+            raw_lyrics,
+            artists,
+            provider,
+            provider_track_id,
+            manually_selected,
+            ..
+        } = cached;
+        let mut state = LyricsDisplayState {
+            track_fingerprint: Some(fingerprint),
+            ..LyricsDisplayState::default()
+        };
+        match timed_lines_from_raw(&raw_lyrics, &artists) {
+            Ok(mut lines) => {
+                segment_lines_into_words(&mut lines);
+                if lines.is_empty() {
+                    state.status_message = Some(Message::Text(Text::CachedLyricsNotSynced));
+                }
+                state.lines = lines;
+                state.credited_artists = artists;
+            }
+            Err(error) => {
+                state.status_message =
+                    Some(Message::Detail(Text::LyricsParseError, error.to_string()));
+            }
         }
-    };
-    // Split every timed unit into animatable words before the readings are
-    // generated, so per-word readings follow the tokens the view renders.
-    segment_lines_into_words(&mut lines);
-
-    if config.show_romanization {
-        spawn_local_romanization(
-            runtime,
-            romanization_sender.clone(),
-            fingerprint.clone(),
-            lines.clone(),
-            config.chinese_romanization,
-        );
-    }
-
-    let status_message = if lines.is_empty() {
-        Some(Message::Text(Text::CachedLyricsNotSynced))
-    } else {
-        None
-    };
-
-    LyricsDisplayState {
-        track_fingerprint: Some(fingerprint),
-        lines,
-        status_message,
-        credited_artists: cached.artists.clone(),
+        Self {
+            state,
+            provider,
+            provider_track_id,
+            manually_selected,
+        }
     }
 }
 
@@ -75,13 +71,12 @@ fn has_cached_translation(state: &LyricsDisplayState) -> bool {
 }
 
 pub(super) fn should_refresh_translation(
-    cached: &CachedLyrics,
-    state: &LyricsDisplayState,
+    lyrics: &PreparedLyrics,
     config: &LyricsRuntimeConfig,
 ) -> bool {
-    !cached.manually_selected && config.show_translation && !has_cached_translation(state)
+    !lyrics.manually_selected && config.show_translation && !has_cached_translation(&lyrics.state)
 }
 
 #[cfg(test)]
-#[path = "../../../test/lyrics_cache_loading_test.rs"]
+#[path = "cache_tests.rs"]
 mod tests;

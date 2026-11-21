@@ -117,7 +117,7 @@ impl ManualSearchState {
     }
 
     pub(super) fn reject_no_track(&mut self) {
-        self.status = ManualStatus::Text(Text::NoTrackPlaying);
+        self.clear_for_track_change(Text::SearchAfterPlayback);
     }
 
     pub(super) fn reject_empty_title(&mut self) {
@@ -149,6 +149,7 @@ impl ManualSearchState {
                     self.preview = PreviewState::Text(Text::NoCandidates);
                 } else {
                     self.status = ManualStatus::CandidatesFound(self.candidates.len());
+                    self.preview = PreviewState::Text(Text::SelectCandidatePreview);
                 }
             }
             Err(error) => {
@@ -165,6 +166,7 @@ impl ManualSearchState {
             return None;
         }
         let candidate = self.candidates.get(index)?.clone();
+        self.generation = self.generation.wrapping_add(1);
         self.selected = None;
         self.preview_index = Some(index);
         self.status = ManualStatus::Text(Text::LoadingPreview);
@@ -214,6 +216,7 @@ impl ManualSearchState {
         let target = self.target_track.clone()?;
         let (_, fetched) = self.selected.as_ref()?;
         self.applying_generation = Some(self.generation);
+        self.status = ManualStatus::Text(Text::ApplyingLyrics);
         Some((self.generation, target, fetched.clone()))
     }
 
@@ -222,9 +225,19 @@ impl ManualSearchState {
     }
 
     pub(super) fn mark_track_changed(&mut self) {
-        self.applying_generation = None;
+        self.clear_for_track_change(Text::TrackChanged);
+    }
+
+    fn clear_for_track_change(&mut self, status: Text) {
+        self.generation = self.generation.wrapping_add(1);
+        self.target_track = None;
+        self.candidates.clear();
+        self.preview_index = None;
         self.selected = None;
-        self.status = ManualStatus::Text(Text::TrackChanged);
+        self.applying_generation = None;
+        self.searching = false;
+        self.status = ManualStatus::Text(status);
+        self.preview = PreviewState::Text(Text::SelectCandidatePreview);
     }
 
     pub(super) fn finish_apply(&mut self, generation: u64, result: Result<(), String>) -> bool {
@@ -242,8 +255,8 @@ impl ManualSearchState {
         true
     }
 
-    pub(super) fn presentation_snapshot(&self) -> (Vec<LyricsCandidate>, Option<usize>) {
-        (self.candidates.clone(), self.preview_index)
+    pub(super) fn presentation_snapshot(&self) -> (&[LyricsCandidate], Option<usize>) {
+        (&self.candidates, self.preview_index)
     }
 
     pub(super) fn status_text(&self, language: Language) -> String {
@@ -268,5 +281,5 @@ impl ManualSearchState {
 }
 
 #[cfg(test)]
-#[path = "../../test/manual_search_state_test.rs"]
+#[path = "state_tests.rs"]
 mod tests;

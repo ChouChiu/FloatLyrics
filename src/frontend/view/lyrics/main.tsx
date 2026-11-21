@@ -9,6 +9,9 @@ import { lyricsStore } from "./store";
 import { uiStore } from "./ui-store";
 
 installLyricsBridge(window, (command) => {
+  if (command.type === "bootstrap") {
+    document.documentElement.lang = command.config.general.language;
+  }
   lyricsStore.dispatch(command);
   uiStore.dispatch(command);
 });

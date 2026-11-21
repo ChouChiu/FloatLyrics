@@ -66,6 +66,7 @@ pub(super) fn ensure_lyrics_loaded(ctx: &ControllerContext<'_>, state: &mut Cont
         ctx.floating.set_track_offset(0);
     }
     let load_context = LyricsLoadContext {
+        runtime: ctx.runtime,
         cache: ctx.cache,
         config: ctx.config,
         cache_sender: ctx.cache_sender,

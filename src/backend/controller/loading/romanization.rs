@@ -78,5 +78,5 @@ fn same_lyrics_document(current: &[TimedLine], generated: &[TimedLine]) -> bool 
 }
 
 #[cfg(test)]
-#[path = "../../../test/romanization_loading_test.rs"]
+#[path = "romanization_tests.rs"]
 mod tests;

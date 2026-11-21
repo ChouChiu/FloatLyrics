@@ -52,6 +52,7 @@ pub(in crate::frontend) struct WebLyricsView {
     web_view: webkit6::WebView,
     bridge: Bridge,
     document_revision: Rc<Cell<Option<u64>>>,
+    last_frame: Rc<RefCell<Option<Arc<LyricsFrame>>>>,
     surface: UiSurface,
     about: Rc<serde_json::Value>,
     available_fonts: Rc<Vec<String>>,
@@ -117,11 +118,16 @@ impl WebLyricsView {
         });
 
         let bridge = Bridge::default();
+        let last_frame = Rc::new(RefCell::new(None));
 
         {
             let bridge = bridge.clone();
+            let last_frame = Rc::clone(&last_frame);
             web_view.connect_load_changed(move |view, event| match event {
-                webkit6::LoadEvent::Started => bridge.set_ready(false),
+                webkit6::LoadEvent::Started => {
+                    last_frame.borrow_mut().take();
+                    bridge.set_ready(false);
+                }
                 webkit6::LoadEvent::Finished => {
                     bridge.set_ready(true);
                     dispatch_pending(view, &bridge);
@@ -135,6 +141,7 @@ impl WebLyricsView {
             web_view,
             bridge,
             document_revision: Rc::new(Cell::new(None)),
+            last_frame,
             surface,
             about,
             available_fonts,
@@ -225,10 +232,17 @@ impl WebLyricsView {
             return;
         }
         self.document_revision.set(Some(document.revision));
+        self.last_frame.borrow_mut().take();
         self.submit(CommandSlot::Document, command::document_script(document));
     }
 
     pub(super) fn show(&self, frame: Arc<LyricsFrame>) {
+        if self.last_frame.borrow().as_ref() == Some(&frame) && !frame.seeking {
+            // A failed JavaScript evaluation may still be queued for retry.
+            dispatch_pending(&self.web_view, &self.bridge);
+            return;
+        }
+        self.last_frame.replace(Some(Arc::clone(&frame)));
         self.submit(
             CommandSlot::Frame {
                 seeking: frame.seeking,

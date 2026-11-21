@@ -381,13 +381,10 @@ watcher publishes the volume, playback modes, and capabilities it observes, the
 controller reports them through `LyricsView::set_player_control`, and the AMLL
 sender republishes them as protocol updates.
 
-Every lyrics document enters the application through
-`loading/cache.rs::lyrics_state_from_cached`, which parses the cached raw payload
-and then runs the karaoke word segmentation from
-`floatlyrics_lyrics::lyrics::segment_lines_into_words` before the background
-romanization worker starts, so readings are aligned to the tokens the views
-render. New presentation behavior that depends on word timing belongs in that
-order, not in the parsers.
+Cached lyrics are parsed and segmented by `loading/cache.rs::PreparedLyrics::parse`
+on Tokio's blocking pool. The controller checks the track fingerprint and
+loading generation before publishing them. Local romanization starts after
+segmentation, so readings align with the tokens the views render.
 
 Neither QRC nor plain LRC has a field for a duet part, a background vocal, or a
 sentence the transcriber broke across rows, so all three are read from the
@@ -527,8 +524,8 @@ Korean decline to read text their rules cannot cover rather than guessing.
 
 ## Run modes and the tray
 
-`general.mode` selects exactly one lyrics output, and the choice is made once,
-in `AppModel::init`:
+`general.mode` selects one lyrics output. `LyricsOutput::activate` applies it
+at startup and on changes from settings:
 
 - `floating` (default) — the Relm4 root window is initialized as the
   layer-shell overlay and `view::OverlaySender` is the `LyricsView`.
@@ -544,8 +541,10 @@ configuration, and the settings windows — is shared by both modes.
   `OverlayView::tick_widget`; without it, `AppModel::init` installs a
   `glib::timeout_add_local` pump instead. Do not remove one without keeping the
   other, or `Controller::tick()` stops running in that mode.
-- Mode, `amll.address`, and `tray.enabled` are read at startup, so changing them
-  requires a restart; the settings UI says so.
+- Run mode applies immediately from settings. Edits to `amll.address` reconnect
+  after a short delay. Changing `tray.enabled` requires a restart.
+- Create the settings, manual-search, and font-picker windows when they are
+  first requested. The output starts without those WebKit views.
 - `src/frontend/tray.rs` publishes a StatusNotifierItem whose callbacks only
   forward `UiAction` values through `APP_BROKER`. Tray callbacks run on the
   D-Bus service loop: never touch GTK state from them. Registration failure is
@@ -558,7 +557,7 @@ configuration, and the settings windows — is shared by both modes.
 
 ## Tests
 
-Tests live in each owning crate's `src/test/` directory and are dispatched from
+Tests live next to their feature or in the owning crate’s `src/test/` directory and are dispatched from
 the owning module with:
 
 ```rust

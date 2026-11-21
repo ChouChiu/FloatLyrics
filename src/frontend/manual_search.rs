@@ -4,6 +4,7 @@
 //! React manual-search coordinator and pure session state.
 
 mod state;
+pub(super) mod window;
 
 use floatlyrics_core::{i18n::Language, track::TrackMetadata};
 use serde_json::{Value, json};
@@ -42,6 +43,9 @@ pub(super) struct ManualSearchCoordinator {
     title: String,
     artist: String,
     pending_request: Option<tokio::task::JoinHandle<()>>,
+    current_fingerprint: Option<String>,
+    search_when_ready: bool,
+    query_revision: u32,
 }
 
 impl ManualSearchCoordinator {
@@ -53,14 +57,48 @@ impl ManualSearchCoordinator {
             title: String::new(),
             artist: String::new(),
             pending_request: None,
+            current_fingerprint: None,
+            search_when_ready: false,
+            query_revision: 0,
         }
     }
 
-    pub(super) fn prepare_and_search(&mut self, sender: relm4::Sender<AppMsg>) {
-        if let Some(track) = self.controller.current_track() {
-            (self.title, self.artist) = search_field_values(&track);
+    pub(super) fn observe_track(
+        &mut self,
+        fingerprint: Option<&str>,
+        sender: &relm4::Sender<AppMsg>,
+    ) -> bool {
+        if self.current_fingerprint.as_deref() == fingerprint {
+            return false;
         }
-        self.search(self.title.clone(), self.artist.clone(), sender);
+        self.current_fingerprint = fingerprint.map(str::to_owned);
+        if self.search_when_ready && fingerprint.is_some() {
+            self.prepare_and_search(sender.clone());
+        } else {
+            self.cancel_request();
+            if fingerprint.is_some() {
+                self.state.mark_track_changed();
+            } else {
+                self.state.reject_no_track();
+            }
+        }
+        true
+    }
+
+    pub(super) fn prepare_and_search(&mut self, sender: relm4::Sender<AppMsg>) {
+        if self.state.is_applying() {
+            return;
+        }
+        if let Some(track) = self.controller.current_track() {
+            self.current_fingerprint = Some(track.fingerprint());
+            self.search_when_ready = false;
+            self.query_revision = self.query_revision.wrapping_add(1);
+            (self.title, self.artist) = ManualSearchService::search_field_values(&track);
+            self.search(self.title.clone(), self.artist.clone(), sender);
+        } else {
+            self.search_when_ready = true;
+            self.state.reject_no_track();
+        }
     }
 
     pub(super) fn search(&mut self, title: String, artist: String, sender: relm4::Sender<AppMsg>) {
@@ -212,7 +250,15 @@ impl ManualSearchCoordinator {
 
     pub(super) fn snapshot(&self, language: Language) -> Value {
         let (candidates, selected_index) = self.state.presentation_snapshot();
+        let track = self.controller.current_track().map(|track| {
+            if track.artists.is_empty() {
+                return track.title;
+            }
+            format!("{} · {}", track.title, track.display_artist())
+        });
         json!({
+            "track": track,
+            "query_revision": self.query_revision,
             "title": self.title,
             "artist": self.artist,
             "status": self.state.status_text(language),
@@ -223,6 +269,7 @@ impl ManualSearchCoordinator {
             "selected_index": selected_index,
             "candidates": candidates.iter().map(|candidate| json!({
                 "provider": candidate.provider.as_str(),
+                "provider_track_id": candidate.provider_track_id,
                 "title": candidate.title,
                 "artists": candidate.artists,
                 "album": candidate.album,
@@ -233,10 +280,6 @@ impl ManualSearchCoordinator {
     }
 }
 
-fn search_field_values(track: &TrackMetadata) -> (String, String) {
-    ManualSearchService::search_field_values(track)
-}
-
 #[cfg(test)]
-#[path = "../test/manual_search_test.rs"]
+#[path = "manual_search/tests.rs"]
 mod tests;

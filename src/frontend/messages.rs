@@ -3,22 +3,13 @@
 
 //! Messages routed through the Relm4 application model.
 
-use std::{ffi::OsStr, sync::Arc};
+use std::ffi::OsStr;
 
 use serde::Deserialize;
 
-use crate::shared::{
-    config::{AppConfig, WindowPosition},
-    presentation::{LyricsDocument, LyricsFrame},
-};
+use crate::shared::config::{AppConfig, WindowPosition};
 
 use super::{manual_search, settings, view};
-
-#[derive(Debug, Clone)]
-pub(super) enum LyricsPresentation {
-    Content(Arc<LyricsFrame>),
-    Status(floatlyrics_core::i18n::Text),
-}
 
 #[derive(Debug)]
 pub(in crate::frontend) enum AppMsg {
@@ -29,11 +20,7 @@ pub(in crate::frontend) enum AppMsg {
     ReconnectAmll {
         generation: u64,
     },
-    SetSongInfo(String),
-    SetTrackOffset(i64),
-    SetLyricsDocument(LyricsDocument),
-    ShowLyrics(Arc<LyricsFrame>),
-    ShowStatus(floatlyrics_core::i18n::Text),
+    Overlay(view::OverlayUpdate),
     OpenSettings,
     OpenManualSearch,
     UiAction(UiAction),

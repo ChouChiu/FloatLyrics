@@ -4,7 +4,7 @@
 import { useSyncExternalStore } from "react";
 import { FontPickerWindow } from "./font-picker";
 import { OverlayShell } from "./overlay";
-import { ManualSearchWindow } from "./search";
+import { ManualSearchWindow } from "./search/page";
 import { ControlCenter } from "./settings/control-center";
 import { uiStore } from "./ui-store";
 
