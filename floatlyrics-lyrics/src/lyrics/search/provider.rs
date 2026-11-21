@@ -8,7 +8,10 @@ use crate::lyrics::{
     parsing::{combine_lyrics_with_translation, combine_word_timing},
 };
 use floatlyrics_core::track::TrackMetadata;
-use lyrics_helper::SearchError;
+use lyrics_helper::{
+    FetchedLyrics as ProviderLyrics, LyricsRawTypes, SearchError, fetch_lyrics, resolve_qq_track,
+    searchers::{Searchers, compare_helper::MatchType, search_result::SearchResult},
+};
 
 pub(super) async fn search_provider_candidates(
     provider: LyricsProvider,
@@ -39,70 +42,87 @@ pub(super) async fn search_provider_candidates(
 
     Ok(results
         .into_iter()
-        .map(|result| LyricsCandidate {
-            provider,
-            provider_track_id: result.id,
-            numeric_id: result.numeric_id,
-            title: result.title,
-            artists: result.artists,
-            album: result.album,
-            duration_ms: result.duration_ms,
-            match_score: result.match_type.map_or(0, |value| value as i32),
-        })
+        .map(|result| to_candidate(provider, result))
         .collect())
+}
+
+pub(super) async fn lookup_qq_candidate(
+    reference: &str,
+) -> Result<Option<LyricsCandidate>, SearchError> {
+    let Some(mut result) = resolve_qq_track(reference).await? else {
+        return Ok(None);
+    };
+    result.match_type = Some(MatchType::Perfect);
+    Ok(Some(to_candidate(LyricsProvider::QqMusic, result)))
+}
+
+fn to_candidate(provider: LyricsProvider, result: SearchResult) -> LyricsCandidate {
+    LyricsCandidate {
+        provider,
+        provider_track_id: result.id,
+        numeric_id: result.numeric_id,
+        title: result.title,
+        artists: result.artists,
+        album: result.album,
+        duration_ms: result.duration_ms,
+        match_score: result.match_type.map_or(0, |value| value as i32),
+    }
 }
 
 pub(super) async fn fetch_candidate_raw_lyrics(
     candidate: &LyricsCandidate,
 ) -> Result<Option<String>, SearchError> {
-    let artist = candidate.artists.join(", ");
-    fetch_raw_lyrics(ProviderTrackRef {
-        provider: candidate.provider,
-        id: &candidate.provider_track_id,
-        numeric_id: candidate.numeric_id,
-        title: &candidate.title,
-        artist: &artist,
-        album: &candidate.album,
-        duration_ms: candidate.duration_ms,
-    })
-    .await
+    let source = match candidate.provider {
+        LyricsProvider::QqMusic => Searchers::QQMusic,
+        LyricsProvider::NetEase => Searchers::Netease,
+        LyricsProvider::Kugou => Searchers::Kugou,
+        LyricsProvider::Lrclib => Searchers::LRCLIB,
+        LyricsProvider::SodaMusic => Searchers::SodaMusic,
+        LyricsProvider::AmllTtmlDb => Searchers::AmllTtmlDb,
+    };
+    let mut track = SearchResult::new(
+        source,
+        candidate.title.clone(),
+        candidate.artists.clone(),
+        candidate.album.clone(),
+        candidate.duration_ms,
+        candidate.provider_track_id.clone(),
+    );
+    track.numeric_id = candidate.numeric_id;
+    fetch_result_lyrics(&track).await
 }
 
 pub(super) async fn fetch_hint_lyrics(
     track: &TrackMetadata,
     hint: &LyricsLookupHint,
 ) -> Option<FetchedLyrics> {
-    let artist = track.display_artist();
-    let (id, numeric_id) = match hint.provider {
-        LyricsProvider::QqMusic => (
-            hint.provider_track_id.as_str(),
-            hint.provider_track_id.parse::<i64>().ok(),
-        ),
-        LyricsProvider::NetEase => (hint.provider_track_id.as_str(), None),
-        // No playback source states a track in the terms the remaining providers
-        // address theirs, so they are only ever searched by metadata.
+    let source = match hint.provider {
+        LyricsProvider::QqMusic => Searchers::QQMusic,
+        LyricsProvider::NetEase => Searchers::Netease,
+        // Only these two playback sources provide track IDs for direct lookup.
         LyricsProvider::Kugou
         | LyricsProvider::Lrclib
         | LyricsProvider::SodaMusic
         | LyricsProvider::AmllTtmlDb => return None,
     };
-    // The hint only shortcuts the search below: an identifier the provider can no
-    // longer serve — and a failed request — falls back to it, so the outcome here
-    // stays an `Option`.
-    let raw_lyrics = fetch_raw_lyrics(ProviderTrackRef {
-        provider: hint.provider,
-        id,
-        numeric_id,
-        title: &track.title,
-        artist: &artist,
-        album: track.album.as_deref().unwrap_or_default(),
-        duration_ms: track.duration_ms.and_then(|value| value.try_into().ok()),
-    })
-    .await
-    .ok()
-    .flatten()?
-    .trim()
-    .to_string();
+    let mut result = SearchResult::new(
+        source,
+        track.title.clone(),
+        track.artists.clone(),
+        track.album.clone().unwrap_or_default(),
+        track.duration_ms.and_then(|value| value.try_into().ok()),
+        hint.provider_track_id.clone(),
+    );
+    if source == Searchers::QQMusic {
+        result.numeric_id = hint.provider_track_id.parse().ok();
+    }
+    // Failed or stale hints fall back to metadata search.
+    let raw_lyrics = fetch_result_lyrics(&result)
+        .await
+        .ok()
+        .flatten()?
+        .trim()
+        .to_string();
     if raw_lyrics.is_empty() {
         return None;
     }
@@ -122,9 +142,9 @@ pub(super) async fn search_provider_best(
     metadata: &lyrics_helper::models::TrackMetadata,
 ) -> Result<Option<FetchedLyrics>, SearchError> {
     use lyrics_helper::searchers::{
-        amll_ttml_db::AmllTtmlDbSearcher, compare_helper::MatchType, kugou::KugouSearcher,
-        lrclib::LRCLIBSearcher, netease::NeteaseSearcher, qq_music::QQMusicSearcher,
-        search_for_best_result_with_match, soda_music::SodaMusicSearcher,
+        amll_ttml_db::AmllTtmlDbSearcher, kugou::KugouSearcher, lrclib::LRCLIBSearcher,
+        netease::NeteaseSearcher, qq_music::QQMusicSearcher, search_for_best_result_with_match,
+        soda_music::SodaMusicSearcher,
     };
 
     let result = match provider {
@@ -158,7 +178,7 @@ pub(super) async fn search_provider_best(
         // asked instead.
         return Ok(None);
     }
-    let Some(raw_lyrics) = fetch_result_lyrics(provider, &result).await? else {
+    let Some(raw_lyrics) = fetch_result_lyrics(&result).await? else {
         return Ok(None);
     };
     let raw_lyrics = raw_lyrics.trim().to_string();
@@ -188,7 +208,7 @@ pub(super) async fn search_provider_best(
 /// score is trusted.
 pub(super) fn is_another_song(
     track: &lyrics_helper::models::TrackMetadata,
-    result: &lyrics_helper::searchers::search_result::SearchResult,
+    result: &SearchResult,
 ) -> bool {
     use lyrics_helper::searchers::compare_helper::{
         ArtistMatchType, NameMatchType, compare_artist, compare_name,
@@ -203,122 +223,42 @@ pub(super) fn is_another_song(
     matches!(name, Some(NameMatchType::NoMatch)) || matches!(artist, Some(ArtistMatchType::NoMatch))
 }
 
-async fn fetch_result_lyrics(
-    provider: LyricsProvider,
-    result: &lyrics_helper::searchers::search_result::SearchResult,
-) -> Result<Option<String>, SearchError> {
-    let artist = result.artist();
-    fetch_raw_lyrics(ProviderTrackRef {
-        provider,
-        id: &result.id,
-        numeric_id: result.numeric_id,
-        title: &result.title,
-        artist: &artist,
-        album: &result.album,
-        duration_ms: result.duration_ms,
-    })
-    .await
+async fn fetch_result_lyrics(track: &SearchResult) -> Result<Option<String>, SearchError> {
+    Ok(fetch_lyrics(track)
+        .await?
+        .as_ref()
+        .and_then(display_payload))
 }
 
-struct ProviderTrackRef<'a> {
-    provider: LyricsProvider,
-    id: &'a str,
-    numeric_id: Option<i64>,
-    title: &'a str,
-    artist: &'a str,
-    album: &'a str,
-    duration_ms: Option<i32>,
-}
-
-async fn fetch_raw_lyrics(track: ProviderTrackRef<'_>) -> Result<Option<String>, SearchError> {
-    use lyrics_helper::search::providers::web::{
-        amll_ttml_db, kugou, lrclib, qq_music, soda_music,
-    };
-
-    let (lyrics, translation) = match track.provider {
-        LyricsProvider::QqMusic => {
-            qq_music::api::get_lyrics(
-                track.id,
-                track.numeric_id,
-                track.title,
-                track.artist,
-                track.album,
-                track.duration_ms,
-            )
-            .await?
+pub(super) fn display_payload(lyrics: &ProviderLyrics) -> Option<String> {
+    if lyrics.source == Searchers::Netease {
+        let rows = lyrics
+            .originals
+            .iter()
+            .find(|lyric| lyric.raw_type == LyricsRawTypes::Lrc)?;
+        // NetEase's LRC spells the displayed text; YRC supplies its word timing.
+        // The row translation is appended after the word-timed translation.
+        let translation = lyrics
+            .translations
+            .iter()
+            .rev()
+            .find(|lyric| lyric.raw_type == LyricsRawTypes::Lrc)
+            .or_else(|| lyrics.translations.first())
+            .map(|lyric| lyric.text.as_str());
+        if let Some(words) = lyrics
+            .originals
+            .iter()
+            .find(|lyric| lyric.raw_type == LyricsRawTypes::Yrc)
+        {
+            return Some(combine_word_timing(&words.text, &rows.text, translation));
         }
-        LyricsProvider::NetEase => {
-            let Ok(song_id) = track.id.parse() else {
-                // An identifier NetEase cannot address names no song, which is the
-                // same outcome as a song without lyrics.
-                return Ok(None);
-            };
-            return netease_lyrics(song_id).await;
-        }
-        LyricsProvider::Kugou => {
-            // Kugou addresses a file by its hash; the keyword only tells the
-            // endpoint which row of the payload to read, and it is written the way
-            // the search wrote it, with the performers separated by spaces.
-            let keyword = format!("{} {}", track.title, track.artist.replace(", ", " "));
-            (
-                kugou::api::get_lyrics(&keyword, track.id, track.duration_ms.unwrap_or(0)).await?,
-                None,
-            )
-        }
-        LyricsProvider::Lrclib => {
-            let Ok(lrclib_id) = track.id.parse::<i32>() else {
-                return Ok(None);
-            };
-            let Some(lyric) = lrclib::api::get_by_id(lrclib_id).await? else {
-                return Ok(None);
-            };
-            // A record carries the transcription timed to the playback clock and,
-            // when its contributor wrote one, the untimed text beside it; only the
-            // timed one can be displayed, and a record without it names no lyrics.
-            (lyric.synced_lyrics, None)
-        }
-        LyricsProvider::SodaMusic => soda_music::api::get_lyrics(track.id).await?,
-        // The library names a transcription by the file it is stored in, and the
-        // TTML in that file carries its translation, its duet sides, and its
-        // background vocals itself.
-        LyricsProvider::AmllTtmlDb => (amll_ttml_db::api::get_raw_lyrics(track.id).await?, None),
-    };
-
-    Ok(lyrics.map(|lyrics| combine_lyrics_with_translation(&lyrics, translation.as_deref())))
-}
-
-/// Fetches NetEase lyrics, with the word times of the tracks that have them.
-///
-/// NetEase times every word of a track it holds a word-timed transcription of and
-/// answers the request for one it does not without lyrics at all, so the row-timed
-/// request is the one that decides whether there are lyrics: it is asked first, and
-/// the word-timed document only follows it. That document is a timing table rather
-/// than a transcription — the provider drops the separators between its words and
-/// reads the brackets of an aside as the brackets of a tag — so it is carried
-/// beside the row-timed lyrics, whose text is displayed, rather than on its own.
-/// The translation is the one of the transcription, not the word-timed one: this
-/// application displays a translation as a row of text, and romanizes locally from
-/// the readings it generates for that purpose, so the provider's romanization is
-/// discarded and its word-timed translation is not needed.
-async fn netease_lyrics(song_id: i64) -> Result<Option<String>, SearchError> {
-    use lyrics_helper::search::providers::web::netease;
-
-    let (lyrics, translation) = netease::api::get_lyrics(song_id).await?;
-    let Some(lyrics) = lyrics else {
-        return Ok(None);
-    };
-    if let Some(syllable) = netease::api::get_syllable_lyrics(song_id).await?
-        && let Some(word_timed) = syllable.yrc
-    {
-        return Ok(Some(combine_word_timing(
-            &word_timed,
-            &lyrics,
-            translation.as_deref(),
-        )));
+        return Some(combine_lyrics_with_translation(&rows.text, translation));
     }
 
-    Ok(Some(combine_lyrics_with_translation(
-        &lyrics,
-        translation.as_deref(),
-    )))
+    let original = lyrics
+        .originals
+        .iter()
+        .find(|lyric| lyric.raw_type != LyricsRawTypes::Unknown)?;
+    let translation = lyrics.translations.first().map(|lyric| lyric.text.as_str());
+    Some(combine_lyrics_with_translation(&original.text, translation))
 }

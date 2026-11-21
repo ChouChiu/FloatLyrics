@@ -124,6 +124,10 @@ impl ManualSearchState {
         self.status = ManualStatus::Text(Text::EnterSongTitle);
     }
 
+    pub(super) fn reject_empty_qq_reference(&mut self) {
+        self.status = ManualStatus::Text(Text::QqSongReference);
+    }
+
     pub(super) fn accept_candidates(
         &mut self,
         generation: u64,

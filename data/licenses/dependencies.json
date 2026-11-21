@@ -7,7 +7,7 @@
     },
     {
       "name": "aes",
-      "version": "0.9.3",
+      "version": "0.9.4",
       "license": "MIT OR Apache-2.0"
     },
     {
@@ -392,7 +392,7 @@
     },
     {
       "name": "flate2",
-      "version": "1.1.10",
+      "version": "1.1.11",
       "license": "MIT OR Apache-2.0"
     },
     {
@@ -862,32 +862,32 @@
     },
     {
       "name": "lyrics-core",
-      "version": "0.5.1",
+      "version": "0.6.0",
       "license": "Apache-2.0"
     },
     {
       "name": "lyrics-crypto",
-      "version": "0.5.1",
+      "version": "0.6.0",
       "license": "Apache-2.0"
     },
     {
       "name": "lyrics-generators",
-      "version": "0.5.1",
+      "version": "0.6.0",
       "license": "Apache-2.0"
     },
     {
       "name": "lyrics-helper",
-      "version": "0.5.1",
+      "version": "0.6.0",
       "license": "Apache-2.0"
     },
     {
       "name": "lyrics-parsers",
-      "version": "0.5.1",
+      "version": "0.6.0",
       "license": "Apache-2.0"
     },
     {
       "name": "lyrics-search",
-      "version": "0.5.1",
+      "version": "0.6.0",
       "license": "Apache-2.0"
     },
     {
@@ -991,16 +991,6 @@
       "license": "Apache-2.0 OR MIT"
     },
     {
-      "name": "parking_lot",
-      "version": "0.12.5",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
-      "name": "parking_lot_core",
-      "version": "0.9.12",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
       "name": "pastey",
       "version": "0.2.3",
       "license": "MIT OR Apache-2.0"
@@ -1102,7 +1092,7 @@
     },
     {
       "name": "rand",
-      "version": "0.10.3",
+      "version": "0.10.4",
       "license": "MIT OR Apache-2.0"
     },
     {
@@ -1121,28 +1111,23 @@
       "license": "MIT OR Apache-2.0"
     },
     {
-      "name": "redox_syscall",
-      "version": "0.5.18",
-      "license": "MIT"
-    },
-    {
       "name": "redox_users",
       "version": "0.5.3",
       "license": "MIT"
     },
     {
       "name": "regex",
-      "version": "1.13.1",
+      "version": "1.13.2",
       "license": "MIT OR Apache-2.0"
     },
     {
       "name": "regex-automata",
-      "version": "0.4.18",
+      "version": "0.4.19",
       "license": "MIT OR Apache-2.0"
     },
     {
       "name": "regex-syntax",
-      "version": "0.8.11",
+      "version": "0.8.12",
       "license": "MIT OR Apache-2.0"
     },
     {
@@ -1457,7 +1442,7 @@
     },
     {
       "name": "tokio",
-      "version": "1.53.3",
+      "version": "1.54.1",
       "license": "MIT"
     },
     {

@@ -21,6 +21,7 @@ pub(super) enum SearchEvent {
     Candidates {
         generation: u64,
         result: Result<Vec<LyricsCandidate>, String>,
+        auto_preview: bool,
     },
     Preview {
         generation: u64,
@@ -40,6 +41,7 @@ pub(super) struct ManualSearchCoordinator {
     state: ManualSearchState,
     title: String,
     artist: String,
+    pending_request: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl ManualSearchCoordinator {
@@ -50,6 +52,7 @@ impl ManualSearchCoordinator {
             state: ManualSearchState::default(),
             title: String::new(),
             artist: String::new(),
+            pending_request: None,
         }
     }
 
@@ -80,25 +83,59 @@ impl ManualSearchCoordinator {
         let Some(generation) = self.state.begin_search(target_track) else {
             return;
         };
-        self.service.search(search_track, move |result| {
+        self.cancel_request();
+        self.pending_request = Some(self.service.search(search_track, move |result| {
             let _ = sender.send(AppMsg::SearchEvent(SearchEvent::Candidates {
                 generation,
                 result,
+                auto_preview: false,
             }));
-        });
+        }));
+    }
+
+    pub(super) fn lookup_qq(&mut self, reference: String, sender: relm4::Sender<AppMsg>) {
+        if self.state.is_applying() {
+            return;
+        }
+        let Some(target_track) = self.controller.current_track() else {
+            self.state.reject_no_track();
+            return;
+        };
+        if reference.trim().is_empty() {
+            self.state.reject_empty_qq_reference();
+            return;
+        }
+        let Some(generation) = self.state.begin_search(target_track) else {
+            return;
+        };
+        self.cancel_request();
+        self.pending_request = Some(self.service.lookup_qq(reference, move |result| {
+            let _ = sender.send(AppMsg::SearchEvent(SearchEvent::Candidates {
+                generation,
+                result,
+                auto_preview: true,
+            }));
+        }));
     }
 
     pub(super) fn select(&mut self, index: usize, sender: relm4::Sender<AppMsg>) {
         let Some((generation, candidate)) = self.state.begin_preview(index) else {
             return;
         };
-        self.service.preview(candidate, move |result| {
+        self.cancel_request();
+        self.pending_request = Some(self.service.preview(candidate, move |result| {
             let _ = sender.send(AppMsg::SearchEvent(SearchEvent::Preview {
                 generation,
                 index,
                 result,
             }));
-        });
+        }));
+    }
+
+    fn cancel_request(&mut self) {
+        if let Some(request) = self.pending_request.take() {
+            request.abort();
+        }
     }
 
     pub(super) fn apply(&mut self, sender: relm4::Sender<AppMsg>) {
@@ -131,10 +168,16 @@ impl ManualSearchCoordinator {
         });
     }
 
-    pub(super) fn handle_event(&mut self, event: SearchEvent) {
+    pub(super) fn handle_event(&mut self, event: SearchEvent, sender: relm4::Sender<AppMsg>) {
         match event {
-            SearchEvent::Candidates { generation, result } => {
-                self.state.accept_candidates(generation, result);
+            SearchEvent::Candidates {
+                generation,
+                result,
+                auto_preview,
+            } => {
+                if self.state.accept_candidates(generation, result) && auto_preview {
+                    self.select(0, sender);
+                }
             }
             SearchEvent::Preview {
                 generation,

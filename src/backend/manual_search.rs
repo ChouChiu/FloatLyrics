@@ -5,8 +5,10 @@
 
 use floatlyrics_core::track::TrackMetadata;
 use floatlyrics_lyrics::lyrics::{
-    fetch_candidate_lyrics, search_lyrics_candidates, simplify_search_text,
+    fetch_candidate_lyrics, lookup_qq_lyrics_candidate, search_lyrics_candidates,
+    simplify_search_text,
 };
+use tokio::task::JoinHandle;
 
 use crate::shared::manual_search::{FetchedLyrics, LyricsCandidate, LyricsProvider};
 
@@ -27,7 +29,7 @@ impl ManualSearchService {
         &self,
         track: TrackMetadata,
         complete: impl FnOnce(Result<Vec<LyricsCandidate>, String>) + Send + 'static,
-    ) {
+    ) -> JoinHandle<()> {
         self.runtime.spawn(async move {
             let providers = LyricsProvider::default_order();
             complete(
@@ -35,21 +37,36 @@ impl ManualSearchService {
                     .await
                     .map_err(|error| error.to_string()),
             );
-        });
+        })
+    }
+
+    pub(crate) fn lookup_qq(
+        &self,
+        reference: String,
+        complete: impl FnOnce(Result<Vec<LyricsCandidate>, String>) + Send + 'static,
+    ) -> JoinHandle<()> {
+        self.runtime.spawn(async move {
+            complete(
+                lookup_qq_lyrics_candidate(&reference)
+                    .await
+                    .map(|candidate| candidate.into_iter().collect())
+                    .map_err(|error| error.to_string()),
+            );
+        })
     }
 
     pub(crate) fn preview(
         &self,
         candidate: LyricsCandidate,
         complete: impl FnOnce(Result<Option<FetchedLyrics>, String>) + Send + 'static,
-    ) {
+    ) -> JoinHandle<()> {
         self.runtime.spawn(async move {
             complete(
                 fetch_candidate_lyrics(&candidate)
                     .await
                     .map_err(|error| error.to_string()),
             );
-        });
+        })
     }
 
     pub(crate) fn apply(

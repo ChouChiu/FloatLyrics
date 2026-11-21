@@ -199,7 +199,8 @@ impl SimpleComponent for AppModel {
                 self.handle_ui_action(action, sender.input_sender().clone())
             }
             AppMsg::SearchEvent(event) => {
-                self.manual_search.handle_event(event);
+                self.manual_search
+                    .handle_event(event, sender.input_sender().clone());
                 self.render_search_state();
             }
             AppMsg::ConfigSaveFinished { revision, result } => {
@@ -249,6 +250,10 @@ impl AppModel {
             UiAction::SaveConfig { config } => self.save_config(*config, sender),
             UiAction::SearchLyrics { title, artist } => {
                 self.manual_search.search(title, artist, sender);
+                self.render_search_state();
+            }
+            UiAction::LookupQqLyrics { reference } => {
+                self.manual_search.lookup_qq(reference, sender);
                 self.render_search_state();
             }
             UiAction::PreviewLyrics { index } => {

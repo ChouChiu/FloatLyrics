@@ -756,6 +756,9 @@ button {
   color: var(--muted-foreground);
   font-size: 11px;
 }
+.search-direct-form {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
 .search-workspace {
   display: grid;
   grid-template-columns: minmax(260px, 0.9fr) minmax(320px, 1.25fr);

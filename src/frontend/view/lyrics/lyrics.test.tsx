@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { currentAmllLines, documentToAmllLines, resolvedLineEnd } from "./amll";
+import { clampAmllPosition, currentAmllLines, documentToAmllLines, resolvedLineEnd } from "./amll";
 import { installLyricsBridge } from "./bridge";
 import { Select, Slider } from "./components/ui";
 import { type FadeTarget, type FrameScheduler, SlotFader } from "./fade";
@@ -380,6 +380,7 @@ describe("React application shell", () => {
     const html = renderToStaticMarkup(<ManualSearchWindow state={state} />);
     expect(html).toContain('class="manual-search-window"');
     expect(html).toContain('id="manual-search-title"');
+    expect(html).toContain('id="manual-search-qq-reference"');
     expect(html).not.toContain('class="sidebar"');
   });
 
@@ -520,6 +521,72 @@ describe("AMLL conversion", () => {
       words: [{ word: "Hello", startTime: 1_000, endTime: 1_800 }],
     });
     expect(lines[1]).toMatchObject({ isBG: true, words: [{ word: "echo" }] });
+  });
+
+  test("keeps a QRC background vocal on its own word timings", () => {
+    const document: LyricsDocument = {
+      revision: 1,
+      duration_ms: 208_000,
+      lines: [
+        {
+          ...line,
+          start_ms: 55_212,
+          end_ms: 58_847,
+          background: "echo",
+          background_start_ms: 58_082,
+          background_end_ms: 58_847,
+          background_syllables: [
+            { text: "e", start_ms: 58_082, end_ms: 58_200 },
+            { text: "cho", start_ms: 58_200, end_ms: 58_847 },
+          ],
+        },
+      ],
+    };
+
+    const [main, background] = documentToAmllLines(document);
+    expect(main).toMatchObject({ startTime: 55_212, endTime: 58_847 });
+    expect(background).toMatchObject({
+      isBG: true,
+      startTime: 58_082,
+      endTime: 58_847,
+      words: [
+        { word: "e", startTime: 58_082, endTime: 58_200 },
+        { word: "cho", startTime: 58_200, endTime: 58_847 },
+      ],
+    });
+  });
+
+  test("uses the background line's timing when it only has text", () => {
+    const document: LyricsDocument = {
+      revision: 1,
+      duration_ms: 4_000,
+      lines: [{ ...line, background_start_ms: 2_500, background_end_ms: 3_000 }],
+    };
+
+    expect(documentToAmllLines(document)[1]).toMatchObject({
+      startTime: 2_500,
+      endTime: 3_000,
+      words: [{ word: "echo", startTime: 2_500, endTime: 3_000 }],
+    });
+  });
+
+  test("keeps advancing while the background vocal outlasts the main line", () => {
+    const document: LyricsDocument = {
+      revision: 1,
+      duration_ms: 4_000,
+      lines: [
+        {
+          ...line,
+          end_ms: 2_000,
+          background_start_ms: 2_500,
+          background_end_ms: 3_000,
+        },
+      ],
+    };
+    const current = currentAmllLines(documentToAmllLines(document), "line:0");
+
+    expect(clampAmllPosition(current, 2_750)).toBe(2_750);
+    expect(clampAmllPosition(current, 3_250)).toBe(2_999);
   });
 
   test("attaches syllable readings to their own word", () => {

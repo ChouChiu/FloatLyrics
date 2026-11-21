@@ -1,6 +1,43 @@
 use super::*;
 
 #[test]
+fn netease_display_payload_keeps_word_timing_and_row_translation() {
+    use lyrics_helper::{FetchedLyrics, LyricsRawTypes, RawLyric, searchers::Searchers};
+
+    let bundle = FetchedLyrics {
+        source: Searchers::Netease,
+        originals: vec![
+            RawLyric {
+                raw_type: LyricsRawTypes::Yrc,
+                text: "[90,2070](90,330,0)Ugh(690,540,0)you're (1230,900,0)a monster".into(),
+            },
+            RawLyric {
+                raw_type: LyricsRawTypes::Lrc,
+                text: "[00:00.396]Ugh, you're a monster".into(),
+            },
+        ],
+        translations: vec![
+            RawLyric {
+                raw_type: LyricsRawTypes::Lrc,
+                text: "[00:00.396]逐字版译文".into(),
+            },
+            RawLyric {
+                raw_type: LyricsRawTypes::Lrc,
+                text: "[00:00.396]呕，你真是只怪兽".into(),
+            },
+        ],
+        romanizations: Vec::new(),
+    };
+
+    let payload = provider::display_payload(&bundle).unwrap();
+    let lines = crate::lyrics::timed_lines_from_raw(&payload, &[]).unwrap();
+
+    assert_eq!(lines[0].text, "Ugh, you're a monster");
+    assert_eq!(lines[0].syllables[0].start_ms, 90);
+    assert_eq!(lines[0].translation.as_deref(), Some("呕，你真是只怪兽"));
+}
+
+#[test]
 fn manual_candidates_are_ranked_and_deduplicated() {
     let candidates = finalize_candidates(vec![
         candidate(LyricsProvider::QqMusic, "same", 70),

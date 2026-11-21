@@ -39,6 +39,8 @@
   "Done": "完成",
   "DownloadedLyricsNotStored": "下载的歌词未能保存",
   "EnterSongTitle": "请输入歌曲标题",
+  "QqSongReference": "QQ 音乐歌曲链接或 MID",
+  "LookupQqLyrics": "查找 QQ 歌词",
   "FilterFonts": "筛选字体",
   "FontFamilies": "字体顺序",
   "FontOrder": "字体优先级",

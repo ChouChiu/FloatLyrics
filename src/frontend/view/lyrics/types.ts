@@ -193,6 +193,7 @@ export type UiAction =
   | { type: "reload-lyrics" }
   | { type: "save-config"; config: AppConfig }
   | { type: "search-lyrics"; title: string; artist: string }
+  | { type: "lookup-qq-lyrics"; reference: string }
   | { type: "preview-lyrics"; index: number }
   | { type: "apply-lyrics" }
   | { type: "open-url"; url: string };

@@ -26,8 +26,8 @@ pub use romanization::{
     ChineseRomanizationMode, generate_local_romanization, generate_local_romanization_with_mode,
 };
 pub use search::{
-    SearchPlan, fetch_candidate_lyrics, search_best_lyrics, search_best_lyrics_with_hint,
-    search_lyrics_candidates, simplify_search_text,
+    SearchPlan, fetch_candidate_lyrics, lookup_qq_lyrics_candidate, search_best_lyrics,
+    search_best_lyrics_with_hint, search_lyrics_candidates, simplify_search_text,
 };
 pub use segmentation::segment_lines_into_words;
 pub use timeline::{active_line_index, line_index_at_or_before};

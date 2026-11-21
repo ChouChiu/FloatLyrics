@@ -308,6 +308,8 @@ define_text_keys!(
     LoadingPreview,
     NoTrackPlaying,
     EnterSongTitle,
+    QqSongReference,
+    LookupQqLyrics,
     SearchingCandidates,
     SearchingProviders,
     TrackChanged,

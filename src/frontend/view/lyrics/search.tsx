@@ -29,6 +29,7 @@ export function SearchPage({ state }: { state: UiState }) {
   };
   const [title, setTitle] = useState(search.title);
   const [artist, setArtist] = useState(search.artist);
+  const [reference, setReference] = useState("");
   useEffect(() => {
     setTitle(search.title);
     setArtist(search.artist);
@@ -70,6 +71,25 @@ export function SearchPage({ state }: { state: UiState }) {
           </label>
           <Button type="submit" disabled={search.searching || search.applying}>
             {search.searching ? t("SearchingProviders") : t("Search")}
+          </Button>
+        </form>
+        <form
+          className="search-form search-direct-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            sendUiAction({ type: "lookup-qq-lyrics", reference });
+          }}
+        >
+          <label htmlFor="manual-search-qq-reference">
+            {t("QqSongReference")}
+            <Input
+              id="manual-search-qq-reference"
+              value={reference}
+              onChange={(event) => setReference(event.currentTarget.value)}
+            />
+          </label>
+          <Button type="submit" disabled={search.applying || !reference.trim()}>
+            {t("LookupQqLyrics")}
           </Button>
         </form>
         <div className="search-workspace">

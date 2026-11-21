@@ -17,7 +17,8 @@ use lyrics_helper::SearchError;
 
 use super::model::{FetchedLyrics, LyricsCandidate, LyricsLookupHint, LyricsProvider};
 use provider::{
-    fetch_candidate_raw_lyrics, fetch_hint_lyrics, search_provider_best, search_provider_candidates,
+    fetch_candidate_raw_lyrics, fetch_hint_lyrics, lookup_qq_candidate, search_provider_best,
+    search_provider_candidates,
 };
 pub(super) use query::lyrics_helper_metadata;
 use ranking::finalize_candidates;
@@ -57,6 +58,14 @@ pub async fn search_lyrics_candidates(
     }
 
     Ok(finalize_candidates(candidates))
+}
+
+/// Resolves a QQ Music song URL, MID, or numeric ID into an exact candidate.
+///
+/// # Errors
+/// Returns an error if the reference is invalid or the provider lookup fails.
+pub async fn lookup_qq_lyrics_candidate(reference: &str) -> Result<Option<LyricsCandidate>> {
+    Ok(lookup_qq_candidate(reference).await?)
 }
 
 /// Downloads the lyrics represented by a manually selected candidate.

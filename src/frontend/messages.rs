@@ -59,6 +59,7 @@ pub(in crate::frontend) enum UiAction {
     ReloadLyrics,
     SaveConfig { config: Box<AppConfig> },
     SearchLyrics { title: String, artist: String },
+    LookupQqLyrics { reference: String },
     PreviewLyrics { index: usize },
     ApplyLyrics,
     OpenUrl { url: String },

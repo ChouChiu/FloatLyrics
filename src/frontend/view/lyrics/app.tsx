@@ -3,7 +3,7 @@
 
 import { LyricPlayer } from "@applemusic-like-lyrics/react";
 import { type CSSProperties, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
-import { currentAmllLines, documentToAmllLines } from "./amll";
+import { clampAmllPosition, currentAmllLines, documentToAmllLines } from "./amll";
 import { SlotFader } from "./fade";
 import { karaokeFill, karaokeFillStyle } from "./karaoke";
 import { type LyricsViewState, lyricsStore, type SlotSnapshot } from "./store";
@@ -129,14 +129,11 @@ function AppleMusicSlot({
     () => currentAmllLines(documentLines, snapshot?.key ?? ""),
     [documentLines, snapshot?.key],
   );
-  const line = lyricLines[0];
-  const currentTime = line
-    ? Math.min(Math.max(Math.round(frame?.position_ms ?? 0), line.startTime), line.endTime - 1)
-    : 0;
+  const currentTime = clampAmllPosition(lyricLines, frame?.position_ms ?? 0);
 
   return (
     <section className="slot apple-music-slot" ref={setSlotRef} data-lyric-key={snapshot?.key}>
-      {line && frame ? (
+      {lyricLines.length > 0 && frame ? (
         <LyricPlayer
           className="apple-music-player"
           style={{ textAlign: "center", whiteSpace: "nowrap" }}

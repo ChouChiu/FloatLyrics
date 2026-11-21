@@ -39,6 +39,8 @@
   "Done": "Done",
   "DownloadedLyricsNotStored": "Downloaded lyrics were not stored",
   "EnterSongTitle": "Enter a song title",
+  "QqSongReference": "QQ Music song URL or MID",
+  "LookupQqLyrics": "Look up QQ lyrics",
   "FilterFonts": "Filter fonts",
   "FontFamilies": "Font order",
   "FontOrder": "Font priority",

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { LyricLine, LyricWord } from "@applemusic-like-lyrics/core";
-import type { LyricsDocument, PresentedLyricLine } from "./types";
+import type { LyricsDocument, PresentedLyricLine, TimedSyllable } from "./types";
 
 const LAST_LINE_FALLBACK_MS = 5_000;
 
@@ -29,8 +29,8 @@ export function resolvedLineEnd(
   );
 }
 
-function lineWords(line: PresentedLyricLine, endTime: number): LyricWord[] {
-  const timed = line.syllables
+function timedWords(syllables: TimedSyllable[]): LyricWord[] {
+  return syllables
     .filter((syllable) => syllable.text.length > 0)
     .map((syllable) => ({
       startTime: Math.round(syllable.start_ms),
@@ -38,6 +38,10 @@ function lineWords(line: PresentedLyricLine, endTime: number): LyricWord[] {
       word: syllable.text,
       romanWord: syllable.romanization?.trim() ?? "",
     }));
+}
+
+function lineWords(line: PresentedLyricLine, endTime: number): LyricWord[] {
+  const timed = timedWords(line.syllables);
   if (timed.length > 0) return timed;
   return [
     {
@@ -49,12 +53,17 @@ function lineWords(line: PresentedLyricLine, endTime: number): LyricWord[] {
   ];
 }
 
-function backgroundLine(line: PresentedLyricLine, endTime: number): LyricLine | null {
+function backgroundLine(line: PresentedLyricLine, mainEndTime: number): LyricLine | null {
   const background = line.background.trim();
   if (!background) return null;
-  const startTime = Math.round(line.start_ms);
+  const words = timedWords(line.background_syllables);
+  const startTime = Math.round(line.background_start_ms);
+  const endTime = Math.max(
+    startTime,
+    Math.round(line.background_end_ms ?? words.at(-1)?.endTime ?? mainEndTime),
+  );
   return {
-    words: [{ startTime, endTime, word: background }],
+    words: words.length > 0 ? words : [{ startTime, endTime, word: background }],
     translatedLyric: "",
     romanLyric: "",
     startTime,
@@ -109,4 +118,13 @@ export function currentAmllLines(lines: LyricLine[], frameKey: string): LyricLin
     primaryIndex += 1;
   }
   return [];
+}
+
+export function clampAmllPosition(lines: LyricLine[], positionMs: number): number {
+  const [main, background] = lines;
+  if (!main) return 0;
+  // An echo can start before the main line or continue after it.
+  const startTime = Math.min(main.startTime, background?.startTime ?? main.startTime);
+  const endTime = Math.max(main.endTime, background?.endTime ?? main.endTime);
+  return Math.min(Math.max(Math.round(positionMs), startTime), endTime - 1);
 }
